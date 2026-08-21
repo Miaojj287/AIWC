@@ -57,6 +57,8 @@ Thumbs.db
 
 # Docs
 Docs
+!docs/
+!docs/native-core-audit.md
 语音转文字接口文档
 
 # WeFolw
@@ -65,7 +67,6 @@ WeFlow
 WxKey-CC
 upx
 native-dlls
-native/image-decrypt/
 native/image-decrypt/target
 resources/whisper
 xkey

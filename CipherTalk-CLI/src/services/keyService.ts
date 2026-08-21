@@ -1,10 +1,12 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { invalidArgument, notImplemented, MiyuError } from '../errors.js'
+import { invalidArgument, notImplemented } from '../errors.js'
 import { patchConfig } from '../config.js'
 import { getPlatformNativeDir, getNativeRoot } from '../runtimePaths.js'
 import { dataService } from './dataService.js'
+import { resolveDbStoragePath } from './db/messageDbScanner.js'
+import { readEncryptedDbSalt, scanWindowsMemoryForDbKey } from './windowsMemoryKeyScanner.js'
 import type { KeyService } from './types.js'
 import type { RuntimeConfig } from '../types.js'
 
@@ -14,21 +16,35 @@ function assertHexKey(hex: string): void {
   }
 }
 
-function getDylibPath(): string | null {
-  const dylibPath = join(getPlatformNativeDir(),
-    process.platform === 'darwin' ? 'libwx_key.dylib' : 'wx_key.dll')
-  if (existsSync(dylibPath)) return dylibPath
+function getOpenMemoryHelperPath(): string | null {
+  const override = process.env.WX_OPEN_MEMORY_HELPER_PATH
+  if (override && existsSync(override)) return override
 
-  // 备选路径
-  if (process.platform === 'darwin') {
-    const altPath = join(getNativeRoot(), '..', '..', 'resources', 'macos', 'libwx_key.dylib')
-    if (existsSync(altPath)) return altPath
-  }
-  return null
+  const bundled = join(getPlatformNativeDir(), 'wechat_memory_scan_helper')
+  if (existsSync(bundled)) return bundled
+
+  const workspace = join(getNativeRoot(), '..', '..', 'resources', 'macos', 'wechat_memory_scan_helper')
+  return existsSync(workspace) ? workspace : null
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function findEncryptedDb(root: string, depth = 0): string | null {
+  if (depth > 5 || !existsSync(root)) return null
+  try {
+    if (statSync(root).isFile()) return readEncryptedDbSalt(root) ? root : null
+    const entries = readdirSync(root, { withFileTypes: true })
+    const files = entries.filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.db'))
+    files.sort((a, b) => Number(b.name.toLowerCase() === 'session.db') - Number(a.name.toLowerCase() === 'session.db'))
+    for (const entry of files) {
+      const candidate = join(root, entry.name)
+      if (readEncryptedDbSalt(candidate)) return candidate
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const candidate = findEncryptedDb(join(root, entry.name), depth + 1)
+      if (candidate) return candidate
+    }
+  } catch { /* unreadable path */ }
+  return null
 }
 
 export class LocalKeyService implements KeyService {
@@ -44,91 +60,73 @@ export class LocalKeyService implements KeyService {
     return { validFormat: Boolean(config.keyHex), connection: status.connection }
   }
 
-  async getKey(_config: RuntimeConfig, _options: { save?: boolean } = {}): Promise<{ keyHex: string; saved: boolean }> {
-    const dllPath = getDylibPath()
-    if (!dllPath) {
-      throw notImplemented(`密钥提取库未找到 (libwx_key.dylib / wx_key.dll)`)
-    }
-
+  async getKey(config: RuntimeConfig, options: { save?: boolean } = {}): Promise<{ keyHex: string; saved: boolean }> {
     if (process.platform === 'darwin') {
-      return await this.tryGetKeyMac(dllPath, _options.save ?? false)
+      const openHelper = getOpenMemoryHelperPath()
+      if (openHelper && config.dbPath) {
+        const scanRoot = resolveDbStoragePath(config.dbPath, config.wxid || '') || config.dbPath
+        const openKey = this.tryGetKeyMacOpen(openHelper, scanRoot)
+        if (openKey) return this.processKeyString(openKey, options.save ?? false)
+      }
+      throw new Error('开源内存扫描未找到与数据库 salt 匹配的密钥；请在登录后尽快重试或手动填写密钥')
     }
 
     if (process.platform === 'win32') {
-      return await this.tryGetKeyWindows(dllPath, _options.save ?? false)
+      const pid = this.getWeChatPid()
+      if (!pid) throw new Error('微信 (Weixin.exe) 未运行。请先登录微信，然后重试。')
+      if (config.dbPath) {
+        const storage = resolveDbStoragePath(config.dbPath, config.wxid || '') || config.dbPath
+        const encryptedDb = findEncryptedDb(storage)
+        if (encryptedDb) {
+          const scan = await scanWindowsMemoryForDbKey(pid, encryptedDb)
+          if (scan.key) return this.processKeyString(scan.key, options.save ?? false)
+        }
+      }
+      throw new Error('开源内存扫描未找到与数据库 salt 匹配的密钥；请在登录后尽快重试或手动填写密钥')
     }
 
     throw notImplemented('当前平台不支持自动获取密钥，请使用 miyu key set <64位密钥> 手动设置')
   }
 
   // ══════════════════════════ macOS ══════════════════════════
-  private async tryGetKeyMac(dylibPath: string, shouldSave: boolean): Promise<{ keyHex: string; saved: boolean }> {
-    const kf = await this.loadKoffi()
-    const lib = kf.load(dylibPath)
+  private tryGetKeyMacOpen(helperPath: string, dbPath: string): string | null {
+    const pid = this.getWeChatPidMac()
+    if (!pid) throw new Error('微信 (WeChat) 未运行。请先登录微信，然后重试。')
 
-    const getDbKey = lib.func('const char* GetDbKey()')
-    const raw = getDbKey()
-
-    if (!raw) throw new Error('GetDbKey() 返回空值')
-
-    const text = String(raw).trim()
-    if (text.startsWith('ERROR:')) {
-      const parts = text.split(':')
-      throw new Error(this.mapKeyError(parts[1] || 'UNKNOWN', parts.slice(2).join(':')))
+    let stdout = ''
+    try {
+      stdout = execFileSync(helperPath, [String(pid), dbPath], {
+        encoding: 'utf8',
+        timeout: 60_000,
+        maxBuffer: 1024 * 1024,
+      })
+    } catch (error: any) {
+      stdout = typeof error?.stdout === 'string' ? error.stdout : ''
     }
 
-    return this.processKeyString(text, shouldSave)
+    const payloadLine = stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1)
+    if (!payloadLine) return null
+    try {
+      const payload = JSON.parse(payloadLine)
+      return typeof payload?.key === 'string' && /^[0-9a-fA-F]{64}$/.test(payload.key)
+        ? payload.key.toLowerCase()
+        : null
+    } catch {
+      return null
+    }
   }
 
-  // ══════════════════════════ Windows ══════════════════════════
-  private async tryGetKeyWindows(dllPath: string, shouldSave: boolean): Promise<{ keyHex: string; saved: boolean }> {
-    // 1. 检查微信进程
-    const pid = this.getWeChatPid()
-    if (!pid) throw new Error('微信 (Weixin.exe) 未运行。请先登录微信，然后重试。')
-
-    const kf = await this.loadKoffi()
-    const lib = kf.load(dllPath)
-
-    // 绑定 DLL 函数
-    const InitializeHook = lib.func('bool InitializeHook(uint32_t)')
-    const PollKeyData = lib.func('bool PollKeyData(char*, int32_t)')
-    const CleanupHook = lib.func('bool CleanupHook()')
-    let getLastError: (() => string) | null = null
-    try {
-      getLastError = lib.func('const char* GetLastErrorMsg()')
-    } catch { /* optional */ }
-
-    // 2. 安装 Hook
-    const hooked = InitializeHook(pid)
-    if (!hooked) {
-      const errMsg = getLastError ? String(getLastError() || '') : ''
-      throw new Error(`Hook 微信进程失败 (PID: ${pid})${errMsg ? ': ' + errMsg : ''}\n请尝试以管理员身份运行。`)
+  private getWeChatPidMac(): number | null {
+    for (const args of [['-x', 'WeChat'], ['-f', 'WeChat.app/Contents/MacOS/WeChat']]) {
+      try {
+        const output = execFileSync('/usr/bin/pgrep', args, { encoding: 'utf8' })
+        const pids = output.split(/\r?\n/)
+          .map(value => Number.parseInt(value.trim(), 10))
+          .filter(value => Number.isInteger(value) && value > 0)
+        if (pids.length) return Math.max(...pids)
+      } catch { /* try next process matcher */ }
     }
-
-    try {
-      // 3. 轮询密钥（超时 60 秒）
-      const timeoutMs = 60_000
-      const start = Date.now()
-
-      while (Date.now() - start < timeoutMs) {
-        const buf = Buffer.alloc(65)
-        const ok = PollKeyData(buf, 65)
-
-        if (ok) {
-          const key = buf.toString('utf8').replace(/\0/g, '').trim()
-          if (key && key.length >= 64) {
-            return this.processKeyString(key, shouldSave)
-          }
-        }
-
-        await sleep(200)
-      }
-
-      throw new Error('等待密钥超时 (60s)。请重新登录微信后重试。')
-    } finally {
-      // 4. 清理
-      try { CleanupHook() } catch { /* ignore */ }
-    }
+    return null
   }
 
   private getWeChatPid(): number | null {
@@ -149,18 +147,6 @@ export class LocalKeyService implements KeyService {
     return null
   }
 
-  // ══════════════════════════ 共用 ══════════════════════════
-
-  private async loadKoffi(): Promise<any> {
-    let mod: any
-    try {
-      mod = await import('koffi')
-    } catch (e: any) {
-      throw new Error('koffi 未安装: ' + (e?.message || e))
-    }
-    return mod.default || mod
-  }
-
   private processKeyString(text: string, shouldSave: boolean): { keyHex: string; saved: boolean } {
     const cleanKey = text.replace(/[^0-9a-fA-F]/g, '').toLowerCase()
     if (cleanKey.length !== 64 || !/^[0-9a-f]{64}$/.test(cleanKey)) {
@@ -174,16 +160,6 @@ export class LocalKeyService implements KeyService {
     return { keyHex: cleanKey, saved: shouldSave }
   }
 
-  private mapKeyError(code: string, detail: string): string {
-    const msg: Record<string, string> = {
-      'PROCESS_NOT_FOUND': '微信主进程未运行。请先登录微信，然后重试。',
-      'ATTACH_FAILED': `无法附加微信进程${detail ? ' (' + detail + ')' : ''}。请关闭 SIP 后重试。`,
-      'SCAN_FAILED': `内存扫描失败${detail ? ' (' + detail + ')' : ''}`,
-      'HOOK_FAILED': '已定位目标但等待超时，请重新登录微信后重试。',
-      'HOOK_TARGET_ONLY': '已定位目标但未捕获到密钥，请重新登录微信后重试。'
-    }
-    return msg[code] || (detail ? `${code}: ${detail}` : `未知错误 (${code})`)
-  }
 }
 
 export const keyService = new LocalKeyService()

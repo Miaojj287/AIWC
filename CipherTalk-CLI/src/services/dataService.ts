@@ -4,6 +4,7 @@ import { configMissing, dbError } from '../errors.js'
 import { getNativeRoot } from '../runtimePaths.js'
 import { dbAdapter } from './db/dbAdapter.js'
 import { wcdbService } from './db/wcdbService.js'
+import { decodeMessageContent } from './db/rowDecoders.js'
 import type { ContactRow, DataService, MessageRow, SessionRow, StatusData } from './types.js'
 import type { RuntimeConfig } from '../types.js'
 
@@ -124,7 +125,10 @@ export class WcdbDataService implements DataService {
       direction: row.is_send === 1 || row.isSend === 1 ? 'out' : row.is_send === 0 || row.isSend === 0 ? 'in' : 'unknown',
       senderUsername: row.sender_username || row.senderUsername,
       type: row.type || row.local_type || row.localType,
-      content: String(row.parsedContent || row.parsed_content || row.content || row.str_content || ''),
+      content: String(row.parsedContent || row.parsed_content || '') || decodeMessageContent(
+        row.message_content ?? row.content ?? row.str_content,
+        row.compress_content
+      ),
       raw: row
     }))
 

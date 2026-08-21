@@ -2,14 +2,23 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-EXE_PATH="${APP_DIR}/CipherTalk"
+EXE_PATH="${CIPHERTALK_DESKTOP_EXE:-}"
+if [[ -z "${EXE_PATH}" ]]; then
+  PLIST_PATH="${APP_DIR}/../Info.plist"
+  if [[ -f "${PLIST_PATH}" ]]; then
+    BUNDLE_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${PLIST_PATH}" 2>/dev/null || true)"
+    if [[ -n "${BUNDLE_EXECUTABLE}" ]]; then
+      EXE_PATH="${APP_DIR}/${BUNDLE_EXECUTABLE}"
+    fi
+  fi
+fi
 MCP_ARCHIVE="${APP_DIR}/../Resources/app.asar"
 MCP_ENTRY_UNPACKED="${APP_DIR}/../Resources/app.asar.unpacked/dist-electron/mcp.js"
 MCP_ENTRY="${MCP_ARCHIVE}/dist-electron/mcp.js"
 MCP_BOOTSTRAP="${APP_DIR}/ciphertalk-mcp-bootstrap.cjs"
 
-if [[ ! -f "${EXE_PATH}" ]]; then
-  >&2 echo "[CipherTalk MCP Launcher] CipherTalk binary not found at \"${EXE_PATH}\""
+if [[ -z "${EXE_PATH}" || ! -f "${EXE_PATH}" ]]; then
+  >&2 echo "[CipherTalk MCP Launcher] desktop executable not found; set CIPHERTALK_DESKTOP_EXE"
   exit 1
 fi
 

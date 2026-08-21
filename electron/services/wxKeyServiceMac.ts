@@ -5,6 +5,7 @@ import { execFile, execSync, spawn } from 'child_process'
 import { promisify } from 'util'
 import crypto from 'crypto'
 import { homedir } from 'os'
+import { scanMacosMemoryForDbKey } from './macosMemoryKeyScanner'
 
 const execFileAsync = promisify(execFile)
 const MAC_KEY_DEBUG = process.env.CIPHERTALK_MAC_KEY_DEBUG === '1'
@@ -65,34 +66,15 @@ export class WxKeyServiceMac {
     throw new Error(`${name} not found`)
   }
 
-  private getHelperPath(): string {
-    if (process.env.WX_KEY_HELPER_PATH && existsSync(process.env.WX_KEY_HELPER_PATH)) {
-      return process.env.WX_KEY_HELPER_PATH
+  private getOpenMemoryScanHelperPath(): string {
+    if (process.env.WX_OPEN_MEMORY_HELPER_PATH && existsSync(process.env.WX_OPEN_MEMORY_HELPER_PATH)) {
+      return process.env.WX_OPEN_MEMORY_HELPER_PATH
     }
-    return this.resolveResource('xkey_helper')
-  }
-
-  private getImageScanHelperPath(): string {
-    if (process.env.IMAGE_SCAN_HELPER_PATH && existsSync(process.env.IMAGE_SCAN_HELPER_PATH)) {
-      return process.env.IMAGE_SCAN_HELPER_PATH
-    }
-    return this.resolveResource('image_scan_helper')
-  }
-
-  private getDylibPath(): string {
-    if (process.env.WX_KEY_DYLIB_PATH && existsSync(process.env.WX_KEY_DYLIB_PATH)) {
-      return process.env.WX_KEY_DYLIB_PATH
-    }
-    return this.resolveResource('libwx_key.dylib')
+    return this.resolveResource('wechat_memory_scan_helper')
   }
 
   async initialize(): Promise<boolean> {
-    try {
-      return this.initializeFromRuntime()
-    } catch (e) {
-      logMacKey('error', '[WxKeyServiceMac] 初始化失败:', e)
-      return false
-    }
+    return true
   }
 
   async checkSipStatus(): Promise<{ enabled: boolean; error?: string }> {
@@ -126,16 +108,6 @@ export class WxKeyServiceMac {
     }
 
     try {
-      if (this.initializeFromRuntime()) {
-        const raw = this.ListWeChatProcesses?.()
-        const parsed = this.parseWeChatProcessList(typeof raw === 'string' ? raw : '')
-        if (parsed.length > 0) return Math.max(...parsed)
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
       const output = execSync('/bin/ps -A -o pid,comm,command', { encoding: 'utf8' })
       const lines = output.split(/\r?\n/).slice(1)
       const candidates: number[] = []
@@ -162,41 +134,6 @@ export class WxKeyServiceMac {
     }
 
     return null
-  }
-
-  private initializeFromRuntime(): boolean {
-    if (this.initialized) return true
-
-    try {
-      this.koffi = require('koffi')
-      const dylibPath = this.getDylibPath()
-      logMacKey('log', '[WxKeyServiceMac] 加载 dylib:', dylibPath)
-      this.lib = this.koffi.load(dylibPath)
-      this.GetDbKey = this.lib.func('const char* GetDbKey()')
-      this.ListWeChatProcesses = this.lib.func('const char* ListWeChatProcesses()')
-      this.initialized = true
-      return true
-    } catch (e: any) {
-      logMacKey('error', '[WxKeyServiceMac] 初始化失败:', e?.message || e)
-      return false
-    }
-  }
-
-  private parseWeChatProcessList(raw: string): number[] {
-    return String(raw || '')
-      .split(';')
-      .map(item => item.trim())
-      .filter(Boolean)
-      .map(item => {
-        const lastColon = item.lastIndexOf(':')
-        if (lastColon < 0) return null
-        const name = item.slice(0, lastColon)
-        const pid = Number(item.slice(lastColon + 1))
-        if (!Number.isFinite(pid) || pid <= 0) return null
-        if (name.includes('Helper') || name.includes('crashpad_handler') || name.includes('WeChatAppEx')) return null
-        return pid
-      })
-      .filter((pid): pid is number => pid !== null)
   }
 
   killWeChat(): boolean {
@@ -244,7 +181,8 @@ export class WxKeyServiceMac {
 
   async autoGetDbKey(
     timeoutMs = 60_000,
-    onStatus?: (message: string, level: number) => void
+    onStatus?: (message: string, level: number) => void,
+    dbRootPath?: string
   ): Promise<DbKeyResult> {
     try {
       const sipStatus = await this.checkSipStatus()
@@ -256,32 +194,28 @@ export class WxKeyServiceMac {
       }
 
       onStatus?.('正在获取数据库密钥...', 0)
-      onStatus?.('正在请求管理员授权并执行 helper...', 0)
-      let parsed: { success: boolean; key?: string; code?: string; detail?: string; raw: string }
-
-      try {
-        const helperResult = await this.getDbKeyByHelperElevated(timeoutMs, onStatus)
-        parsed = this.parseDbKeyResult(helperResult)
-        logMacKey('log', '[WxKeyServiceMac] GetDbKey elevated returned:', parsed.raw)
-      } catch (e: any) {
-        const msg = `${e?.message || e}`
-        if (msg.includes('(-128)') || msg.includes('User canceled')) {
-          return { success: false, error: '已取消管理员授权' }
+      const pid = this.getWeChatPid()
+      if (pid && dbRootPath) {
+        onStatus?.('正在使用开源只读内存扫描匹配数据库 salt...', 0)
+        const openScan = await scanMacosMemoryForDbKey(pid, dbRootPath, (bytes) => {
+          onStatus?.(`开源扫描已读取 ${Math.round(bytes / 1024 / 1024)} MB...`, 0)
+        })
+        if (openScan.key) {
+          onStatus?.('开源内存扫描已获取候选密钥', 1)
+          return { success: true, key: openScan.key }
         }
-        throw e
-      }
 
-      if (!parsed.success) {
-        const errorMsg = this.mapDbKeyErrorMessage(parsed.code, parsed.detail)
-        onStatus?.(errorMsg, 2)
-        return {
-          success: false,
-          error: errorMsg
+        onStatus?.('正在使用开源原生助手继续扫描...', 0)
+        const nativeOpenScan = await this.getDbKeyByOpenMemoryHelper(pid, dbRootPath, timeoutMs)
+        if (nativeOpenScan.key) {
+          onStatus?.('开源原生扫描已获取候选密钥', 1)
+          return { success: true, key: nativeOpenScan.key }
         }
       }
 
-      onStatus?.('密钥获取成功', 1)
-      return { success: true, key: parsed.key }
+      const error = '开放内存扫描未找到与数据库 salt 匹配的密钥；请在登录后尽快重试或手动填写密钥'
+      onStatus?.(error, 2)
+      return { success: false, error }
     } catch (e: any) {
       logMacKey('error', '[WxKeyServiceMac] 获取密钥失败:', e)
       logMacKey('error', '[WxKeyServiceMac] Stack:', e.stack)
@@ -290,97 +224,37 @@ export class WxKeyServiceMac {
     }
   }
 
-  private async getDbKeyByHelperElevated(
-    timeoutMs: number,
-    onStatus?: (message: string, level: number) => void
-  ): Promise<string> {
-    const helperPath = this.getHelperPath()
-    const waitMs = Math.max(timeoutMs, 30_000)
-    const timeoutSec = Math.ceil(waitMs / 1000) + 30
-    const pid = this.getWeChatPid()
-
-    if (!pid) {
-      throw new Error('未找到微信主进程')
-    }
-
-    const scriptLines = [
-      `set helperPath to ${JSON.stringify(helperPath)}`,
-      `set cmd to quoted form of helperPath & " ${pid} ${waitMs}"`,
-      `set timeoutSec to ${timeoutSec}`,
-      'try',
-      'with timeout of timeoutSec seconds',
-      'set outText to do shell script cmd with administrator privileges',
-      'end timeout',
-      'return "WF_OK::" & outText',
-      'on error errMsg number errNum partial result pr',
-      'return "WF_ERR::" & errNum & "::" & errMsg & "::" & (pr as text)',
-      'end try'
-    ]
-
-    onStatus?.('已准备就绪，现在登录微信或退出登录后重新登录微信', 0)
-
-    let stdout = ''
+  private async getDbKeyByOpenMemoryHelper(
+    pid: number,
+    dbRootPath: string,
+    timeoutMs: number
+  ): Promise<{ key?: string; attached: boolean }> {
     try {
-      const result = await execFileAsync('/usr/bin/osascript', scriptLines.flatMap(line => ['-e', line]), {
-        timeout: waitMs + 20_000
-      })
-      stdout = result.stdout
-    } catch (e: any) {
-      const msg = `${e?.stderr || ''}\n${e?.stdout || ''}\n${e?.message || ''}`.trim()
-      throw new Error(msg || 'elevated helper execution failed')
-    }
-
-    const lines = String(stdout).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
-    if (!lines.length) throw new Error('elevated helper returned empty output')
-
-    const joined = lines.join('\n')
-    if (joined.startsWith('WF_ERR::')) {
-      const parts = joined.split('::')
-      const errNum = parts[1] || 'unknown'
-      const errMsg = parts[2] || 'unknown'
-      const partial = parts.slice(3).join('::')
-      throw new Error(`elevated helper failed: errNum=${errNum}, errMsg=${errMsg}, partial=${partial || '(empty)'}`)
-    }
-
-    const normalizedOutput = joined.startsWith('WF_OK::') ? joined.slice('WF_OK::'.length) : joined
-    const extractJsonObjects = (s: string): any[] => {
-      const results: any[] = []
-      const re = /\{[^{}]*\}/g
-      let m: RegExpExecArray | null
-      while ((m = re.exec(s)) !== null) {
-        try { results.push(JSON.parse(m[0])) } catch { }
+      const helperPath = this.getOpenMemoryScanHelperPath()
+      let stdout = ''
+      try {
+        const result = await execFileAsync(helperPath, [String(pid), dbRootPath], {
+          timeout: Math.max(timeoutMs, 30_000),
+          maxBuffer: 1024 * 1024
+        })
+        stdout = result.stdout
+      } catch (error: any) {
+        // A completed scan with no match deliberately exits non-zero; its JSON is
+        // still authoritative. Launch/timeout failures have no parseable payload.
+        stdout = typeof error?.stdout === 'string' ? error.stdout : ''
       }
-      return results
+
+      const payloadLine = stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1)
+      if (!payloadLine) return { attached: false }
+      const payload = JSON.parse(payloadLine)
+      const key = typeof payload?.key === 'string' && /^[0-9a-fA-F]{64}$/.test(payload.key)
+        ? payload.key.toLowerCase()
+        : undefined
+      return { key, attached: payload?.attached === true }
+    } catch (error: any) {
+      logMacKey('warn', '[WxKeyServiceMac] open native memory helper unavailable:', error?.message || error)
+      return { attached: false }
     }
-    const allJson = extractJsonObjects(normalizedOutput)
-    const successPayload = allJson.find(p => p?.success === true && typeof p?.key === 'string')
-    if (successPayload) return successPayload.key
-    const resultPayload = allJson.find(p => typeof p?.result === 'string')
-    if (resultPayload) return resultPayload.result
-    throw new Error('elevated helper returned invalid json: ' + lines[lines.length - 1])
-  }
-
-  private parseDbKeyResult(raw: any): { success: boolean; key?: string; code?: string; detail?: string; raw: string } {
-    const text = typeof raw === 'string' ? raw.trim() : ''
-    if (!text) return { success: false, code: 'UNKNOWN', raw: text }
-    if (!text.startsWith('ERROR:')) return { success: true, key: text, raw: text }
-
-    const parts = text.split(':')
-    return {
-      success: false,
-      code: parts[1] || 'UNKNOWN',
-      detail: parts.slice(2).join(':') || undefined,
-      raw: text
-    }
-  }
-
-  private mapDbKeyErrorMessage(code?: string, detail?: string): string {
-    if (code === 'PROCESS_NOT_FOUND') return '微信主进程未运行'
-    if (code === 'ATTACH_FAILED') return `无法附加微信进程 (${detail || 'operation not permitted'})`
-    if (code === 'SCAN_FAILED') return `未定位到目标函数 (${detail || 'sink pattern not found'})`
-    if (code === 'HOOK_FAILED') return `已定位目标，但断点等待超时 (${detail || 'hook timeout'})`
-    if (code === 'HOOK_TARGET_ONLY') return `仅定位到目标地址，尚未捕获到最终 DbKey (${detail || ''})`
-    return detail ? `${code || 'UNKNOWN'}: ${detail}` : '未知错误'
   }
 
   async autoGetImageKey(
@@ -910,25 +784,13 @@ export class WxKeyServiceMac {
     ciphertext: Buffer,
     onProgress?: (message: string) => void
   ): Promise<string | null> {
+    const ciphertextHex = ciphertext.toString('hex')
     try {
-      const helperPath = this.getImageScanHelperPath()
-      const ciphertextHex = ciphertext.toString('hex')
-
-      if (!this.needsElevation) {
-        const direct = await this.spawnScanHelper(helperPath, pid, ciphertextHex, false)
-        if (direct.key) return direct.key
-        if (direct.permissionError) {
-          this.needsElevation = true
-          onProgress?.('需要管理员权限，正在切换提权扫描...')
-        }
-      }
-
-      if (this.needsElevation) {
-        const elevated = await this.spawnScanHelper(helperPath, pid, ciphertextHex, true)
-        if (elevated.key) return elevated.key
-      }
+      const openHelper = this.getOpenMemoryScanHelperPath()
+      const openResult = await this.spawnOpenImageScanHelper(openHelper, pid, ciphertextHex)
+      if (openResult) return openResult
     } catch (e: any) {
-      logMacKey('warn', '[WxKeyServiceMac] image_scan_helper 不可用，回退 Mach API:', e.message)
+      logMacKey('warn', '[WxKeyServiceMac] open image memory helper unavailable:', e?.message || e)
     }
 
     if (!this.ensureMachApis()) {
@@ -1026,56 +888,33 @@ export class WxKeyServiceMac {
     return null
   }
 
-  private spawnScanHelper(
+  private spawnOpenImageScanHelper(
     helperPath: string,
     pid: number,
-    ciphertextHex: string,
-    elevated: boolean
-  ): Promise<{ key: string | null; permissionError: boolean }> {
+    ciphertextHex: string
+  ): Promise<string | null> {
     return new Promise((resolve, reject) => {
-      let child: any
-
-      if (elevated) {
-        const shellCmd = `'${helperPath}' ${pid} ${ciphertextHex}`
-        child = spawn('/usr/bin/osascript', ['-e', `do shell script ${JSON.stringify(shellCmd)} with administrator privileges`], {
-          stdio: ['ignore', 'pipe', 'pipe']
-        })
-      } else {
-        child = spawn(helperPath, [String(pid), ciphertextHex], { stdio: ['ignore', 'pipe', 'pipe'] })
-      }
-
+      const child = spawn(helperPath, ['--image', String(pid), ciphertextHex], {
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
       let stdout = ''
-      let stderr = ''
-
-      child.stdout?.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString()
-      })
-      child.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString()
-      })
+      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
       child.on('error', reject)
       child.on('close', () => {
-        const permissionError = !elevated && stderr.includes('task_for_pid failed')
         try {
-          const lines = stdout.split(/\r?\n/).map(x => x.trim()).filter(Boolean)
-          const last = lines[lines.length - 1]
-          if (!last) {
-            resolve({ key: null, permissionError })
-            return
-          }
-          const payload = JSON.parse(last)
-          resolve({
-            key: payload?.success && payload?.aesKey ? payload.aesKey : null,
-            permissionError
-          })
+          const last = stdout.split(/\r?\n/).map(x => x.trim()).filter(Boolean).at(-1)
+          const payload = last ? JSON.parse(last) : null
+          const keyHex = typeof payload?.aesKeyHex === 'string' ? payload.aesKeyHex : ''
+          resolve(payload?.success && /^[0-9a-fA-F]{32}$/.test(keyHex)
+            ? Buffer.from(keyHex, 'hex').toString('ascii')
+            : null)
         } catch {
-          resolve({ key: null, permissionError })
+          resolve(null)
         }
       })
-
       setTimeout(() => {
         try { child.kill('SIGTERM') } catch { }
-      }, elevated ? 60_000 : 30_000)
+      }, 30_000)
     })
   }
 

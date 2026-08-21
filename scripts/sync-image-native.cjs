@@ -70,6 +70,10 @@ function removeLegacyOutput(platformDir, archDir, outputName) {
 function buildManifest(safePlatformKey) {
   const baseDir = path.join(projectRoot, 'resources', 'wedecrypt')
   const manifestPath = path.join(baseDir, 'manifest.json')
+  let previous = {}
+  try {
+    previous = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  } catch { }
   const matrix = [
     ['win32', 'x64'],
     ['win32', 'arm64'],
@@ -85,17 +89,16 @@ function buildManifest(safePlatformKey) {
     const filePath = path.join(baseDir, `${addonName}-${platformDir}-${archDir}.node`)
     if (!fs.existsSync(filePath)) continue
     const key = `${platformDir}-${archDir}`
-    activeBinaries[key] = 'self-built-from-repo-source'
+    activeBinaries[key] = key === safePlatformKey
+      ? 'self-built-from-repo-source'
+      : previous.activeBinaries?.[key] || 'legacy-prebuilt-not-reproduced'
     platforms.push(key)
   }
 
   let previousSafePlatforms = []
-  try {
-    const previous = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-    if (Array.isArray(previous.safeNativePlatforms)) {
-      previousSafePlatforms = previous.safeNativePlatforms
-    }
-  } catch { }
+  if (Array.isArray(previous.safeNativePlatforms)) {
+    previousSafePlatforms = previous.safeNativePlatforms
+  }
   const safeNativePlatforms = Array.from(new Set([...previousSafePlatforms, safePlatformKey]))
     .filter(key => platforms.includes(key))
 

@@ -1,0 +1,17 @@
+[package]
+name = "ciphertalk-image-native"
+version = "0.1.0"
+edition = "2021"
+license = "CC-BY-NC-SA-4.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aes = "0.8"
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2"

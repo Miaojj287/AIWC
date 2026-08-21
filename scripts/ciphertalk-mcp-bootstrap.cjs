@@ -17,6 +17,8 @@ function getAppAsarPath() {
 const appAsarPath = getAppAsarPath();
 
 function getUserDataPath() {
+  const configured = String(process.env.CIPHERTALK_USER_DATA_DIR || "").trim();
+  if (configured) return path.resolve(configured);
   if (process.platform === "darwin") {
     return path.join(os.homedir(), "Library", "Application Support", "ciphertalk");
   }

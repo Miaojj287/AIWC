@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const { Arch } = require('electron-builder');
-const { setupMacosWcdbFramework } = require('./setup-macos-wcdb-framework');
 
 const IMAGE_NATIVE_PREFIX = 'ciphertalk-image-native-';
 const IMAGE_NATIVE_SUFFIX = '.node';
@@ -302,6 +301,5 @@ exports.default = async function (context) {
             break;
         }
 
-        setupMacosWcdbFramework(context);
     }
 };

@@ -1,8 +1,10 @@
 import { spawn, execSync } from 'child_process'
 import { join } from 'path'
-import { app } from 'electron'
 import { existsSync, readdirSync, statSync } from 'fs'
-import * as crypto from 'crypto'
+import {
+  scanWindowsMemoryForDbKey,
+  type WindowsMemoryKeyScanResult,
+} from './windowsMemoryKeyScanner'
 
 /** 内存扫描诊断结果 */
 export interface WxScanDiag {
@@ -190,83 +192,23 @@ export class WxKeyService {
     return false
   }
 
-  // ===== Windows 内存扫描方案（Rust DLL wechat_key_tool.dll，Ed25519 强验证） =====
-
-  private scanLib: any = null
-
-  /** 内存扫描 DLL 路径 */
-  getScanDllPath(): string {
-    const resourcesPath = app.isPackaged
-      ? join(process.resourcesPath, 'resources')
-      : join(app.getAppPath(), 'resources')
-    return join(resourcesPath, 'wechat_key_tool.dll')
-  }
-
-  /** 加载内存扫描 DLL */
-  initScanLib(): boolean {
-    if (this.scanLib) return true
-    try {
-      const koffi = require('koffi')
-      const dllPath = this.getScanDllPath()
-      if (!existsSync(dllPath)) {
-        console.error('内存扫描 DLL 不存在:', dllPath)
-        return false
-      }
-      this.scanLib = koffi.load(dllPath)
-      return true
-    } catch (e) {
-      console.error('加载内存扫描 DLL 失败:', e)
-      return false
-    }
-  }
-
-  /** 还原内嵌私钥（XOR 混淆，配对 DLL 内嵌公钥） */
-  private getScanPrivateKey(): crypto.KeyObject {
-    const obf = '6a74585b5a6a5f5c59713f2a5e785e7a168e0e9425838c437f0b1274d114f59457f436c936b80178da1848856b58eef3'
-    const der = Buffer.from(Buffer.from(obf, 'hex').map(v => v ^ 0x5a))
-    return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
-  }
-
   /**
-   * 内存扫描获取数据库密钥（诊断版，Ed25519 挑战-应答鉴权）。
-   * 取挑战 → 私钥签名 → 验签通过后 DLL 扫描 crypt_key 邻域，返回密钥与读取诊断，
-   * 供调用方区分“权限不足读到 0 字节” vs “读到了但没找到密钥”。
+   * 使用本仓库的 TypeScript 内存扫描器获取数据库密钥和读取诊断。
    * @param contactDbPath contact.db 完整路径（决定校验用的 salt）
    */
   scanDbKeyDiag(contactDbPath: string): WxScanDiag | null {
-    if (!this.initScanLib()) return null
-    try {
-      const koffi = require('koffi')
-      const wktChallenge = this.scanLib.func('int wkt_challenge(uint8_t*, size_t)')
-      const wktDiag = this.scanLib.func('void* wkt_scan_diag_auth(uint8_t*, size_t, str)')
-      const wktFree = this.scanLib.func('void wkt_free(void*)')
-
-      const nonce = Buffer.alloc(32)
-      if (wktChallenge(nonce, 32) !== 32) return null
-
-      const sig = crypto.sign(null, nonce, this.getScanPrivateKey()) // Ed25519，64 字节
-      const ptr = wktDiag(sig, sig.length, contactDbPath)
-      if (!ptr) return null
-
-      const jsonStr = koffi.decode(ptr, 'char', -1)
-      wktFree(ptr)
-
-      const d = JSON.parse(String(jsonStr || '{}').replace(/\0/g, ''))
-      const rawKey = typeof d.key === 'string' ? d.key.trim() : ''
-      return {
-        key: rawKey.length === 64 ? rawKey : null,
-        auth: d.auth !== false,
-        dbOk: d.db_ok !== false,
-        pids: Number(d.pids) || 0,
-        opened: Number(d.opened) || 0,
-        bytes: Number(d.bytes) || 0,
-        markers: Number(d.markers) || 0,
-        candidates: Number(d.candidates) || 0,
+    let openScan: WindowsMemoryKeyScanResult | null = null
+    const pid = this.getWeChatPid()
+    if (pid) {
+      try {
+        openScan = scanWindowsMemoryForDbKey(pid, contactDbPath)
+        if (openScan.key) return openScan
+      } catch (e) {
+        console.warn('开源内存扫描未完成:', e)
       }
-    } catch (e) {
-      console.error('内存扫描获取密钥失败:', e)
-      return null
     }
+
+    return openScan
   }
 
   /** 仅取密钥（诊断版的薄封装）。 */
@@ -275,79 +217,23 @@ export class WxKeyService {
   }
 
   /**
-   * 一次性提取完整账号信息（Ed25519 鉴权）。
-   * 走 weixin.dll keystream 推导 + global_config 结构游走，直接读出
-   * db_key 与 wxid / name(昵称) / number(微信号) / phone(手机号)。
-   * 该路径不依赖 contact.db，命中即返回；失败/未授权返回 null。
+   * 旧内存结构账号扫描已移除；账号发现使用文件系统与数据库路径。
    */
   scanAccount(): WxAccountInfo | null {
-    if (!this.initScanLib()) return null
-    try {
-      const koffi = require('koffi')
-      const wktChallenge = this.scanLib.func('int wkt_challenge(uint8_t*, size_t)')
-      const wktScanAccount = this.scanLib.func('void* wkt_scan_account_auth(uint8_t*, size_t)')
-      const wktFree = this.scanLib.func('void wkt_free(void*)')
-
-      const nonce = Buffer.alloc(32)
-      if (wktChallenge(nonce, 32) !== 32) return null
-
-      const sig = crypto.sign(null, nonce, this.getScanPrivateKey()) // Ed25519，64 字节
-      const ptr = wktScanAccount(sig, sig.length)
-      if (!ptr) return null
-
-      const jsonStr = koffi.decode(ptr, 'char', -1)
-      wktFree(ptr)
-
-      const d = JSON.parse(String(jsonStr || '{}').replace(/\0/g, ''))
-      const dbKey = typeof d.db_key === 'string' ? d.db_key.trim() : ''
-      return {
-        dbKey: dbKey.length === 64 ? dbKey : null,
-        wxid: String(d.wxid || '').trim(),
-        name: String(d.name || '').trim(),
-        number: String(d.number || '').trim(),
-        phone: String(d.phone || '').trim(),
-        seed: Number(d.seed) || 0,
-      }
-    } catch (e) {
-      console.error('账号信息扫描失败:', e)
-      return null
-    }
+    return null
   }
 
   /**
-   * 内存扫描图片 AES 密钥（Ed25519 鉴权）。传入模板密文(16B)，
-   * 返回 32 字符密钥串（调用方取前 16 字符作 AES-128 密钥），失败返回 null。
+   * Windows 图片 AES key 开放扫描尚未实现。
    */
   scanImageAesKey(ciphertext: Buffer): string | null {
     if (!ciphertext || ciphertext.length < 16) return null
-    if (!this.initScanLib()) return null
-    try {
-      const koffi = require('koffi')
-      const wktChallenge = this.scanLib.func('int wkt_challenge(uint8_t*, size_t)')
-      const wktScanImg = this.scanLib.func('void* wkt_scan_image_key_auth(uint8_t*, size_t, uint8_t*, size_t)')
-      const wktFree = this.scanLib.func('void wkt_free(void*)')
-
-      const nonce = Buffer.alloc(32)
-      if (wktChallenge(nonce, 32) !== 32) return null
-
-      const sig = crypto.sign(null, nonce, this.getScanPrivateKey())
-      const ptr = wktScanImg(sig, sig.length, ciphertext, ciphertext.length)
-      if (!ptr) return null
-
-      const key = koffi.decode(ptr, 'char', -1)
-      wktFree(ptr)
-
-      const trimmed = String(key || '').replace(/\0/g, '').trim()
-      return trimmed.length >= 16 ? trimmed : null
-    } catch (e) {
-      console.error('内存扫描图片密钥失败:', e)
-      return null
-    }
+    return null
   }
 
   /** 释放 Rust 扫描库引用。 */
   dispose(): void {
-    this.scanLib = null
+    // no native scanner state
   }
 
   /**

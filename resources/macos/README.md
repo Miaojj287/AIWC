@@ -7,14 +7,20 @@
 - `entitlements.mac.plist`
 - `image_scan_entitlements.plist`
 
-需要在 mac 机器上通过 `native-dlls/build-macos.sh` 生成的文件：
+仓库内已有完整源码并可直接构建的文件：
 
-- `libwx_key.dylib`
-- `xkey_helper`
-- `image_scan_helper`
-- `libWCDB.dylib`
-- `libwcdb_api.dylib`
-- `libwcdb_decrypt.dylib`
+- `wechat_memory_scan_helper`：只读扫描 WCDB key + salt 记录，并校验图片 AES key 候选
+- `libWCDBOpen.dylib`：官方 Tencent WCDB 源码加开放 C Bridge
+
+构建命令：
+
+```bash
+npm run native:wcdb-open:macos
+npm run native:macos-memory-scan
+```
+
+应用只使用 `libWCDBOpen.dylib`。旧 WCDB 桥、取钥 hook、Dobby 和图片扫描 helper
+已经从默认仓库与发行包移除；开放组件缺失时会明确报错，不再静默加载封闭回退。
 
 检查是否齐全：
 
@@ -22,7 +28,7 @@
 npm run native:macos:check
 ```
 
-只构建 mac 原生产物，不构建 Electron 应用：
+只构建仓库内有源码的 macOS 原生产物，不构建 Electron 应用：
 
 ```bash
 npm run native:macos

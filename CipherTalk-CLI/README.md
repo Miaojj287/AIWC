@@ -6,6 +6,19 @@
 
 桌面版和 CLI 在运行时互不依赖。需要同步数据层能力时，通过 `npm run sync:upstream` 做人工移植，不直接引用 Electron 模块。
 
+macOS 的数据库访问只使用仓库源码构建的 `libWCDBOpen.dylib`，不依赖旧闭源
+`libwcdb_api` 中写死的 CipherTalk 宿主名。可用 `CT_OPEN_WCDB_LIBRARY` 指向自定义构建。
+Windows 开放 DLL 的接入代码已经就绪，发布前仍需在 Windows 上构建并验证
+`native/win32-x64/wcdb_open.dll`。
+
+macOS 自动取钥会先运行仓库 C 源码构建的只读内存扫描助手，并以本地加密数据库的
+salt 校验候选，不再加载旧 `libwx_key.dylib`。构建根项目的
+`native:macos-memory-scan` 会把助手同步到 CLI 原生资源目录。
+
+Windows 自动取钥同样优先使用 CLI 内置的 TypeScript 只读进程扫描器；扫描器只申请
+查询和读取权限，并用加密数据库头部 salt 校验候选；旧 `wx_key.dll` 已移除。
+开放路径仍需在 Windows 实机上完成最终验证。
+
 ## 安装
 
 **npm：**

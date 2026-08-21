@@ -94,7 +94,7 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
 
         const result = await wxKeyServiceMac.autoGetDbKey(180_000, (status, level) => {
           event.sender.send('wxkey:status', { status, level })
-        })
+        }, dbPath)
 
         if (!result.success) {
           ctx.getLogService()?.warn('WxKey', 'macOS 数据库密钥获取失败', { error: result.error })

@@ -1,6 +1,7 @@
 import { dbError } from '../../errors.js'
 import { dbAdapter } from '../db/dbAdapter.js'
 import { wcdbService } from '../db/wcdbService.js'
+import { decodeMaybeCompressed } from '../db/rowDecoders.js'
 import type { RuntimeConfig } from '../../types.js'
 
 export interface MomentsOptions {
@@ -148,7 +149,7 @@ async function buildDisplayNameMap(): Promise<Map<string, string>> {
 }
 
 function normalizeRow(row: any, displayNames: Map<string, string>): MomentsEntry {
-  const xml = String(row?.rawXml || row?.content || row?.xml || '')
+  const xml = decodeMaybeCompressed(row?.rawXml || row?.content || row?.xml || '')
   const username = String(row?.username || row?.user_name || row?.userName || '')
   const fallbackCreateTime = Number(row?.createTime || row?.create_time || 0)
   const createTime = extractCreateTime(xml, fallbackCreateTime)

@@ -6,13 +6,19 @@ const macosDir = path.join(rootDir, 'resources', 'macos')
 const imageNativeBaseDir = path.join(rootDir, 'resources', 'wedecrypt')
 
 const requiredArtifacts = [
-  { name: 'libwx_key.dylib', type: 'file', generated: true },
-  { name: 'xkey_helper', type: 'file', generated: true },
-  { name: 'image_scan_helper', type: 'file', generated: true },
-  { name: 'libWCDB.dylib', type: 'file', generated: true },
-  { name: 'libwcdb_api.dylib', type: 'file', generated: true },
-  { name: 'entitlements.mac.plist', type: 'file', generated: false },
-  { name: 'image_scan_entitlements.plist', type: 'file', generated: false }
+  { name: 'wechat_memory_scan_helper', type: 'file', status: 'open-built' },
+  { name: 'libWCDBOpen.dylib', type: 'file', status: 'open-built' },
+  { name: 'entitlements.mac.plist', type: 'file', status: 'static' },
+  { name: 'image_scan_entitlements.plist', type: 'file', status: 'static' }
+]
+
+const forbiddenClosedArtifacts = [
+  'libwx_key.dylib',
+  'xkey_helper',
+  'image_scan_helper',
+  'libdobby.dylib',
+  'libWCDB.dylib',
+  'libwcdb_api.dylib'
 ]
 
 function statSafe(targetPath) {
@@ -46,24 +52,34 @@ function main() {
     present.push({
       name: artifact.name,
       size: stat.size,
-      generated: artifact.generated
+      status: artifact.status
     })
   }
 
   if (present.length > 0) {
     console.log('[macos-native-check] present:')
     for (const item of present) {
-      console.log(`  - ${item.name} (${item.size} bytes)${item.generated ? ' [generated]' : ' [static]'}`)
+      console.log(`  - ${item.name} (${item.size} bytes) [${item.status}]`)
     }
   }
 
   if (missing.length > 0) {
     console.error('[macos-native-check] missing:')
     for (const item of missing) {
-      console.error(`  - ${item.name}${item.generated ? ' [build required]' : ''}`)
+      console.error(`  - ${item.name} [${item.status}]`)
     }
     process.exit(2)
   }
+
+  const forbiddenPresent = forbiddenClosedArtifacts.filter(name =>
+    statSafe(path.join(macosDir, name))?.isFile()
+  )
+  if (forbiddenPresent.length) {
+    console.error('[macos-native-check] forbidden closed artifacts present:')
+    for (const name of forbiddenPresent) console.error(`  - ${name}`)
+    process.exit(3)
+  }
+  console.log('[macos-native-check] no closed compatibility artifacts present')
 
   const imageNativeArch = process.env.CIPHERTALK_IMAGE_NATIVE_ARCH || process.arch
   const imageNativeAddon = path.join(
@@ -73,11 +89,10 @@ function main() {
 
   const imageNativeStat = statSafe(imageNativeAddon)
   if (!imageNativeStat || !imageNativeStat.isFile()) {
-    console.error(`[macos-native-check] missing image native addon: ${imageNativeAddon}`)
-    process.exit(3)
+    console.log(`[macos-native-check] image native addon not present; TypeScript fallback will be used`)
+  } else {
+    console.log(`[macos-native-check] image native addon present: ${imageNativeAddon} (${imageNativeStat.size} bytes) [source-built]`)
   }
-
-  console.log(`[macos-native-check] image native addon ok: ${imageNativeAddon} (${imageNativeStat.size} bytes)`)
 
   console.log('[macos-native-check] all required macOS native artifacts are present')
 }

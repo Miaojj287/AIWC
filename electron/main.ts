@@ -1,5 +1,7 @@
 import { app, BrowserWindow, protocol, type Tray } from 'electron'
 import { randomBytes } from 'crypto'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { autoUpdater } from 'electron-updater'
 import {
   getStartupDiagnosticsLogPath,
@@ -203,7 +205,16 @@ markStartupMilestone('startup:window-manager-created')
 // Windows 通知用 AppUserModelID 作为显示的应用名，必须与 electron-builder 的 appId 一致，
 // 否则 toast 标题会回退成 Electron 默认的 "electron.app.CipherTalk"。
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.ciphertalk.app')
+  let configuredAppId = process.env.CIPHERTALK_APP_ID || 'com.ciphertalk.app'
+  try {
+    const packageMetadata = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8'))
+    if (!process.env.CIPHERTALK_APP_ID && typeof packageMetadata?.build?.appId === 'string') {
+      configuredAppId = packageMetadata.build.appId
+    }
+  } catch {
+    // Keep the stable fallback for development layouts without package metadata.
+  }
+  app.setAppUserModelId(configuredAppId)
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()

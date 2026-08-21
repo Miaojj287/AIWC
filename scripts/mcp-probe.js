@@ -1,4 +1,5 @@
 const path = require('path')
+const pkg = require('../package.json')
 
 function parseToolArgs(raw) {
   if (!raw) return {}
@@ -36,7 +37,7 @@ async function main() {
   if (mode === 'packaged') {
     const launcherPath = process.argv[3] || (
       process.platform === 'darwin'
-        ? path.join(cwd, 'CipherTalk.app', 'Contents', 'MacOS', 'ciphertalk-mcp')
+        ? path.join(cwd, `${process.env.CIPHERTALK_PRODUCT_NAME || pkg.build?.productName || 'CipherTalk'}.app`, 'Contents', 'MacOS', 'ciphertalk-mcp')
         : path.join(cwd, 'ciphertalk-mcp.cmd')
     )
     command = launcherPath

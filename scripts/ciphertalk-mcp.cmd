@@ -2,14 +2,19 @@
 setlocal
 
 set "APP_DIR=%~dp0"
-set "EXE_PATH=%APP_DIR%CipherTalk.exe"
+set "EXE_PATH=%CIPHERTALK_DESKTOP_EXE%"
+if not defined EXE_PATH (
+  for %%F in ("%APP_DIR%*.exe") do (
+    if /I not "%%~nxF"=="Uninstall.exe" if not defined EXE_PATH set "EXE_PATH=%%~fF"
+  )
+)
 set "MCP_ARCHIVE=%APP_DIR%resources\app.asar"
 set "MCP_ENTRY_UNPACKED=%APP_DIR%resources\app.asar.unpacked\dist-electron\mcp.js"
 set "MCP_ENTRY=%MCP_ARCHIVE%\dist-electron\mcp.js"
 set "MCP_BOOTSTRAP=%APP_DIR%ciphertalk-mcp-bootstrap.cjs"
 
 if not exist "%EXE_PATH%" (
-  >&2 echo [CipherTalk MCP Launcher] CipherTalk.exe not found at "%EXE_PATH%"
+  >&2 echo [CipherTalk MCP Launcher] desktop executable not found; set CIPHERTALK_DESKTOP_EXE
   exit /b 1
 )
 
