@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {
   extractWindowsMemoryKeyCandidates,
+  extractWindowsRawV4KeyCandidates,
+  parseWeChatTasklist,
   readEncryptedDbSalt,
 } from '../electron/services/windowsMemoryKeyScanner.ts'
 import { extractMemoryDbKeyCandidates } from '../electron/services/memoryDbKeyPattern.ts'
@@ -23,6 +25,30 @@ const splitRecord = Buffer.concat([
   Buffer.from(`${key}${salt}'`, 'ascii'),
 ])
 assert.equal(extractWindowsMemoryKeyCandidates(splitRecord).length, 0)
+
+const rawV4Key = Buffer.alloc(32)
+rawV4Key[6] = 0x40
+rawV4Key[8] = 0x80
+rawV4Key[22] = 0x40
+rawV4Key[24] = 0x80
+assert.deepEqual(extractWindowsRawV4KeyCandidates(rawV4Key, 0n), [rawV4Key])
+assert.deepEqual(
+  extractWindowsRawV4KeyCandidates(Buffer.concat([Buffer.alloc(5), rawV4Key]), 3n),
+  [rawV4Key]
+)
+const invalidRawV4Key = Buffer.from(rawV4Key)
+invalidRawV4Key[22] = 0x30
+assert.deepEqual(extractWindowsRawV4KeyCandidates(invalidRawV4Key, 0n), [])
+
+const tasklist = [
+  '"Weixin.exe","1036","Console","1","22,028 K"',
+  '"Weixin.exe","8556","Console","1","441,468 K"',
+  '"not-weixin.exe","9999","Console","1","999,999 K"',
+].join('\r\n')
+assert.deepEqual(parseWeChatTasklist(tasklist), [
+  { pid: 8556, workingSetKb: 441468 },
+  { pid: 1036, workingSetKb: 22028 },
+])
 
 const tempDir = mkdtempSync(join(tmpdir(), 'ciphertalk-key-scan-'))
 try {

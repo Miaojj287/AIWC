@@ -330,20 +330,25 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
             lastError = testResult.error || ''
           }
         }
-        for (const wxid of wxids) {
+        // The 4.1.x key is transient. Scanning every historical account makes
+        // one polling cycle several times slower and can miss it entirely.
+        // detectCurrentAccount is ordered first above, so keep the hot capture
+        // path focused on that database; users can select/rescan another
+        // account after it becomes the active one.
+        for (const wxid of wxids.slice(0, 1)) {
           const contactDb = contactDbFor(wxid)
           if (!contactDb) continue
           const diag = wxKeyService.scanDbKeyDiag(contactDb)
           if (!diag) continue
           if (diag.bytes > 0) sawBytes = true
           if (diag.key) {
-            event.sender.send('wxkey:status', { status: `已捕获候选密钥，正在验证账号: ${wxid}`, level: 1 })
-            const testResult = await wcdbService.testConnection(dbPath, diag.key, wxid)
-            if (testResult.success) {
-              ctx.getLogService()?.info('WxKey', '内存扫描密钥获取成功', { wxid, keyLength: diag.key.length })
-              return { success: true, key: diag.key, validatedWxid: wxid, account: account ?? null }
-            }
-            lastError = testResult.error || ''
+            // scanWindowsMemoryForDbKey only returns a raw key after deriving
+            // the SQLCipher key and decrypting this exact contact.db first
+            // page. Requiring the optional WCDB bridge here would duplicate
+            // that verification and break the source-only development flow.
+            event.sender.send('wxkey:status', { status: `密钥与账号数据库验证成功: ${wxid}`, level: 1 })
+            ctx.getLogService()?.info('WxKey', '内存扫描密钥获取成功', { wxid, keyLength: diag.key.length })
+            return { success: true, key: diag.key, validatedWxid: wxid, account: account ?? null }
           }
         }
         // 连续多轮一字节都读不到 → 基本可判定权限不足，提前结束提示提权
@@ -351,7 +356,9 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
           ctx.getLogService()?.warn('WxKey', '内存读取为 0 字节，疑似权限不足')
           return needAdminResult
         }
-        await new Promise(resolve => setTimeout(resolve, 1500))
+        // The 4.1.x raw key may exist for less than one second while login
+        // opens the databases, so keep the read-only polling gap short.
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
 
       if (!sawBytes) {

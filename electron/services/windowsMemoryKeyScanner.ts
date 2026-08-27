@@ -3,6 +3,9 @@ import {
   readEncryptedDbSalt,
   type MemoryDbKeyCandidate,
 } from './memoryDbKeyPattern'
+import koffi from 'koffi'
+import { createDecipheriv, pbkdf2Sync } from 'crypto'
+import { closeSync, openSync, readSync } from 'fs'
 
 export { readEncryptedDbSalt } from './memoryDbKeyPattern'
 
@@ -24,6 +27,13 @@ const MAX_REGION_SIZE = 512 * 1024 * 1024
 const CHUNK_SIZE = 2 * 1024 * 1024
 const ASCII_RECORD_SIZE = 99 // x' + 96 hex chars + '
 const OVERLAP_SIZE = ASCII_RECORD_SIZE - 1
+const V4_KEY_SIZE = 32
+const SQLCIPHER_PAGE_SIZE = 4096
+// A fresh 4.1.x login can materialize a few hundred UUID-shaped objects in one
+// allocation wave. They are copied before validation, so it is safe to spend a
+// bounded amount of time checking that captured snapshot after the read pass.
+const MAX_RAW_CANDIDATES_TO_VALIDATE_PER_ROUND = 512
+const TRANSIENT_SCAN_BYTE_LIMIT = 64 * 1024 * 1024
 
 export type WindowsMemoryKeyCandidate = MemoryDbKeyCandidate
 
@@ -38,6 +48,34 @@ export interface WindowsMemoryKeyScanResult {
   candidates: number
 }
 
+export interface WindowsMemoryKeyScanOptions {
+  /** Stop between memory regions/chunks once this wall-clock deadline is reached. */
+  deadline?: number
+  /** Candidates retained across polling rounds so only newly loaded keys need PBKDF validation. */
+  seenRawCandidates?: Set<string>
+  /** The first pre-login round establishes a baseline and intentionally skips validation. */
+  validateNewRawCandidates?: boolean
+}
+
+export interface WeChatProcessInfo {
+  pid: number
+  workingSetKb: number
+}
+
+/** Parse tasklist CSV and put the most likely data-bearing Weixin process first. */
+export function parseWeChatTasklist(output: string): WeChatProcessInfo[] {
+  const processes: WeChatProcessInfo[] = []
+  for (const line of output.trim().split(/\r?\n/)) {
+    const fields = Array.from(line.matchAll(/"([^"]*)"/g), match => match[1])
+    if (fields.length < 2 || fields[0].toLowerCase() !== 'weixin.exe') continue
+    const pid = Number.parseInt(fields[1], 10)
+    if (!Number.isInteger(pid) || pid <= 0) continue
+    const workingSetKb = Number.parseInt(String(fields[4] || '').replace(/\D/g, ''), 10) || 0
+    processes.push({ pid, workingSetKb })
+  }
+  return processes.sort((left, right) => right.workingSetKb - left.workingSetKb)
+}
+
 /**
  * Extract WeChat 4.x SQLCipher records stored as x'<64 hex key><32 hex salt>'.
  * Exported separately so the byte-pattern logic can be tested on every platform.
@@ -47,6 +85,74 @@ export function extractWindowsMemoryKeyCandidates(
   onMarker?: () => void
 ): WindowsMemoryKeyCandidate[] {
   return extractMemoryDbKeyCandidates(data, onMarker)
+}
+
+function isUuidV4At(data: Buffer, offset: number): boolean {
+  return (
+    offset >= 0 &&
+    offset + 16 <= data.length &&
+    (data[offset + 6] & 0xf0) === 0x40 &&
+    (data[offset + 8] & 0xc0) === 0x80
+  )
+}
+
+/** Extract the transient 4.1.x raw key representation (two UUIDv4 byte blocks). */
+export function extractWindowsRawV4KeyCandidates(data: Buffer, baseAddress = 0n): Buffer[] {
+  const candidates: Buffer[] = []
+  const baseRemainder = Number(baseAddress % 8n)
+  let offset = (8 - baseRemainder) % 8
+  for (; offset + V4_KEY_SIZE <= data.length; offset += 8) {
+    if (isUuidV4At(data, offset) && isUuidV4At(data, offset + 16)) {
+      candidates.push(Buffer.from(data.subarray(offset, offset + V4_KEY_SIZE)))
+    }
+  }
+  return candidates
+}
+
+function readEncryptedDbFirstPage(dbPath: string): Buffer | null {
+  let fd: number | null = null
+  try {
+    fd = openSync(dbPath, 'r')
+    const page = Buffer.alloc(SQLCIPHER_PAGE_SIZE)
+    if (readSync(fd, page, 0, page.length, 0) !== page.length) return null
+    if (page.subarray(0, 15).equals(Buffer.from('SQLite format 3'))) return null
+    return page
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
+/** Validate a raw WeChat 4.x database key without exposing or persisting it. */
+export function verifyWindowsV4DbKey(key: Buffer, encryptedFirstPage: Buffer): boolean {
+  if (key.length !== V4_KEY_SIZE || encryptedFirstPage.length < SQLCIPHER_PAGE_SIZE) return false
+  try {
+    const salt = encryptedFirstPage.subarray(0, 16)
+    const derivedKey = pbkdf2Sync(key, salt, 256_000, 32, 'sha512')
+    const decipher = createDecipheriv(
+      'aes-256-cbc',
+      derivedKey,
+      encryptedFirstPage.subarray(4016, 4032)
+    )
+    decipher.setAutoPadding(false)
+    const decrypted = Buffer.concat([
+      decipher.update(encryptedFirstPage.subarray(16, 4016)),
+      decipher.final(),
+    ])
+    return (
+      decrypted[0] === 0x10 &&
+      decrypted[1] === 0x00 &&
+      (decrypted[2] === 1 || decrypted[2] === 2) &&
+      (decrypted[3] === 1 || decrypted[3] === 2) &&
+      decrypted[4] === 0x50 &&
+      decrypted[5] === 0x40 &&
+      decrypted[6] === 0x20 &&
+      decrypted[7] === 0x20
+    )
+  } catch {
+    return false
+  }
 }
 
 function isWritableReadablePage(protect: number): boolean {
@@ -72,7 +178,8 @@ function readSizeT(buffer: Buffer): bigint {
  */
 export function scanWindowsMemoryForDbKey(
   pid: number,
-  dbPath: string
+  dbPath: string,
+  options: WindowsMemoryKeyScanOptions = {}
 ): WindowsMemoryKeyScanResult {
   const result: WindowsMemoryKeyScanResult = {
     key: null,
@@ -88,10 +195,10 @@ export function scanWindowsMemoryForDbKey(
   if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return result
 
   const targetSalt = readEncryptedDbSalt(dbPath)
-  if (!targetSalt) return result
+  const encryptedFirstPage = readEncryptedDbFirstPage(dbPath)
+  if (!targetSalt || !encryptedFirstPage) return result
   result.dbOk = true
 
-  const koffi = require('koffi')
   const kernel32 = koffi.load('kernel32.dll')
   const openProcess = kernel32.func(
     'uintptr_t OpenProcess(uint32_t desiredAccess, int inheritHandle, uint32_t processId)'
@@ -107,12 +214,18 @@ export function scanWindowsMemoryForDbKey(
   const processHandle = BigInt(openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
   if (!processHandle || processHandle === 0n) return result
   result.opened = 1
+  const pendingRawCandidates: Buffer[] = []
 
   try {
     let address = 0n
     const memoryInfo = Buffer.alloc(MEMORY_BASIC_INFORMATION_X64_SIZE)
 
-    while (address < MAX_USER_ADDRESS && !result.key) {
+    while (
+      address < MAX_USER_ADDRESS &&
+      !result.key &&
+      (!options.seenRawCandidates || result.bytes < TRANSIENT_SCAN_BYTE_LIMIT) &&
+      (!options.deadline || Date.now() < options.deadline)
+    ) {
       memoryInfo.fill(0)
       const querySize = Number(
         virtualQueryEx(processHandle, address, memoryInfo, MEMORY_BASIC_INFORMATION_X64_SIZE)
@@ -134,7 +247,12 @@ export function scanWindowsMemoryForDbKey(
         let regionOffset = 0
         let trailing = Buffer.alloc(0)
 
-        while (regionOffset < regionSize && !result.key) {
+        while (
+          regionOffset < regionSize &&
+          !result.key &&
+          (!options.seenRawCandidates || result.bytes < TRANSIENT_SCAN_BYTE_LIMIT) &&
+          (!options.deadline || Date.now() < options.deadline)
+        ) {
           const requested = Math.min(CHUNK_SIZE, regionSize - regionOffset)
           const chunk = Buffer.allocUnsafe(requested)
           const bytesReadBuffer = Buffer.alloc(8)
@@ -152,6 +270,15 @@ export function scanWindowsMemoryForDbKey(
             result.bytes += bytesRead
             const current = chunk.subarray(0, bytesRead)
             const searchable = trailing.length ? Buffer.concat([trailing, current]) : current
+            const searchableBase = baseAddress + BigInt(regionOffset) - BigInt(trailing.length)
+            const rawCandidates = extractWindowsRawV4KeyCandidates(searchable, searchableBase)
+            for (const rawKey of rawCandidates) {
+              const identity = rawKey.toString('hex')
+              if (options.seenRawCandidates?.has(identity)) continue
+              options.seenRawCandidates?.add(identity)
+              result.candidates += 1
+              if (options.validateNewRawCandidates !== false) pendingRawCandidates.push(rawKey)
+            }
             const candidates = extractWindowsMemoryKeyCandidates(searchable, () => {
               result.markers += 1
             })
@@ -175,6 +302,21 @@ export function scanWindowsMemoryForDbKey(
     }
   } finally {
     closeHandle(processHandle)
+  }
+
+  // Copy every transient candidate during the fast memory pass first. PBKDF is
+  // intentionally deferred: validating inline can take long enough for a key
+  // in a later region to disappear before that region is read.
+  if (
+    !result.key &&
+    pendingRawCandidates.length <= MAX_RAW_CANDIDATES_TO_VALIDATE_PER_ROUND
+  ) {
+    for (const rawKey of pendingRawCandidates) {
+      if (verifyWindowsV4DbKey(rawKey, encryptedFirstPage)) {
+        result.key = rawKey.toString('hex')
+        break
+      }
+    }
   }
 
   return result

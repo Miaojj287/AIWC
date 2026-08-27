@@ -2,6 +2,7 @@ import { spawn, execSync } from 'child_process'
 import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import {
+  parseWeChatTasklist,
   scanWindowsMemoryForDbKey,
   type WindowsMemoryKeyScanResult,
 } from './windowsMemoryKeyScanner'
@@ -33,6 +34,10 @@ export interface WxAccountInfo {
 }
 
 export class WxKeyService {
+  private rawCandidateProcessSignature = ''
+  private readonly rawCandidateBaselines = new Set<string>()
+  private readonly seenRawCandidatesByDb = new Map<string, Set<string>>()
+
   /**
    * 检查微信进程是否运行 (仅微信4.x Weixin.exe)
    */
@@ -45,29 +50,19 @@ export class WxKeyService {
     }
   }
 
-  /**
-   * 获取微信进程 PID (仅微信4.x Weixin.exe)
-   */
-  getWeChatPid(): number | null {
+  /** 获取全部微信进程 PID，并优先返回工作集最大的主进程。 */
+  getWeChatPids(): number[] {
     try {
       const result = execSync('tasklist /FI "IMAGENAME eq Weixin.exe" /FO CSV /NH', { encoding: 'utf8', windowsHide: true })
-      const lines = result.trim().split('\n')
-
-      for (const line of lines) {
-        if (line.toLowerCase().includes('weixin.exe')) {
-          const parts = line.split(',')
-          if (parts.length >= 2) {
-            const pid = parseInt(parts[1].replace(/"/g, ''), 10)
-            if (!isNaN(pid)) {
-              return pid
-            }
-          }
-        }
-      }
-      return null
+      return parseWeChatTasklist(result).map(processInfo => processInfo.pid)
     } catch {
-      return null
+      return []
     }
+  }
+
+  /** 获取最可能承载登录数据的微信进程 PID。 */
+  getWeChatPid(): number | null {
+    return this.getWeChatPids()[0] ?? null
   }
 
   /**
@@ -197,18 +192,61 @@ export class WxKeyService {
    * @param contactDbPath contact.db 完整路径（决定校验用的 salt）
    */
   scanDbKeyDiag(contactDbPath: string): WxScanDiag | null {
-    let openScan: WindowsMemoryKeyScanResult | null = null
-    const pid = this.getWeChatPid()
-    if (pid) {
-      try {
-        openScan = scanWindowsMemoryForDbKey(pid, contactDbPath)
-        if (openScan.key) return openScan
-      } catch (e) {
-        console.warn('开源内存扫描未完成:', e)
-      }
+    const pids = this.getWeChatPids()
+    if (pids.length === 0) return null
+    // Helper processes appear progressively during login. Only the largest
+    // data-bearing process identifies the capture session; helper churn must
+    // not repeatedly discard the pre-login baseline.
+    const processSignature = String(pids[0])
+    if (processSignature !== this.rawCandidateProcessSignature) {
+      this.rawCandidateProcessSignature = processSignature
+      this.rawCandidateBaselines.clear()
+      this.seenRawCandidatesByDb.clear()
     }
 
-    return openScan
+    // The IPC handler may try several account databases. Candidate history
+    // must be isolated per database: a key rejected against account A still
+    // needs to be validated against account B in the same polling round.
+    const dbIdentity = contactDbPath.toLowerCase()
+    let seenRawCandidates = this.seenRawCandidatesByDb.get(dbIdentity)
+    if (!seenRawCandidates) {
+      seenRawCandidates = new Set<string>()
+      this.seenRawCandidatesByDb.set(dbIdentity, seenRawCandidates)
+    }
+
+    const aggregate: WindowsMemoryKeyScanResult = {
+      key: null,
+      auth: true,
+      dbOk: false,
+      pids: pids.length,
+      opened: 0,
+      bytes: 0,
+      markers: 0,
+      candidates: 0,
+    }
+    // A scan is synchronous in the Electron main process. Bound every round so
+    // the IPC handler can enforce its overall timeout and update the UI.
+    const deadline = Date.now() + 15_000
+    for (const pid of pids.slice(0, 1)) {
+      if (Date.now() >= deadline) break
+      try {
+        const scan = scanWindowsMemoryForDbKey(pid, contactDbPath, {
+          deadline,
+          seenRawCandidates,
+          validateNewRawCandidates: this.rawCandidateBaselines.has(dbIdentity),
+        })
+        aggregate.dbOk ||= scan.dbOk
+        aggregate.opened += scan.opened
+        aggregate.bytes += scan.bytes
+        aggregate.markers += scan.markers
+        aggregate.candidates += scan.candidates
+        if (scan.key) return { ...aggregate, key: scan.key }
+      } catch (e) {
+        console.warn(`微信进程 ${pid} 内存扫描未完成:`, e)
+      }
+    }
+    this.rawCandidateBaselines.add(dbIdentity)
+    return aggregate
   }
 
   /** 仅取密钥（诊断版的薄封装）。 */
@@ -231,9 +269,11 @@ export class WxKeyService {
     return null
   }
 
-  /** 释放 Rust 扫描库引用。 */
+  /** 开放扫描器没有常驻原生状态。 */
   dispose(): void {
-    // no native scanner state
+    this.rawCandidateProcessSignature = ''
+    this.rawCandidateBaselines.clear()
+    this.seenRawCandidatesByDb.clear()
   }
 
   /**
