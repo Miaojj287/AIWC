@@ -3,6 +3,7 @@ import { existsSync, readdirSync, statSync } from 'fs'
 import { decodeMessageContent, getRowField, coerceRowNumber } from './chat/rowDecoders'
 import { formatWcdbOpenFailure } from './wcdbOpenFailure'
 import { OpenWcdbBridge } from './openWcdbBridge'
+import { SourceWcdbBridge } from './sourceWcdbBridge'
 
 // 消息表 local_type 列在不同微信版本下的可能列名
 const MSG_TYPE_COLUMNS = [
@@ -15,7 +16,7 @@ const MSG_TYPE_COLUMNS = [
  * WcdbCore —— 直连微信加密数据库的底层封装。
  * - 不依赖 Electron `app`，可在 utilityProcess 中实例化
  * - 所有资源路径通过 setPaths() 注入
- * - 仅加载由本仓库源码构建的开放 WCDB Bridge
+ * - 优先加载源码构建的 WCDB Bridge；缺失时使用仓库内的 TypeScript 解密后端
  */
 export class WcdbCore {
   private initialized = false
@@ -26,7 +27,7 @@ export class WcdbCore {
   private currentDbStoragePath: string | null = null
   private resourcesPath: string | null = null
   private userDataPath: string | null = null
-  private openBridge: OpenWcdbBridge | null = null
+  private openBridge: OpenWcdbBridge | SourceWcdbBridge | null = null
   private openDefaultDbPath: string | null = null
 
   setPaths(resourcesPath: string, userDataPath: string, appVersion = ''): void {
@@ -50,11 +51,12 @@ export class WcdbCore {
 
     try {
       const openLibraryPath = this.getOpenLibraryPath()
-      if (!existsSync(openLibraryPath)) {
-        return { success: false, error: `开放 WCDB Bridge 不存在: ${openLibraryPath}` }
-      }
-      const bridge = new OpenWcdbBridge()
-      const result = bridge.initialize(openLibraryPath)
+      const bridge = existsSync(openLibraryPath)
+        ? new OpenWcdbBridge()
+        : new SourceWcdbBridge()
+      const result = bridge instanceof OpenWcdbBridge
+        ? bridge.initialize(openLibraryPath)
+        : bridge.initialize(this.userDataPath || '')
       if (!result.success) return result
       this.openBridge = bridge
       this.initialized = true
@@ -160,12 +162,12 @@ export class WcdbCore {
 
   private tryOpenWithCandidates(sessionDbPaths: string[], hexKey: string): { success: boolean; handle?: number; matchedPath?: string; errors: string[] } {
     const errors: string[] = []
-    if (!this.openBridge) return { success: false, errors: ['开放 WCDB Bridge 尚未初始化'] }
+    if (!this.openBridge) return { success: false, errors: ['数据库后端尚未初始化'] }
     for (const sessionDbPath of sessionDbPaths) {
       if (this.openBridge.canOpen(sessionDbPath, hexKey)) {
         return { success: true, handle: 1, matchedPath: sessionDbPath, errors }
       }
-      errors.push(`${sessionDbPath} => 开放 WCDB Bridge 拒绝密钥或数据库`)
+      errors.push(`${sessionDbPath} => 数据库后端拒绝密钥或数据库`)
     }
     return { success: false, errors }
   }
@@ -278,9 +280,9 @@ export class WcdbCore {
       return { success: false, error: 'WCDB 未初始化' }
     }
     try {
-      if (!this.openBridge) return { success: false, error: '开放 WCDB Bridge 尚未初始化' }
+      if (!this.openBridge) return { success: false, error: '数据库后端尚未初始化' }
       const dbPath = this.resolveOpenDbPath(kind, path)
-      if (!dbPath) return { success: false, error: `开放 WCDB Bridge 缺少 ${kind || '默认'} 数据库路径` }
+      if (!dbPath) return { success: false, error: `数据库后端缺少 ${kind || '默认'} 数据库路径` }
       return this.openBridge.execQuery(dbPath, sql, this.currentKey || undefined)
     } catch (e: any) {
       return { success: false, error: e.message || String(e) }
@@ -290,15 +292,15 @@ export class WcdbCore {
   /**
    * 参数化查询。
    * 参数数组需序列化为 `[{type:'string'|'int'|'double'|'bytes'|'null', value:any}]`。
-   * 开放 WCDB Bridge 直接绑定参数。
+   * 数据库后端直接绑定参数。
    */
   async execQueryWithParams(kind: string, path: string, sql: string, params?: any[]): Promise<{ success: boolean; rows?: any[]; error?: string }> {
     if (!this.initialized || this.handle === null) {
       return { success: false, error: 'WCDB 未初始化' }
     }
-    if (!this.openBridge) return { success: false, error: '开放 WCDB Bridge 尚未初始化' }
+    if (!this.openBridge) return { success: false, error: '数据库后端尚未初始化' }
     const dbPath = this.resolveOpenDbPath(kind, path)
-    if (!dbPath) return { success: false, error: `开放 WCDB Bridge 缺少 ${kind || '默认'} 数据库路径` }
+    if (!dbPath) return { success: false, error: `数据库后端缺少 ${kind || '默认'} 数据库路径` }
     const values = (params || []).map((value: any) => {
       const descriptor = this.inferParamDescriptor(value)
       if (descriptor.type === 'null') return null
@@ -436,7 +438,7 @@ export class WcdbCore {
       return { success: false, error: 'WCDB 未初始化' }
     }
     try {
-      if (!this.openBridge) return { success: false, error: '开放 WCDB Bridge 尚未初始化' }
+      if (!this.openBridge) return { success: false, error: '数据库后端尚未初始化' }
       if (!this.currentDbStoragePath) return { success: false, error: '未解析 db_storage 路径' }
       const snsPath = this.findNamedDbs(this.currentDbStoragePath, 'sns.db')[0]
       if (!snsPath) return { success: false, error: '未找到 sns.db' }

@@ -37,7 +37,7 @@ const steps = [
   { id: 'key', title: '解密密钥', desc: '获取密钥与自动识别账号' },
   { id: 'image', title: '图片密钥', desc: '获取 XOR 与 AES 密钥' },
   { id: 'security', title: '安全防护', desc: '配置应用锁保护隐私' },
-  { id: 'decrypt', title: '连接数据库', desc: '直连 WCDB 并完成配置' }
+  { id: 'decrypt', title: '连接数据库', desc: '验证本地数据库并完成配置' }
 ]
 
 interface WelcomePageProps {
@@ -834,7 +834,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
       <div className="flex min-w-0 flex-col gap-3.5">
         <Typography.Heading level={4}>连接数据库</Typography.Heading>
         <Typography.Paragraph size="sm" color="muted">
-          最后一步会保存账号配置，并测试本地 WCDB 直连。
+          最后一步会保存账号配置，并测试本地数据库连接。
         </Typography.Paragraph>
         {renderInfoList(['验证数据库目录、账号目录和密钥', '连接成功后保存当前账号配置', '完成后自动进入主应用'])}
         {renderStatusAlert('请确认前面的必填项都已正确配置。', 'warning')}
@@ -1156,7 +1156,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         {isDecrypting ? '连接中' : '连接数据库'}
       </Button>
       {decryptStatus && countdown === 0 && renderStatusAlert(decryptStatus, 'accent')}
-      {!isDecrypting && !decryptStatus && <Description className="text-center">点击连接数据库后，系统将验证配置并直连 WCDB。</Description>}
+      {!isDecrypting && !decryptStatus && <Description className="text-center">点击连接数据库后，系统将验证配置并连接本地数据库。</Description>}
     </div>
   )
 
