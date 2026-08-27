@@ -393,6 +393,21 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         setError('')
         setShowWechatPathPrompt(false)
 
+        // Windows 源码扫描器返回 validatedWxid 前已经用对应 contact.db
+        // 的加密首个页面验证过密钥。优先采用这个权威结果，避免再调用
+        // 可选的 WCDB Bridge，也要同步更新真正控制步骤状态的布尔值。
+        if (result.validatedWxid) {
+          setWxid(result.validatedWxid)
+          setIsAccountVerified(true)
+          const acc = result.account
+          const extra = acc && (acc.name || acc.number)
+            ? `（${[acc.name && `昵称: ${acc.name}`, acc.number && `微信号: ${acc.number}`].filter(Boolean).join('，')}）`
+            : ''
+          setDbKeyStatus(`密钥获取成功，已验证账号目录: ${result.validatedWxid}${extra}`)
+          return
+        }
+
+        // 兼容未携带 validatedWxid 的旧版或其他平台获取结果。
         if (dbPath) {
           const resolved = await window.electronAPI.wcdb.resolveValidWxid(dbPath, result.key)
           if (resolved.success && resolved.wxid) {
@@ -401,16 +416,6 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             setDbKeyStatus(`密钥获取成功，已验证账号目录: ${resolved.wxid}`)
             return
           }
-        }
-
-        if (result.validatedWxid) {
-          setWxid(result.validatedWxid)
-          const acc = result.account
-          const extra = acc && (acc.name || acc.number)
-            ? `（${[acc.name && `昵称: ${acc.name}`, acc.number && `微信号: ${acc.number}`].filter(Boolean).join('，')}）`
-            : ''
-          setDbKeyStatus(`密钥获取成功，已验证账号目录: ${result.validatedWxid}${extra}`)
-          return
         }
 
         // DLL 直接返回了 wxid：用它定位并验证账号目录，避免落到“扫描文件夹让用户选”
@@ -951,11 +956,11 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           type="button"
           variant="secondary"
           onPress={() => void verifyAccountDirectory(wxid, decryptKey)}
-          isDisabled={isVerifyingAccount || !wxid || decryptKey.length !== 64}
+          isDisabled={isAccountVerified || isVerifyingAccount || !wxid || decryptKey.length !== 64}
           isPending={isVerifyingAccount}
         >
           {isVerifyingAccount ? <Spinner size="sm" color="current" /> : <ShieldCheck width={16} height={16} />}
-          {isVerifyingAccount ? '验证中' : '验证账号目录'}
+          {isVerifyingAccount ? '验证中' : isAccountVerified ? '账号目录已验证' : '验证账号目录'}
         </Button>
         <Button
           type="button"
