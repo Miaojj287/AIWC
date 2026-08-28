@@ -12,9 +12,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <CommonCrypto/CommonCryptor.h>
+#include <CommonCrypto/CommonKeyDerivation.h>
+#include <dispatch/dispatch.h>
+#include <pthread.h>
 
 #define MAX_SALTS 1000
+#define MAX_DB_PAGES 1000
+#define MAX_RAW_CANDIDATES 4096
 #define RECORD_SIZE 99
+#define DB_PAGE_SIZE 4096
+#define RAW_KEY_SIZE 32
 #define CHUNK_SIZE (2u * 1024u * 1024u)
 #define MAX_REGION_SIZE (512ull * 1024ull * 1024ull)
 
@@ -22,6 +29,16 @@ typedef struct {
   uint8_t values[MAX_SALTS][16];
   size_t count;
 } SaltSet;
+
+typedef struct {
+  uint8_t values[MAX_DB_PAGES][DB_PAGE_SIZE];
+  size_t count;
+} DbPageSet;
+
+typedef struct {
+  uint8_t values[MAX_RAW_CANDIDATES][RAW_KEY_SIZE];
+  size_t count;
+} RawKeySet;
 
 static bool ends_with_db(const char *path) {
   size_t length = strlen(path);
@@ -37,7 +54,7 @@ static bool add_salt(SaltSet *salts, const uint8_t value[16]) {
   return true;
 }
 
-static void collect_salts(const char *root, SaltSet *salts) {
+static void collect_databases(const char *root, SaltSet *salts, DbPageSet *pages) {
   char *paths[] = {(char *)root, NULL};
   FTS *tree = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
   if (!tree) return;
@@ -46,14 +63,155 @@ static void collect_salts(const char *root, SaltSet *salts) {
     if (entry->fts_info != FTS_F || !ends_with_db(entry->fts_path)) continue;
     int fd = open(entry->fts_path, O_RDONLY);
     if (fd < 0) continue;
-    uint8_t head[16];
-    ssize_t actual = pread(fd, head, sizeof(head), 0);
+    uint8_t page[DB_PAGE_SIZE];
+    ssize_t actual = pread(fd, page, sizeof(page), 0);
     close(fd);
-    if (actual != (ssize_t)sizeof(head)) continue;
-    if (memcmp(head, "SQLite format 3", 15) == 0) continue;
-    add_salt(salts, head);
+    if (actual < 16) continue;
+    if (memcmp(page, "SQLite format 3", 15) == 0) continue;
+    add_salt(salts, page);
+    if (actual == (ssize_t)sizeof(page) && pages->count < MAX_DB_PAGES) {
+      memcpy(pages->values[pages->count++], page, sizeof(page));
+    }
   }
   fts_close(tree);
+}
+
+static bool is_uuid_v4_at(const uint8_t *data, size_t offset, size_t length) {
+  return offset + 16 <= length &&
+         (data[offset + 6] & 0xf0) == 0x40 &&
+         (data[offset + 8] & 0xc0) == 0x80;
+}
+
+static void add_raw_key(RawKeySet *keys, const uint8_t value[RAW_KEY_SIZE]) {
+  for (size_t i = 0; i < keys->count; i++) {
+    if (memcmp(keys->values[i], value, RAW_KEY_SIZE) == 0) return;
+  }
+  if (keys->count >= MAX_RAW_CANDIDATES) return;
+  memcpy(keys->values[keys->count++], value, RAW_KEY_SIZE);
+}
+
+static void collect_raw_v4_keys(const uint8_t *data, size_t length,
+                                mach_vm_address_t base_address, RawKeySet *keys) {
+  size_t offset = (size_t)((8 - (base_address & 7)) & 7);
+  for (; offset + RAW_KEY_SIZE <= length; offset += 8) {
+    if (is_uuid_v4_at(data, offset, length) &&
+        is_uuid_v4_at(data, offset + 16, length)) {
+      add_raw_key(keys, data + offset);
+    }
+  }
+}
+
+static void collect_raw_v4_keys_unaligned(const uint8_t *data, size_t length,
+                                          RawKeySet *keys) {
+  for (size_t offset = 0; offset + RAW_KEY_SIZE <= length; offset++) {
+    if (is_uuid_v4_at(data, offset, length) &&
+        is_uuid_v4_at(data, offset + 16, length)) {
+      add_raw_key(keys, data + offset);
+    }
+  }
+}
+
+static bool verifies_raw_v4_key(const uint8_t key[RAW_KEY_SIZE],
+                                const uint8_t page[DB_PAGE_SIZE]) {
+  uint8_t derived[RAW_KEY_SIZE];
+  int kdf = CCKeyDerivationPBKDF(kCCPBKDF2, (const char *)key, RAW_KEY_SIZE,
+                                 page, 16, kCCPRFHmacAlgSHA512, 256000,
+                                 derived, sizeof(derived));
+  if (kdf != kCCSuccess) return false;
+
+  uint8_t plain[4000];
+  size_t moved = 0;
+  CCCryptorStatus status = CCCrypt(kCCDecrypt, kCCAlgorithmAES, 0,
+                                   derived, sizeof(derived), page + 4016,
+                                   page + 16, sizeof(plain),
+                                   plain, sizeof(plain), &moved);
+  if (status != kCCSuccess || moved != sizeof(plain)) return false;
+  return plain[0] == 0x10 && plain[1] == 0x00 &&
+         (plain[2] == 1 || plain[2] == 2) &&
+         (plain[3] == 1 || plain[3] == 2) &&
+         plain[4] == 0x50 && plain[5] == 0x40 &&
+         plain[6] == 0x20 && plain[7] == 0x20;
+}
+
+static bool find_verified_raw_v4_key(const RawKeySet *keys, const DbPageSet *pages,
+                                     uint8_t key[RAW_KEY_SIZE]) {
+  if (keys->count == 0 || pages->count == 0) return false;
+  __block ssize_t matched = -1;
+  __block pthread_mutex_t matched_lock = PTHREAD_MUTEX_INITIALIZER;
+  dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+  dispatch_apply(keys->count, queue, ^(size_t i) {
+    pthread_mutex_lock(&matched_lock);
+    bool already_matched = matched >= 0;
+    pthread_mutex_unlock(&matched_lock);
+    if (already_matched) return;
+    for (size_t j = 0; j < pages->count; j++) {
+      if (!verifies_raw_v4_key(keys->values[i], pages->values[j])) continue;
+      pthread_mutex_lock(&matched_lock);
+      if (matched < 0) matched = (ssize_t)i;
+      pthread_mutex_unlock(&matched_lock);
+      return;
+    }
+  });
+  pthread_mutex_destroy(&matched_lock);
+  if (matched >= 0) {
+    memcpy(key, keys->values[matched], RAW_KEY_SIZE);
+    return true;
+  }
+  return false;
+}
+
+static bool scan_dump_file(const char *path, const DbPageSet *pages,
+                           uint8_t key[RAW_KEY_SIZE], size_t *candidate_count,
+                           uint64_t *bytes_read) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) return false;
+  uint8_t *chunk = malloc(CHUNK_SIZE + RAW_KEY_SIZE - 1);
+  if (!chunk) {
+    close(fd);
+    return false;
+  }
+  RawKeySet keys = {0};
+  size_t trailing = 0;
+  while (true) {
+    ssize_t actual = read(fd, chunk + trailing, CHUNK_SIZE);
+    if (actual <= 0) break;
+    *bytes_read += (uint64_t)actual;
+    size_t searchable = trailing + (size_t)actual;
+    collect_raw_v4_keys_unaligned(chunk, searchable, &keys);
+    trailing = searchable < RAW_KEY_SIZE - 1 ? searchable : RAW_KEY_SIZE - 1;
+    memmove(chunk, chunk + searchable - trailing, trailing);
+  }
+  close(fd);
+  free(chunk);
+  *candidate_count += keys.count;
+  return find_verified_raw_v4_key(&keys, pages, key);
+}
+
+static bool scan_dump_path(const char *root, const DbPageSet *pages,
+                           uint8_t key[RAW_KEY_SIZE], size_t *candidate_count,
+                           uint64_t *bytes_read, size_t *file_count) {
+  struct stat info;
+  if (stat(root, &info) != 0) return false;
+  if (S_ISREG(info.st_mode)) {
+    *file_count = 1;
+    return scan_dump_file(root, pages, key, candidate_count, bytes_read);
+  }
+  if (!S_ISDIR(info.st_mode)) return false;
+
+  char *paths[] = {(char *)root, NULL};
+  FTS *tree = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+  if (!tree) return false;
+  bool matched = false;
+  FTSENT *entry;
+  while (!matched && (entry = fts_read(tree)) != NULL) {
+    if (entry->fts_info != FTS_F) continue;
+    size_t length = strlen(entry->fts_name);
+    if (length < 4 || strcasecmp(entry->fts_name + length - 4, ".dmp") != 0) continue;
+    (*file_count)++;
+    matched = scan_dump_file(entry->fts_path, pages, key, candidate_count, bytes_read);
+  }
+  fts_close(tree);
+  return matched;
 }
 
 static int hex_value(uint8_t value) {
@@ -227,13 +385,34 @@ int main(int argc, char **argv) {
     }
     return scan_image_key((pid_t)strtol(argv[2], NULL, 10), ciphertext);
   }
+  if (argc == 4 && strcmp(argv[1], "--dump") == 0) {
+    SaltSet salts = {0};
+    DbPageSet pages = {0};
+    collect_databases(argv[3], &salts, &pages);
+    uint8_t key[RAW_KEY_SIZE] = {0};
+    size_t candidates = 0, files = 0;
+    uint64_t bytes_read = 0;
+    bool matched = pages.count > 0 &&
+                   scan_dump_path(argv[2], &pages, key, &candidates, &bytes_read, &files);
+    if (matched) {
+      printf("{\"success\":true,\"key\":\"");
+      for (size_t i = 0; i < RAW_KEY_SIZE; i++) printf("%02x", key[i]);
+      printf("\",\"source\":\"wechat-crash-dump\",\"attached\":false,\"saltCount\":%zu,\"dumpFiles\":%zu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
+             salts.count, files, bytes_read, candidates);
+      return 0;
+    }
+    printf("{\"success\":false,\"source\":\"wechat-crash-dump\",\"attached\":false,\"saltCount\":%zu,\"dumpFiles\":%zu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
+           salts.count, files, bytes_read, candidates);
+    return 6;
+  }
   if (argc != 3) {
-    fprintf(stderr, "usage: %s <pid> <db-root> | --image <pid> <ciphertext-hex>\n", argv[0]);
+    fprintf(stderr, "usage: %s <pid> <db-root> | --dump <dump-path> <db-root> | --image <pid> <ciphertext-hex>\n", argv[0]);
     return 2;
   }
   pid_t pid = (pid_t)strtol(argv[1], NULL, 10);
   SaltSet salts = {0};
-  collect_salts(argv[2], &salts);
+  DbPageSet pages = {0};
+  collect_databases(argv[2], &salts, &pages);
   if (pid <= 0 || salts.count == 0) {
     printf("{\"success\":false,\"attached\":false,\"saltCount\":%zu,\"regions\":0,\"bytes\":0}\n", salts.count);
     return 3;
@@ -252,6 +431,7 @@ int main(int argc, char **argv) {
   uint64_t bytes_read = 0;
   uint64_t regions = 0;
   char key[65] = {0};
+  RawKeySet raw_keys = {0};
 
   while (address < 0x7fffffffffffULL) {
     mach_vm_size_t size = 0;
@@ -281,6 +461,8 @@ int main(int argc, char **argv) {
         }
         bytes_read += actual;
         size_t searchable = trailing + (size_t)actual;
+        mach_vm_address_t searchable_address = address + offset - requested - trailing;
+        collect_raw_v4_keys(chunk, searchable, searchable_address, &raw_keys);
         if (find_key(chunk, searchable, &salts, key)) {
           printf("{\"success\":true,\"key\":\"%s\",\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu}\n",
                  key, salts.count, regions, bytes_read);
@@ -296,8 +478,20 @@ int main(int argc, char **argv) {
     address = next;
   }
 
-  printf("{\"success\":false,\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu}\n",
-         salts.count, regions, bytes_read);
+
+  uint8_t raw_key[RAW_KEY_SIZE];
+  if (find_verified_raw_v4_key(&raw_keys, &pages, raw_key)) {
+    printf("{\"success\":true,\"key\":\"");
+    for (size_t i = 0; i < RAW_KEY_SIZE; i++) printf("%02x", raw_key[i]);
+    printf("\",\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
+           salts.count, regions, bytes_read, raw_keys.count);
+    free(chunk);
+    mach_port_deallocate(mach_task_self(), task);
+    return 0;
+  }
+
+  printf("{\"success\":false,\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
+         salts.count, regions, bytes_read, raw_keys.count);
   free(chunk);
   mach_port_deallocate(mach_task_self(), task);
   return 6;

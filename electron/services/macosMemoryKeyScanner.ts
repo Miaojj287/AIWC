@@ -1,5 +1,6 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync } from 'fs'
 import { join } from 'path'
+import koffi from 'koffi'
 import { extractMemoryDbKeyCandidates } from './memoryDbKeyPattern'
 
 export interface MacosMemoryKeyScanResult {
@@ -65,7 +66,6 @@ export async function scanMacosMemoryForDbKey(
   if (pid <= 0 || salts.size === 0) return result
 
   try {
-    const koffi = require('koffi')
     const lib = koffi.load('/usr/lib/libSystem.B.dylib')
     const machTaskSelf = lib.func('mach_task_self', 'uint32', [])
     const taskForPid = lib.func('task_for_pid', 'int', ['uint32', 'int', koffi.out('uint32*')])

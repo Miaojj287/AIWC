@@ -57,6 +57,8 @@ const MAC_WECHAT_BUNDLE_ID = 'com.tencent.xinWeChat'
 const K_CG_HID_EVENT_TAP = 0
 /** kCGEventFlagMaskCommand */
 const K_CG_FLAG_COMMAND = 0x100000
+/** 粘贴之后等微信把正文塞进输入框，再交给调用方按回车。 */
+const MAC_PASTE_SETTLE_MS = 350
 /** mac 虚拟键码与 Windows VK 完全不同：kVK_ANSI_F / kVK_ANSI_V / kVK_Return */
 const K_VK_F = 0x03
 const K_VK_V = 0x09
@@ -113,13 +115,20 @@ function ensureMacInputLoaded(): boolean {
   }
 }
 
-/** 按一次键；withCommand 时带 Cmd 修饰。用 flags 而不是单独发 Cmd 键事件，更不易残留修饰状态。 */
+/**
+ * 按一次键；withCommand 时带 Cmd 修饰。用 flags 而不是单独发 Cmd 键事件，更不易残留修饰状态。
+ *
+ * flags 必须每次都显式设置，不带修饰时也要设成 0：source 传 NULL 建出来的事件会继承
+ * 当前会话的修饰键状态，而合成的 Cmd+V 结束后 Command 位并不会自己清掉。
+ * 不设的话紧随其后的回车会变成 ⌘+Return——在微信里是换行不是发送，
+ * 表现为「正文粘好了但消息发不出去」。
+ */
 function macTap(keyCode: number, withCommand = false): void {
   for (const down of [true, false]) {
     const event = CGEventCreateKeyboardEvent(null, keyCode, down)
     if (!event) continue
     try {
-      if (withCommand) CGEventSetFlags(event, BigInt(K_CG_FLAG_COMMAND))
+      CGEventSetFlags(event, BigInt(withCommand ? K_CG_FLAG_COMMAND : 0))
       CGEventPost(K_CG_HID_EVENT_TAP, event)
     } finally {
       try { CFRelease(event) } catch { /* ignore */ }
@@ -128,24 +137,34 @@ function macTap(keyCode: number, withCommand = false): void {
 }
 
 /**
- * 把微信拉到前台。用 osascript 而不是辅助功能 API：activate 不需要额外授权，
- * 失败时再按应用名试一次（bundle id 在不同微信版本上不完全一致）。
+ * 把微信拉到前台。优先用 osascript activate：不需要额外授权，
+ * 按 bundle id 和应用名各试一次（bundle id 在不同微信版本上不完全一致）。
+ *
+ * 不能只看 osascript 的退出码：微信 4.x 会忽略 Apple Event 的 activate，
+ * osascript 照样退 0 而窗口纹丝不动，只看退出码会误判成激活成功。
+ * 所以每试一条都要回查前台，都没生效就退到辅助功能通道设置前台——
+ * 按键注入本来就要求了辅助功能权限，这里不引入新的权限种类。
  */
-function activateWeChatMac(): Promise<boolean> {
-  const scripts = [
-    `tell application id "${MAC_WECHAT_BUNDLE_ID}" to activate`,
-    'tell application "WeChat" to activate',
-  ]
+const MAC_ACTIVATE_SCRIPTS = [
+  `tell application id "${MAC_WECHAT_BUNDLE_ID}" to activate`,
+  'tell application "WeChat" to activate',
+  'tell application "System Events" to tell process "WeChat" to set frontmost to true',
+  'tell application "System Events" to tell process "微信" to set frontmost to true',
+]
+
+function runOsascript(script: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const run = (index: number): void => {
-      if (index >= scripts.length) return resolve(false)
-      execFile('osascript', ['-e', scripts[index]], (error) => {
-        if (!error) return resolve(true)
-        run(index + 1)
-      })
-    }
-    run(0)
+    execFile('osascript', ['-e', script], (error) => resolve(!error))
   })
+}
+
+async function activateWeChatMac(): Promise<boolean> {
+  for (const script of MAC_ACTIVATE_SCRIPTS) {
+    if (!await runOsascript(script)) continue
+    await sleep(250)
+    if (isWeChatForegroundMac()) return true
+  }
+  return false
 }
 
 function isWeChatForegroundMac(): boolean {
@@ -179,6 +198,9 @@ async function fillWeChatInputMac(text: string, searchName?: string): Promise<We
   clipboard.writeText(text)
   await sleep(80)
   macTap(K_VK_V, true)
+  // 粘贴到「正文真的进了输入框」之间有延迟，而调用方紧接着就按回车（实测间隔只有 2ms）。
+  // 不等的话回车会打在还空着的输入框上，正文随后才落进去——表现为时好时坏地发不出去。
+  await sleep(MAC_PASTE_SETTLE_MS)
   return { ok: true }
 }
 

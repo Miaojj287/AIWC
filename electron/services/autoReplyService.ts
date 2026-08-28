@@ -1,7 +1,19 @@
+import { appendFileSync } from 'fs'
 import { chatService } from './chatService'
 import { commitWeChatInput, fillWeChatInput } from './wechatWindowTracker'
 import { splitSuggestionBursts } from '../../src/pages/chat/replySuggestBurst'
 import type { MainProcessContext } from '../main/context'
+
+/** TODO 临时排查用，定位完删掉。绕开 logService，直接落盘。 */
+function debugTrace(message: string, meta?: Record<string, unknown>): void {
+  try {
+    appendFileSync(
+      '/tmp/ciphertalk-autoreply-debug.log',
+      `[${new Date().toISOString()}] ${message} ${meta ? JSON.stringify(meta) : ''}\n`,
+      'utf8'
+    )
+  } catch { /* ignore */ }
+}
 
 /**
  * 全自动回复的发送队列（主进程）。
@@ -98,6 +110,12 @@ class AutoReplyService {
     if (existing >= 0) this.queue[existing] = { sessionId, sessionName, segments }
     else this.queue.push({ sessionId, sessionName, segments })
 
+    debugTrace('入队自动回复', {
+      sessionId,
+      segments,
+      hasCtx: Boolean(this.ctx),
+      hasLogService: Boolean(this.ctx?.getLogService()),
+    })
     this.log('入队自动回复', { sessionId, segments: segments.length, queued: this.queue.length })
     void this.drain()
   }
@@ -184,13 +202,29 @@ class AutoReplyService {
 
       // 只有第一句需要 Ctrl+F 跳转，后面几句已经在这个会话里了
       const fill = await this.fillWithBusyRetry(seg, i === 0 ? item.sessionName : undefined)
+      debugTrace('fill 返回', { seg, searchName: i === 0 ? item.sessionName : undefined, fill })
       if (!fill.ok) return this.halt(item, fill.reason || 'not-sent')
 
       const sentAt = Math.floor(Date.now() / 1000)
       const commit = commitWeChatInput()
+      debugTrace('commit 返回', { sentAt, commit })
       if (!commit.ok) return this.halt(item, commit.reason || 'not-sent')
 
-      const result = await this.verify(item.sessionId, seg, sentAt)
+      let result = await this.verify(item.sessionId, seg, sentAt)
+      debugTrace('verify 返回', { sessionId: item.sessionId, expected: seg, sentAt, result })
+
+      // 判成没发出去时补按一次回车：这种情况正文多半还留在输入框里。
+      // 只重按回车、绝不重新粘贴——真发出去过的话输入框已经空了，回车是空操作，
+      // 所以补按不会造成重复发送，而重新粘贴会。
+      if (result.verdict === 'not-sent') {
+        const retry = commitWeChatInput()
+        debugTrace('补按回车', { retry })
+        if (retry.ok) {
+          result = await this.verify(item.sessionId, seg, sentAt)
+          debugTrace('补按后 verify 返回', { result })
+        }
+      }
+
       if (result.verdict !== 'ok') {
         return this.halt(item, result.verdict, result.verdict === 'wrong-session' ? result.where : undefined)
       }
@@ -212,6 +246,17 @@ class AutoReplyService {
   /** 某会话最近的消息里有没有「我刚发出去的这一句」。 */
   private async hasMine(sessionId: string, expected: string, sentAt: number): Promise<boolean> {
     const res = await chatService.getMessages(sessionId, 0, 10)
+    debugTrace('查库最近消息', {
+      sessionId,
+      expected,
+      sentAt,
+      success: res.success,
+      tail: (res.messages || []).slice(-4).map((m) => ({
+        isSend: m.isSend,
+        createTime: m.createTime,
+        text: m.parsedContent?.slice(0, 40),
+      })),
+    })
     return Boolean(res.messages?.some((m) => (
       m.isSend === 1
       && m.createTime >= sentAt - VERIFY_TS_SLACK

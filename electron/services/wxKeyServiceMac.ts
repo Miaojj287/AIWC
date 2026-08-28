@@ -162,21 +162,46 @@ export class WxKeyServiceMac {
       } else {
         await execFileAsync('/usr/bin/open', ['-a', 'WeChat'])
       }
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      return this.isWeChatRunning()
+      // Returning as soon as LaunchServices accepts the request is deliberate:
+      // WeChat 4.1.x only materializes its raw database key briefly during
+      // startup, so a fixed delay here makes the memory scanner miss it.
+      return true
     } catch {
       return false
     }
   }
 
   async waitForWeChatWindow(maxWaitSeconds = 15): Promise<boolean> {
-    for (let i = 0; i < maxWaitSeconds * 2; i++) {
+    for (let i = 0; i < maxWaitSeconds * 20; i++) {
       if (this.isWeChatRunning()) {
         return true
       }
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 50))
     }
     return false
+  }
+
+  private findPreferredDbForKeyValidation(dbRootPath: string): string {
+    const roots: string[] = []
+    const pushRoot = (value?: string) => {
+      if (value && existsSync(value) && !roots.includes(value)) roots.push(value)
+    }
+    pushRoot(this.detectCurrentAccount(dbRootPath, 60)?.dbPath)
+    pushRoot(dbRootPath)
+
+    const relativeCandidates = [
+      join('db_storage', 'session', 'session.db'),
+      join('db_storage', 'contact', 'contact.db'),
+      join('session', 'session.db'),
+      join('contact', 'contact.db'),
+    ]
+    for (const root of roots) {
+      for (const relativePath of relativeCandidates) {
+        const candidate = join(root, relativePath)
+        if (existsSync(candidate)) return candidate
+      }
+    }
+    return dbRootPath
   }
 
   async autoGetDbKey(
@@ -185,6 +210,16 @@ export class WxKeyServiceMac {
     dbRootPath?: string
   ): Promise<DbKeyResult> {
     try {
+      const validationDb = dbRootPath ? this.findPreferredDbForKeyValidation(dbRootPath) : undefined
+      if (validationDb) {
+        onStatus?.('正在检查微信本机崩溃转储中的已验证密钥...', 0)
+        const dumpScan = await this.getDbKeyFromCrashDumps(validationDb, timeoutMs)
+        if (dumpScan.key) {
+          onStatus?.('已从微信本机转储获取并验证数据库密钥', 1)
+          return { success: true, key: dumpScan.key }
+        }
+      }
+
       const sipStatus = await this.checkSipStatus()
       if (sipStatus.enabled) {
         return {
@@ -196,6 +231,15 @@ export class WxKeyServiceMac {
       onStatus?.('正在获取数据库密钥...', 0)
       const pid = this.getWeChatPid()
       if (pid && dbRootPath) {
+        // The native helper starts first because the 4.1.x raw UUID key can
+        // disappear in well under a second after the process becomes visible.
+        onStatus?.('正在使用开源原生助手捕获启动阶段密钥...', 0)
+        const nativeOpenScan = await this.getDbKeyByOpenMemoryHelper(pid, validationDb!, timeoutMs)
+        if (nativeOpenScan.key) {
+          onStatus?.('开源原生扫描已获取候选密钥', 1)
+          return { success: true, key: nativeOpenScan.key }
+        }
+
         onStatus?.('正在使用开源只读内存扫描匹配数据库 salt...', 0)
         const openScan = await scanMacosMemoryForDbKey(pid, dbRootPath, (bytes) => {
           onStatus?.(`开源扫描已读取 ${Math.round(bytes / 1024 / 1024)} MB...`, 0)
@@ -203,13 +247,6 @@ export class WxKeyServiceMac {
         if (openScan.key) {
           onStatus?.('开源内存扫描已获取候选密钥', 1)
           return { success: true, key: openScan.key }
-        }
-
-        onStatus?.('正在使用开源原生助手继续扫描...', 0)
-        const nativeOpenScan = await this.getDbKeyByOpenMemoryHelper(pid, dbRootPath, timeoutMs)
-        if (nativeOpenScan.key) {
-          onStatus?.('开源原生扫描已获取候选密钥', 1)
-          return { success: true, key: nativeOpenScan.key }
         }
       }
 
@@ -221,6 +258,41 @@ export class WxKeyServiceMac {
       logMacKey('error', '[WxKeyServiceMac] Stack:', e.stack)
       onStatus?.(`获取失败: ${e.message}`, 2)
       return { success: false, error: e.message }
+    }
+  }
+
+  private async getDbKeyFromCrashDumps(
+    dbRootPath: string,
+    timeoutMs: number
+  ): Promise<{ key?: string }> {
+    const dumpPath = join(
+      homedir(),
+      'Library', 'Containers', 'com.tencent.xinWeChat', 'Data', 'Documents',
+      'app_data', 'crashinfo', 'completed'
+    )
+    if (!existsSync(dumpPath)) return {}
+    try {
+      const helperPath = this.getOpenMemoryScanHelperPath()
+      let stdout = ''
+      try {
+        const result = await execFileAsync(helperPath, ['--dump', dumpPath, dbRootPath], {
+          timeout: Math.max(timeoutMs, 30_000),
+          maxBuffer: 1024 * 1024
+        })
+        stdout = result.stdout
+      } catch (error: any) {
+        stdout = typeof error?.stdout === 'string' ? error.stdout : ''
+      }
+      const payloadLine = stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean).at(-1)
+      if (!payloadLine) return {}
+      const payload = JSON.parse(payloadLine)
+      const key = typeof payload?.key === 'string' && /^[0-9a-fA-F]{64}$/.test(payload.key)
+        ? payload.key.toLowerCase()
+        : undefined
+      return { key }
+    } catch (error: any) {
+      logMacKey('warn', '[WxKeyServiceMac] crash dump key scan unavailable:', error?.message || error)
+      return {}
     }
   }
 
