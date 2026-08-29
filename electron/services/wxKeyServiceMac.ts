@@ -6,6 +6,7 @@ import { promisify } from 'util'
 import crypto from 'crypto'
 import { homedir } from 'os'
 import { scanMacosMemoryForDbKey } from './macosMemoryKeyScanner'
+import { DB_PAGE_SIZE, parseLldbKeyBytes, validateRawDbKey } from './macosLldbKeyCapture'
 
 const execFileAsync = promisify(execFile)
 const MAC_KEY_DEBUG = process.env.CIPHERTALK_MAC_KEY_DEBUG === '1'
@@ -181,6 +182,153 @@ export class WxKeyServiceMac {
     return false
   }
 
+  /** Poll for the WeChat main process PID, returning as early as possible. */
+  private async waitForWeChatPid(maxWaitMs = 15_000): Promise<number | null> {
+    const deadline = Date.now() + maxWaitMs
+    for (;;) {
+      const pid = this.getWeChatPid()
+      if (pid) return pid
+      if (Date.now() >= deadline) return null
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }
+
+  private getWeChatExecutable(customPath?: string): string {
+    const requested = String(customPath || '').trim()
+    if (requested && existsSync(requested)) {
+      if (requested.endsWith('.app')) return join(requested, 'Contents', 'MacOS', 'WeChat')
+      return requested
+    }
+    return '/Applications/WeChat.app/Contents/MacOS/WeChat'
+  }
+
+  private async resumeWeChatAfterDebugger(): Promise<void> {
+    try {
+      await execFileAsync('/usr/bin/pkill', ['-CONT', '-x', 'WeChat'])
+    } catch {
+      // No matching process is normal when LLDB could not launch WeChat.
+    }
+  }
+
+  /**
+   * Capture the raw account key at the moment WeChat asks Apple's CommonCrypto
+   * to derive a WCDB key, then verify it against the selected account database.
+   *
+   * The raw key only exists in memory during derivation (a read-only scan of an
+   * already-logged-in process cannot find it), so we relaunch WeChat under our
+   * control and attach LLDB with a conditional breakpoint on the exact
+   * `CCKeyDerivationPBKDF` call WeChat uses for WCDB:
+   *   CCKeyDerivationPBKDF(kCCPBKDF2, rawKey[32], 32, salt[16], 16,
+   *                        kCCPRFHmacAlgSHA512(=5), 256000, derived, 32)
+   * On ARM64 the raw key is at $x1 and the file salt at $x3. Every database of an
+   * account is encrypted with the SAME raw key (only the per-file salt differs),
+   * so any matching derivation yields the usable key; we verify the captured
+   * bytes against the selected account database before returning.
+   *
+   * This is source-only and account-independent: no CipherTalk DLL or persisted
+   * key cache is involved.
+   */
+  async captureDbKeyOnLaunch(
+    customPath: string | undefined,
+    dbRootPath: string,
+    timeoutMs = 60_000,
+    onStatus?: (message: string, level: number) => void
+  ): Promise<DbKeyResult> {
+    const validationDb = this.findPreferredDbForKeyValidation(dbRootPath)
+    if (!existsSync(validationDb)) return { success: false, error: '未找到用于密钥校验的微信数据库' }
+    if (!existsSync('/usr/bin/lldb')) return { success: false, error: '系统未安装 LLDB（需要 Apple Command Line Tools）' }
+
+    const page = readFileSync(validationDb).subarray(0, DB_PAGE_SIZE)
+    if (page.length !== DB_PAGE_SIZE) return { success: false, error: '微信数据库首页不完整' }
+
+    // Match any WCDB key derivation. We intentionally do NOT pin the salt to one
+    // database: WeChat opens several databases at startup in an unpredictable
+    // order, and pinning the salt made the breakpoint miss the first (and often
+    // only) derivation. The captured key is verified against the account
+    // database afterwards, which is what actually guarantees correctness.
+    const condition = ['$x2 == 32', '$x4 == 16', '$x5 == 5', '$x6 == 256000'].join(' && ')
+    const finishCommands = [
+      '-o', 'memory read --force --format x --size 1 --count 32 $x1',
+      '-o', 'process detach',
+      '-o', 'quit'
+    ]
+    // Attach to a *running* WeChat (started via LaunchServices) rather than
+    // launching the executable directly under LLDB: the sandboxed, hardened
+    // WeChat app only initializes its data container correctly when launched by
+    // LaunchServices, so `target create + run` frequently fails to reach the
+    // real database open.
+    const runLldb = async (pid: number, timeout: number): Promise<string> => {
+      const args = [
+        '--no-lldbinit', '--batch',
+        '-o', `process attach --pid ${pid}`,
+        '-o', 'breakpoint set --name CCKeyDerivationPBKDF',
+        '-o', `breakpoint modify --condition '${condition}' 1`,
+        '-o', 'continue',
+        ...finishCommands
+      ]
+      try {
+        const result = await execFileAsync('/usr/bin/lldb', args, {
+          encoding: 'utf8',
+          timeout: Math.max(15_000, timeout),
+          maxBuffer: 4 * 1024 * 1024
+        })
+        return result.stdout
+      } catch (error: any) {
+        return typeof error?.stdout === 'string' ? error.stdout : ''
+      }
+    }
+
+    // Relaunch WeChat ourselves so the databases are (re)opened while the
+    // debugger is armed.
+    if (this.isWeChatRunning()) {
+      onStatus?.('正在重启微信以捕获密钥派生...', 0)
+      this.killWeChat()
+      await this.waitForWeChatExit(20)
+    }
+    onStatus?.('正在启动微信...', 0)
+    if (!(await this.launchWeChat(customPath))) return { success: false, error: '启动微信失败' }
+
+    const startedAt = Date.now()
+    let pid = await this.waitForWeChatPid(15_000)
+    if (!pid) {
+      await this.resumeWeChatAfterDebugger()
+      return { success: false, error: '微信启动后未检测到主进程' }
+    }
+
+    onStatus?.('已挂载调试器，正在捕获密钥派生（若微信停在登录页，请扫码登录并进入任意聊天）...', 0)
+
+    let key: Buffer | null = null
+    // `continue` blocks until the breakpoint fires (or the timeout kills LLDB),
+    // so this loop costs nothing while waiting. It re-attaches when WeChat
+    // replaces its process or when a stray derivation fails verification.
+    while (Date.now() - startedAt < timeoutMs) {
+      const remaining = timeoutMs - (Date.now() - startedAt)
+      const output = await runLldb(pid, remaining)
+      const candidate = parseLldbKeyBytes(output)
+      if (candidate && validateRawDbKey(validationDb, candidate)) {
+        key = candidate
+        break
+      }
+      await this.resumeWeChatAfterDebugger()
+      const nextPid = this.getWeChatPid()
+      if (!nextPid) break
+      pid = nextPid
+      // Guard against a fast-failing attach (e.g. transient permission error)
+      // turning the retry loop into a busy spin.
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+
+    await this.resumeWeChatAfterDebugger()
+    if (!key) {
+      return {
+        success: false,
+        error: '未捕获到与当前账号数据库匹配的密钥派生调用，请确认微信已登录该账号并进入任意聊天后重试'
+      }
+    }
+    onStatus?.('已捕获并验证当前账号数据库密钥', 1)
+    return { success: true, key: key.toString('hex') }
+  }
+
   private findPreferredDbForKeyValidation(dbRootPath: string): string {
     const roots: string[] = []
     const pushRoot = (value?: string) => {
@@ -211,8 +359,25 @@ export class WxKeyServiceMac {
   ): Promise<DbKeyResult> {
     try {
       const validationDb = dbRootPath ? this.findPreferredDbForKeyValidation(dbRootPath) : undefined
+      const sipStatus = await this.checkSipStatus()
+      onStatus?.('正在获取数据库密钥...', 0)
+      const pid = this.getWeChatPid()
+      if (!sipStatus.enabled && pid && dbRootPath && validationDb) {
+        // The native helper starts first because the 4.1.x raw UUID key can
+        // disappear in well under a second after the process becomes visible.
+        onStatus?.('正在使用开源原生助手捕获启动阶段密钥...', 0)
+        const nativeOpenScan = await this.getDbKeyByOpenMemoryHelper(pid, validationDb, timeoutMs)
+        if (nativeOpenScan.key) {
+          onStatus?.('开源原生扫描已获取候选密钥', 1)
+          return { success: true, key: nativeOpenScan.key }
+        }
+      }
+
+      // Dumps are a useful cache fallback, but they must never run before the
+      // live scan: on a brand-new account there is no matching dump yet and the
+      // delay loses WeChat's short-lived startup key window.
       if (validationDb) {
-        onStatus?.('正在检查微信本机崩溃转储中的已验证密钥...', 0)
+        onStatus?.('实时捕获未命中，正在检查微信本机崩溃转储...', 0)
         const dumpScan = await this.getDbKeyFromCrashDumps(validationDb, timeoutMs)
         if (dumpScan.key) {
           onStatus?.('已从微信本机转储获取并验证数据库密钥', 1)
@@ -220,7 +385,6 @@ export class WxKeyServiceMac {
         }
       }
 
-      const sipStatus = await this.checkSipStatus()
       if (sipStatus.enabled) {
         return {
           success: false,
@@ -228,18 +392,7 @@ export class WxKeyServiceMac {
         }
       }
 
-      onStatus?.('正在获取数据库密钥...', 0)
-      const pid = this.getWeChatPid()
       if (pid && dbRootPath) {
-        // The native helper starts first because the 4.1.x raw UUID key can
-        // disappear in well under a second after the process becomes visible.
-        onStatus?.('正在使用开源原生助手捕获启动阶段密钥...', 0)
-        const nativeOpenScan = await this.getDbKeyByOpenMemoryHelper(pid, validationDb!, timeoutMs)
-        if (nativeOpenScan.key) {
-          onStatus?.('开源原生扫描已获取候选密钥', 1)
-          return { success: true, key: nativeOpenScan.key }
-        }
-
         onStatus?.('正在使用开源只读内存扫描匹配数据库 salt...', 0)
         const openScan = await scanMacosMemoryForDbKey(pid, dbRootPath, (bytes) => {
           onStatus?.(`开源扫描已读取 ${Math.round(bytes / 1024 / 1024)} MB...`, 0)

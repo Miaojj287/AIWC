@@ -56,45 +56,26 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
     ctx.getLogService()?.info('WxKey', '开始获取微信密钥', { customWechatPath })
     if (process.platform === 'darwin') {
       try {
-        const isRunning = wxKeyServiceMac.isWeChatRunning()
-        if (isRunning) {
-          event.sender.send('wxkey:status', { status: '检测到微信正在运行，正在关闭微信...', level: 0 })
-          wxKeyServiceMac.killWeChat()
+        if (!dbPath) return { success: false, error: '缺少数据库路径，无法定位当前账号数据库' }
 
-          const exited = await wxKeyServiceMac.waitForWeChatExit(20)
-          if (!exited) {
-            return { success: false, error: '未能自动关闭微信，请先手动退出微信后重试' }
-          }
-
-          event.sender.send('wxkey:status', { status: '微信已关闭，正在重新启动微信...', level: 0 })
-          const relaunched = await wxKeyServiceMac.launchWeChat(customWechatPath)
-          if (!relaunched) {
-            return { success: false, error: '微信关闭后自动重启失败' }
-          }
-
-          event.sender.send('wxkey:status', { status: '微信已重新启动，等待主进程就绪...', level: 0 })
-          const ready = await wxKeyServiceMac.waitForWeChatWindow(20)
-          if (!ready) {
-            return { success: false, error: '微信已重新启动，但未检测到可用主进程，请确认微信已完成启动并显示主窗口' }
-          }
-        } else {
-          event.sender.send('wxkey:status', { status: '未检测到微信主进程，正在尝试启动微信...', level: 0 })
-
-          const launched = await wxKeyServiceMac.launchWeChat(customWechatPath)
-          if (!launched) {
-            return { success: false, error: '未找到微信主进程，且自动启动微信失败' }
-          }
-
-          event.sender.send('wxkey:status', { status: '微信已启动，等待主进程就绪...', level: 0 })
-          const ready = await wxKeyServiceMac.waitForWeChatWindow(20)
-          if (!ready) {
-            return { success: false, error: '微信已启动，但未检测到可用主进程，请确认微信已完成启动并显示主窗口' }
-          }
+        const reportStatus = (status: string, level: number) => {
+          event.sender.send('wxkey:status', { status, level })
         }
 
-        const result = await wxKeyServiceMac.autoGetDbKey(180_000, (status, level) => {
-          event.sender.send('wxkey:status', { status, level })
-        }, dbPath)
+        // 主方案：重启微信并在其派生 WCDB 密钥的瞬间用 LLDB 断点捕获原始密钥。
+        // captureDbKeyOnLaunch 会自行关闭/启动微信，捕获后微信保持运行。
+        let result = await wxKeyServiceMac.captureDbKeyOnLaunch(
+          customWechatPath,
+          dbPath,
+          180_000,
+          reportStatus
+        )
+
+        // 回退方案：断点未命中时，对仍在运行的微信做一次只读内存扫描兜底。
+        if (!result.success && wxKeyServiceMac.isWeChatRunning()) {
+          event.sender.send('wxkey:status', { status: '断点捕获未命中，正在尝试只读内存扫描兜底...', level: 0 })
+          result = await wxKeyServiceMac.autoGetDbKey(180_000, reportStatus, dbPath)
+        }
 
         if (!result.success) {
           ctx.getLogService()?.warn('WxKey', 'macOS 数据库密钥获取失败', { error: result.error })

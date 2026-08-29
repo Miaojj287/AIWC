@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseLldbKeyBytes, validateRawDbKey } from '../electron/services/macosLldbKeyCapture'
 
 if (process.platform !== 'darwin') {
   console.log(JSON.stringify({ skipped: true, reason: 'macOS only' }))
@@ -88,6 +89,21 @@ try {
     }
     const rawMetadata = JSON.parse(rawFirstLine.split(/\r?\n/)[0])
     writeFileSync(join(dbFixtureDir, 'fixture.db'), createEncryptedV4FirstPage(Buffer.from(rawKeyHex, 'hex')))
+    if (!validateRawDbKey(join(dbFixtureDir, 'fixture.db'), Buffer.from(rawKeyHex, 'hex'))) {
+      throw new Error('LLDB raw-key database validation fixture failed')
+    }
+    if (validateRawDbKey(join(dbFixtureDir, 'fixture.db'), Buffer.alloc(32, 0xaa))) {
+      throw new Error('LLDB raw-key validation accepted an invalid key')
+    }
+    const lldbFixture = [
+      '(lldb) memory read --force --format x --size 1 --count 32 $x1',
+      `0x1000: ${rawKeyHex.match(/.{2}/g)!.slice(0, 16).map(byte => `0x${byte}`).join(' ')}`,
+      `0x1010: ${rawKeyHex.match(/.{2}/g)!.slice(16).map(byte => `0x${byte}`).join(' ')}`,
+      '(lldb) process detach'
+    ].join('\n')
+    if (parseLldbKeyBytes(lldbFixture)?.toString('hex') !== rawKeyHex) {
+      throw new Error('LLDB memory output parser fixture failed')
+    }
     const rawHelper = spawn(helperPath, [String(rawMetadata.pid), join(dbFixtureDir, 'fixture.db')], {
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -124,6 +140,7 @@ try {
     matchedDbFixtureKey: true,
     matchedRawV4DbFixtureKey: true,
     matchedCrashDumpDbFixtureKey: true,
+    matchedLldbCaptureFixtureKey: true,
     keyExposed: false
   }))
 } finally {

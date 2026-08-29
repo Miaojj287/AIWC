@@ -431,21 +431,24 @@ int main(int argc, char **argv) {
   uint64_t bytes_read = 0;
   uint64_t regions = 0;
   char key[65] = {0};
-  RawKeySet raw_keys = {0};
+  size_t raw_candidate_count = 0;
 
   while (address < 0x7fffffffffffULL) {
     mach_vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info = {0};
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    vm_region_extended_info_data_t info = {0};
+    mach_msg_type_number_t count = VM_REGION_EXTENDED_INFO_COUNT;
     mach_port_t object = MACH_PORT_NULL;
-    kern_return_t kr = mach_vm_region(task, &address, &size, VM_REGION_BASIC_INFO_64,
+    kern_return_t kr = mach_vm_region(task, &address, &size, VM_REGION_EXTENDED_INFO,
                                       (vm_region_info_t)&info, &count, &object);
     if (kr != KERN_SUCCESS) break;
     if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
     mach_vm_address_t next = address + size;
 
+    // SQLCipher/WCDB key buffers live in anonymous writable allocations. File-
+    // backed mappings contain thousands of unrelated UUID pairs and used to
+    // fill the global candidate pool before the real key was reached.
     if ((info.protection & VM_PROT_READ) && (info.protection & VM_PROT_WRITE) &&
-        size > 0 && size <= MAX_REGION_SIZE) {
+        info.external_pager == 0 && size > 0 && size <= MAX_REGION_SIZE) {
       regions++;
       mach_vm_size_t offset = 0;
       size_t trailing = 0;
@@ -462,7 +465,19 @@ int main(int argc, char **argv) {
         bytes_read += actual;
         size_t searchable = trailing + (size_t)actual;
         mach_vm_address_t searchable_address = address + offset - requested - trailing;
-        collect_raw_v4_keys(chunk, searchable, searchable_address, &raw_keys);
+        RawKeySet chunk_keys = {0};
+        collect_raw_v4_keys(chunk, searchable, searchable_address, &chunk_keys);
+        raw_candidate_count += chunk_keys.count;
+        uint8_t raw_key[RAW_KEY_SIZE];
+        if (find_verified_raw_v4_key(&chunk_keys, &pages, raw_key)) {
+          printf("{\"success\":true,\"key\":\"");
+          for (size_t i = 0; i < RAW_KEY_SIZE; i++) printf("%02x", raw_key[i]);
+          printf("\",\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
+                 salts.count, regions, bytes_read, raw_candidate_count);
+          free(chunk);
+          mach_port_deallocate(mach_task_self(), task);
+          return 0;
+        }
         if (find_key(chunk, searchable, &salts, key)) {
           printf("{\"success\":true,\"key\":\"%s\",\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu}\n",
                  key, salts.count, regions, bytes_read);
@@ -477,21 +492,8 @@ int main(int argc, char **argv) {
     if (next <= address) break;
     address = next;
   }
-
-
-  uint8_t raw_key[RAW_KEY_SIZE];
-  if (find_verified_raw_v4_key(&raw_keys, &pages, raw_key)) {
-    printf("{\"success\":true,\"key\":\"");
-    for (size_t i = 0; i < RAW_KEY_SIZE; i++) printf("%02x", raw_key[i]);
-    printf("\",\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
-           salts.count, regions, bytes_read, raw_keys.count);
-    free(chunk);
-    mach_port_deallocate(mach_task_self(), task);
-    return 0;
-  }
-
   printf("{\"success\":false,\"attached\":true,\"saltCount\":%zu,\"regions\":%llu,\"bytes\":%llu,\"rawCandidates\":%zu}\n",
-         salts.count, regions, bytes_read, raw_keys.count);
+         salts.count, regions, bytes_read, raw_candidate_count);
   free(chunk);
   mach_port_deallocate(mach_task_self(), task);
   return 6;
