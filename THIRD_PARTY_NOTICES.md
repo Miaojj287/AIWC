@@ -15,6 +15,17 @@ The implementation is read-only and uses documented Windows process inspection
 APIs. It does not include or redistribute code from repositories removed by
 their authors or by GitHub.
 
+The Windows WeChat 4.1.13+ `Config.Cipher` object traversal and XOR blob
+decoding are adapted from:
+
+- Project: `fanyuantaier/wechatauto-replica`
+- Source: <https://github.com/fanyuantaier/wechatauto-replica>
+- Referenced file: `wechatauto/db.py`
+- License: Apache License 2.0
+
+The TypeScript adaptation is read-only and validates extracted candidates
+against the selected encrypted database before returning them.
+
 ## Tencent WCDB
 
 The reproducible open database bridge under `native/wcdb-open` builds Tencent

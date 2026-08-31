@@ -4,7 +4,9 @@ import {
   extractWindowsRawV4KeyCandidates,
   parseWeChatTasklist,
   readEncryptedDbSalt,
+  verifyWindowsDirectDbKey,
 } from '../electron/services/windowsMemoryKeyScanner.ts'
+import { createCipheriv, randomBytes } from 'node:crypto'
 import { extractMemoryDbKeyCandidates } from '../electron/services/memoryDbKeyPattern.ts'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -49,6 +51,17 @@ assert.deepEqual(parseWeChatTasklist(tasklist), [
   { pid: 8556, workingSetKb: 441468 },
   { pid: 1036, workingSetKb: 22028 },
 ])
+
+const directKey = randomBytes(32)
+const directIv = randomBytes(16)
+const directPlain = Buffer.alloc(4000)
+Buffer.from([0x10, 0x00, 0x01, 0x01, 0x50, 0x40, 0x20, 0x20]).copy(directPlain)
+const directCipher = createCipheriv('aes-256-cbc', directKey, directIv)
+directCipher.setAutoPadding(false)
+const directEncrypted = Buffer.concat([directCipher.update(directPlain), directCipher.final()])
+const directPage = Buffer.concat([randomBytes(16), directEncrypted, directIv, Buffer.alloc(64)])
+assert.equal(verifyWindowsDirectDbKey(directKey, directPage), true)
+assert.equal(verifyWindowsDirectDbKey(randomBytes(32), directPage), false)
 
 const tempDir = mkdtempSync(join(tmpdir(), 'aiwc-key-scan-'))
 try {

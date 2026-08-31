@@ -35,7 +35,6 @@ export interface WxAccountInfo {
 
 export class WxKeyService {
   private rawCandidateProcessSignature = ''
-  private readonly rawCandidateBaselines = new Set<string>()
   private readonly seenRawCandidatesByDb = new Map<string, Set<string>>()
 
   /**
@@ -162,10 +161,14 @@ export class WxKeyService {
     try {
       spawn(wechatPath, [], { detached: true, stdio: 'ignore' }).unref()
 
-      // 等待微信启动
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
-      return this.isWeChatRunning()
+      // The database key is materialized very early during WeChat startup.
+      // Return as soon as the first process exists instead of sleeping through
+      // the short capture window.
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (this.isWeChatRunning()) return true
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      return false
     } catch {
       return false
     }
@@ -200,7 +203,6 @@ export class WxKeyService {
     const processSignature = String(pids[0])
     if (processSignature !== this.rawCandidateProcessSignature) {
       this.rawCandidateProcessSignature = processSignature
-      this.rawCandidateBaselines.clear()
       this.seenRawCandidatesByDb.clear()
     }
 
@@ -226,14 +228,13 @@ export class WxKeyService {
     }
     // A scan is synchronous in the Electron main process. Bound every round so
     // the IPC handler can enforce its overall timeout and update the UI.
-    const deadline = Date.now() + 15_000
-    for (const pid of pids.slice(0, 1)) {
+    const deadline = Date.now() + 5_000
+    for (const pid of pids.slice(0, 2)) {
       if (Date.now() >= deadline) break
       try {
         const scan = scanWindowsMemoryForDbKey(pid, contactDbPath, {
           deadline,
           seenRawCandidates,
-          validateNewRawCandidates: this.rawCandidateBaselines.has(dbIdentity),
         })
         aggregate.dbOk ||= scan.dbOk
         aggregate.opened += scan.opened
@@ -245,7 +246,6 @@ export class WxKeyService {
         console.warn(`微信进程 ${pid} 内存扫描未完成:`, e)
       }
     }
-    this.rawCandidateBaselines.add(dbIdentity)
     return aggregate
   }
 
@@ -272,7 +272,6 @@ export class WxKeyService {
   /** 开放扫描器没有常驻原生状态。 */
   dispose(): void {
     this.rawCandidateProcessSignature = ''
-    this.rawCandidateBaselines.clear()
     this.seenRawCandidatesByDb.clear()
   }
 

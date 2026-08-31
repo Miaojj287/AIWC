@@ -200,6 +200,39 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
           ctx.getLogService()?.info('WxKey', '直接读取到账号信息（未通过目录验证），返回密钥与账号', { bindWxid })
           return { success: true, key: account.dbKey, account: outAccount }
         }
+
+        // WeChat 4.1.13+ no longer exposes the legacy global_config account
+        // structure used by scanAccount(), but its per-database key remains in
+        // the read-only Config.Cipher object. Try the active account database
+        // before asking the user to restart WeChat; this path also validates
+        // the candidate against that exact encrypted contact.db.
+        if (dbPath) {
+          const runningWxids: string[] = []
+          const pushRunningWxid = (value?: string | null) => {
+            const wxid = String(value || '').trim()
+            if (wxid && !runningWxids.includes(wxid)) runningWxids.push(wxid)
+          }
+          const active = wxKeyService.detectCurrentAccount(dbPath, 10) || wxKeyService.detectCurrentAccount(dbPath, 60)
+          pushRunningWxid(active?.wxid)
+          for (const wxid of safeScanWxids(dbPath)) pushRunningWxid(wxid)
+          for (const wxid of runningWxids) {
+            const contactDb = [
+              join(dbPath, wxid, 'db_storage', 'contact', 'contact.db'),
+              join(dbPath, 'db_storage', 'contact', 'contact.db'),
+            ].find(existsSync)
+            if (!contactDb) continue
+            event.sender.send('wxkey:status', { status: `正在读取并验证账号密钥: ${wxid}`, level: 1 })
+            const diag = wxKeyService.scanDbKeyDiag(contactDb)
+            if (diag?.key) {
+              ctx.getLogService()?.info('WxKey', '已登录微信 Config.Cipher 密钥获取成功', {
+                wxid,
+                keyLength: diag.key.length,
+                candidates: diag.candidates,
+              })
+              return { success: true, key: diag.key, validatedWxid: wxid, account: null }
+            }
+          }
+        }
         if (options?.allowRestart === false) {
           ctx.getLogService()?.info('WxKey', '直接读取未命中，等待用户确认是否重启微信')
           return {
