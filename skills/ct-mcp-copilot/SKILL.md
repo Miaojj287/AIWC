@@ -1,12 +1,12 @@
 ---
 name: ct-mcp-copilot
 version: '1.2.0'
-description: Use CipherTalk MCP as an AI copilot for health/status checks, contact lookup, session resolution, message search, memory search, context retrieval, moments timeline exploration, and chat export. Trigger when the user provides partial, fuzzy, mistaken, or incomplete clues, or wants the AI to proactively dig for more local data instead of stopping after one failed query.
+description: Use AIWC MCP as an AI copilot for health/status checks, contact lookup, session resolution, message search, memory search, context retrieval, moments timeline exploration, and chat export. Trigger when the user provides partial, fuzzy, mistaken, or incomplete clues, or wants the AI to proactively dig for more local data instead of stopping after one failed query.
 ---
 
 # ct-mcp-copilot
 
-Use CipherTalk MCP like a patient investigator, not like a rigid database client.
+Use AIWC MCP like a patient investigator, not like a rigid database client.
 
 ## Core behavior
 
@@ -20,7 +20,7 @@ Use CipherTalk MCP like a patient investigator, not like a rigid database client
 
 ## Tool coverage
 
-This skill is expected to use all currently exposed CipherTalk MCP tools when relevant:
+This skill is expected to use all currently exposed AIWC MCP tools when relevant:
 
 - `health_check`
 - `get_status`
@@ -61,13 +61,13 @@ When a message item has `kind="voice"`:
 When the user gives a local audio file path:
 
 - Use `transcribe_audio_file` directly.
-- If the tool returns `STT_NOT_READY`, tell the user to download a local STT model or complete online STT settings in CipherTalk.
+- If the tool returns `STT_NOT_READY`, tell the user to download a local STT model or complete online STT settings in AIWC.
 
 ## Health and status routing
 
 Use `health_check` when:
 
-- the user asks whether CipherTalk MCP is alive
+- the user asks whether AIWC MCP is alive
 - the host just connected
 - you only need a lightweight liveness check
 

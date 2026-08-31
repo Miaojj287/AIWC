@@ -200,7 +200,7 @@ function McpPage() {
   const [saving, setSaving] = useState(false)
   const [exportingSkillZip, setExportingSkillZip] = useState<string | null>(null)
   const [launchConfig, setLaunchConfig] = useState<McpLaunchConfig>({
-    command: 'npm', args: ['run', 'mcp'], cwd: 'D:/CipherTalk', mode: 'dev',
+    command: 'npm', args: ['run', 'mcp'], cwd: 'D:/AIWC', mode: 'dev',
   })
 
   const [skills, setSkills] = useState<SkillInfo[]>([])
@@ -264,7 +264,7 @@ function McpPage() {
   }, [topTab, loadIntegrationData])
 
   const mcpServerJsonTemplate = useMemo(() => JSON.stringify({
-    mcpServers: { ciphertalk: { command: launchConfig.command, args: launchConfig.args, cwd: launchConfig.cwd } },
+    mcpServers: { aiwc: { command: launchConfig.command, args: launchConfig.args, cwd: launchConfig.cwd } },
   }, null, 2), [launchConfig])
 
   const handleSave = async () => {
@@ -344,14 +344,14 @@ function McpPage() {
   const downloadSkillTemplate = async () => {
     try {
       const zip = new JSZip()
-      const root = zip.folder('ciphertalk-skill-template')
-      root?.file('SKILL.md', `---\nname: ciphertalk-example\nversion: '1.0.0'\ndescription: Describe what this skill helps with.\n---\n\n# CipherTalk Example Skill\n\n## When to use\nUse this skill when...\n\n## Workflow\n1. Read the user request.\n2. Use the relevant CipherTalk context.\n3. Return a concise answer.\n`)
+      const root = zip.folder('aiwc-skill-template')
+      root?.file('SKILL.md', `---\nname: aiwc-example\nversion: '1.0.0'\ndescription: Describe what this skill helps with.\n---\n\n# AIWC Example Skill\n\n## When to use\nUse this skill when...\n\n## Workflow\n1. Read the user request.\n2. Use the relevant AIWC context.\n3. Return a concise answer.\n`)
       root?.folder('references')?.file('README.md', '# References\n\nPut supporting docs here when the skill needs them.\n')
       const blob = await zip.generateAsync({ type: 'blob' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = 'ciphertalk-skill-template.zip'
+      link.download = 'aiwc-skill-template.zip'
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -844,7 +844,7 @@ function McpPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <Typography type="h5">MCP 服务端</Typography>
-                    <Description>CipherTalk 作为 MCP 服务端对外暴露工具。</Description>
+                    <Description>AIWC 作为 MCP 服务端对外暴露工具。</Description>
                   </div>
                   <Tooltip delay={0}>
                     <Button variant="primary" isIconOnly isPending={saving} isDisabled={loading || saving} onPress={handleSave}>
@@ -937,7 +937,7 @@ function McpPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <Typography type="h5">Skills</Typography>
-                    <Description>管理 CipherTalk 使用的 Skills，也可以导出给外部 Agent。</Description>
+                    <Description>管理 AIWC 使用的 Skills，也可以导出给外部 Agent。</Description>
                   </div>
                   <ButtonGroup variant="tertiary" size="sm">
                     <Button onPress={downloadSkillTemplate}>

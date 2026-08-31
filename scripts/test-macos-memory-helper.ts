@@ -48,7 +48,7 @@ function createEncryptedV4FirstPage(rawKey: Buffer): Buffer {
 }
 
 const fixture = spawn(process.execPath, ['-e', fixtureSource], { stdio: ['ignore', 'pipe', 'ignore'] })
-const dbFixtureDir = mkdtempSync(join(tmpdir(), 'ciphertalk-open-helper-test-'))
+const dbFixtureDir = mkdtempSync(join(tmpdir(), 'aiwc-open-helper-test-'))
 try {
   let firstLine = ''
   for await (const chunk of fixture.stdout!) {

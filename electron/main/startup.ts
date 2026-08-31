@@ -307,8 +307,8 @@ export async function startLocalIntegrationServices(ctx: MainProcessContext): Pr
   })
 
   // 手机遥控端网关：默认关闭，设置页「设备连接 → 手机遥控」开启；
-  // 开发时也可用环境变量 CIPHERTALK_REMOTE_GATEWAY=1 强开
-  const remoteGatewayEnabled = process.env.CIPHERTALK_REMOTE_GATEWAY === '1'
+  // 开发时也可用环境变量 AIWC_REMOTE_GATEWAY=1 强开
+  const remoteGatewayEnabled = process.env.AIWC_REMOTE_GATEWAY === '1'
     || configService?.get('remoteGatewayEnabled') === true
   if (remoteGatewayEnabled) {
     const result = await startRemoteControl(ctx)

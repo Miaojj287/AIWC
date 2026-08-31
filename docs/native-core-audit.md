@@ -1,4 +1,4 @@
-# CipherTalk 原生核心审计
+# AIWC 原生核心审计
 
 审计日期：2026-08-19
 
@@ -21,7 +21,7 @@ source-available，而不是 OSI 意义的开源软件。这里的“open-only�
 | --- | --- | --- |
 | `resources/macos/libWCDBOpen.dylib` | `994b1c4dbf02ddce2ed794c51f73db695814e628ad0883af9f4a00c35b74c932` | `native/wcdb-open/`；官方 WCDB 2.1.15 + 开放 C Bridge |
 | `resources/macos/wechat_memory_scan_helper` | `8f1cb29108ed4b45b55881ab3ba2545b9c26d2351fa6257cf6778ab5efb94e4a` | `native/macos-memory-scan/main.c` |
-| `resources/wedecrypt/ciphertalk-image-native-macos-arm64.node` | `a05b2e55ecd46e1ebf583c0a563ccd24a672ab9994fe5538da68e72c39ab9518` | `native/image-decrypt/` Rust/N-API |
+| `resources/wedecrypt/aiwc-image-native-macos-arm64.node` | `a05b2e55ecd46e1ebf583c0a563ccd24a672ab9994fe5538da68e72c39ab9518` | `native/image-decrypt/` Rust/N-API |
 
 CLI 的三份 macOS 原生产物与上表逐字节相同。Windows 目录当前不分发旧二进制；
 必须先通过源码构建脚本生成 `wcdb_open.dll` 和图片 `.node`。
@@ -43,7 +43,7 @@ CLI 的三份 macOS 原生产物与上表逐字节相同。Windows 目录当前�
 ## 改名问题
 
 此前改名失败的根因不是 Authenticode 或 Apple 签名要求固定文件名，而是旧私有
-`wcdb_api` 在应用层检查 `ciphertalk.exe`、相邻 DLL、marker 和品牌路径。
+`wcdb_api` 在应用层检查 `aiwc.exe`、相邻 DLL、marker 和品牌路径。
 该桥现已删除。开放 WCDB Bridge 不检查宿主名称；MCP 启动、AppUserModelID、
 安装包名称检查也已改为从 `package.json` 动态读取。
 

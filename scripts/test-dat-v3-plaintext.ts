@@ -46,7 +46,7 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg)
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'ciphertalk-dat-v3-'))
+const dir = mkdtempSync(join(tmpdir(), 'aiwc-dat-v3-'))
 try {
   const xorKey = 0x73
   const jpeg = padToMinSize(JPEG_MIN)

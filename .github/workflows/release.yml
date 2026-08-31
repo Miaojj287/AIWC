@@ -131,7 +131,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ needs.prepare-meta.outputs.version }}"
-          $installer = "release/CipherTalk-$version-Setup.exe"
+          $installer = "release/AIWC-$version-Setup.exe"
           if (-not (Test-Path $installer)) {
             Write-Error "Installer not found: $installer"
             exit 1
@@ -142,7 +142,7 @@ jobs:
         with:
           name: release-binaries-windows
           path: |
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe
+            release/AIWC-${{ needs.prepare-meta.outputs.version }}-Setup.exe
             release/latest.yml
           if-no-files-found: error
 
@@ -201,7 +201,7 @@ jobs:
       - name: Validate build artifacts
         run: |
           version="${{ needs.prepare-meta.outputs.version }}"
-          dmg="release/CipherTalk-${version}-Setup.dmg"
+          dmg="release/AIWC-${version}-Setup.dmg"
           if [ ! -f "$dmg" ]; then
             echo "DMG not found: $dmg" >&2
             exit 1
@@ -212,7 +212,7 @@ jobs:
         with:
           name: release-binaries-macos
           path: |
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.dmg
+            release/AIWC-${{ needs.prepare-meta.outputs.version }}-Setup.dmg
             release/latest-mac.yml
           if-no-files-found: error
 
@@ -301,8 +301,8 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ needs.prepare-meta.outputs.version }}"
-          $installer = "release/CipherTalk-$version-Setup.exe"
-          $macInstaller = "release/CipherTalk-$version-Setup.dmg"
+          $installer = "release/AIWC-$version-Setup.exe"
+          $macInstaller = "release/AIWC-$version-Setup.dmg"
           if (-not (Test-Path $installer)) {
             Write-Error "Installer not found: $installer"
             exit 1
@@ -383,13 +383,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ needs.prepare-meta.outputs.tag }}
-          name: CipherTalk v${{ needs.prepare-meta.outputs.version }}
+          name: AIWC v${{ needs.prepare-meta.outputs.version }}
           body_path: release/release-body.md
           fail_on_unmatched_files: false
           overwrite_files: false
           files: |
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.exe
-            release/CipherTalk-${{ needs.prepare-meta.outputs.version }}-Setup.dmg
+            release/AIWC-${{ needs.prepare-meta.outputs.version }}-Setup.exe
+            release/AIWC-${{ needs.prepare-meta.outputs.version }}-Setup.dmg
             release/latest.yml
             release/latest-mac.yml
             release/force-update.json
@@ -462,19 +462,19 @@ jobs:
           $endpoint = "https://$($env:R2_ACCOUNT_ID).r2.cloudflarestorage.com"
           $bucket = "s3://$($env:R2_BUCKET_NAME)"
           $version = "${{ needs.prepare-meta.outputs.version }}"
-          $currentInstaller = "CipherTalk-$version-Setup.exe"
-          $currentMacInstaller = "CipherTalk-$version-Setup.dmg"
+          $currentInstaller = "AIWC-$version-Setup.exe"
+          $currentMacInstaller = "AIWC-$version-Setup.dmg"
 
           $existingInstallers = aws s3 ls $bucket --endpoint-url $endpoint | ForEach-Object {
             $line = $_.ToString().Trim()
-            if ($line -match 'CipherTalk-.*-Setup\.exe$') {
+            if ($line -match 'AIWC-.*-Setup\.exe$') {
               ($line -split '\s+')[-1]
             }
           } | Where-Object { $_ }
 
           $existingMacInstallers = aws s3 ls $bucket --endpoint-url $endpoint | ForEach-Object {
             $line = $_.ToString().Trim()
-            if ($line -match 'CipherTalk-.*-Setup\.dmg$') {
+            if ($line -match 'AIWC-.*-Setup\.dmg$') {
               ($line -split '\s+')[-1]
             }
           } | Where-Object { $_ }

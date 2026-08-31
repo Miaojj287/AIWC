@@ -22,14 +22,14 @@ export function getUserDataPath(): string {
   }
 
   if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'CipherTalk')
+    return path.join(os.homedir(), 'Library', 'Application Support', 'AIWC')
   }
   const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
-  return path.join(appData, 'ciphertalk')
+  return path.join(appData, 'aiwc')
 }
 
-export function getCipherTalkCodexHome(): string {
-  const override = String(process.env.CIPHERTALK_CODEX_HOME || '').trim()
+export function getAIWCCodexHome(): string {
+  const override = String(process.env.AIWC_CODEX_HOME || '').trim()
   return override || path.join(getUserDataPath(), 'codex-subscription')
 }
 

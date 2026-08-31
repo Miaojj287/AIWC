@@ -1,5 +1,5 @@
 import { delimiter, join } from 'path'
-import { getAppPath, getCipherTalkCodexHome, isElectronPackaged } from './runtimePaths'
+import { getAppPath, getAIWCCodexHome, isElectronPackaged } from './runtimePaths'
 
 function copyProcessEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
@@ -30,6 +30,6 @@ export function getElectronWorkerEnv(): NodeJS.ProcessEnv {
       ]
 
   env.NODE_PATH = Array.from(new Set([...packagedNodePaths, ...existingNodePaths])).join(delimiter)
-  env.CIPHERTALK_CODEX_HOME = getCipherTalkCodexHome()
+  env.AIWC_CODEX_HOME = getAIWCCodexHome()
   return env
 }

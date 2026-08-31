@@ -24,11 +24,11 @@ export function getDefaultCachePath(): string {
   const documentsPath = getDocumentsPath()
 
   if (process.platform === 'darwin') {
-    return join(documentsPath, 'CipherTalkData')
+    return join(documentsPath, 'AIWCData')
   }
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    return join(documentsPath, 'CipherTalkData')
+    return join(documentsPath, 'AIWCData')
   }
 
   const exePath = getExePath()
@@ -37,12 +37,12 @@ export function getDefaultCachePath(): string {
 
   if (process.platform === 'win32') {
     if (isOnCDrive) {
-      return join(documentsPath, 'CipherTalkData')
+      return join(documentsPath, 'AIWCData')
     }
-    return join(installDir, 'CipherTalkData')
+    return join(installDir, 'AIWCData')
   }
 
-  return join(getUserDataPath(), 'CipherTalkData')
+  return join(getUserDataPath(), 'AIWCData')
 }
 
 export function getBestCachePath(): CachePathResult {
@@ -65,7 +65,7 @@ export function getBestCachePath(): CachePathResult {
     if (existsSync(`${drive}:\\`)) {
       return {
         success: true,
-        path: join(`${drive}:\\`, 'CipherTalkDB'),
+        path: join(`${drive}:\\`, 'AIWCDB'),
         drive
       }
     }

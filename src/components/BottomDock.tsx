@@ -13,7 +13,7 @@ import RemotePhoneDialog from '@/components/RemotePhoneDialog'
 const HIDE_DELAY = 2500
 const EDGE_TRIGGER_PX = 8
 const WECHAT_LOGO_SRC = './微信logo.png'
-const CIPHERTALK_LOGO_SRC = './logo.png'
+const AIWC_LOGO_SRC = './logo.png'
 
 // 无背景图标：白色线条 + 细黑描边（四向 drop-shadow 叠出黑边），在玻璃上仍有对比
 function AppIcon({ Icon }: { Icon: IconComponent }) {
@@ -141,9 +141,9 @@ function BottomDock() {
     { id: 'data-management', name: '数据管理', icon: makeIcon(Database) },
     { id: 'mcp', name: 'MCP & Skills', icon: makeIcon(LogoMcp) },
     { id: 'settings', name: '设置', icon: makeIcon(Gear) },
-    { id: 'remote-phone', name: '密语 App', icon: (
+    { id: 'remote-phone', name: 'AIWC App', icon: (
       <div className="relative w-full h-full p-1">
-        <img src={CIPHERTALK_LOGO_SRC} alt="密语 App" className="h-full w-full object-contain" />
+        <img src={AIWC_LOGO_SRC} alt="AIWC App" className="h-full w-full object-contain" />
         <DeviceConnectStatusDot status={remoteConnected ? 'connected' : 'disconnected'} className="absolute right-[4%] top-[4%] size-[26%] ring-2 ring-white" />
       </div>
     ) },

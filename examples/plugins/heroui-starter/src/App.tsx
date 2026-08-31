@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Button, Card, Chip, Spinner, toast } from '@heroui/react'
-import type { CipherTalkAPI, SessionSummary } from 'ciphertalk-plugin-sdk'
+import type { AIWCAPI, SessionSummary } from 'aiwc-plugin-sdk'
 
 /**
  * 示例视图：真正的 HeroUI 组件 + 一次真实数据调用（读最近会话）。
  * api 由 main.tsx 在握手完成后注入。
  */
-export default function App({ api }: { api: CipherTalkAPI }) {
+export default function App({ api }: { api: AIWCAPI }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
 

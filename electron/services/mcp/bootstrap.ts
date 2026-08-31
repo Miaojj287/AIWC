@@ -1,10 +1,10 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { createCipherTalkMcpServer } from './server'
+import { createAIWCMcpServer } from './server'
 
 const SHUTDOWN_TIMEOUT_MS = 1_000
 const CLOSED_PIPE_ERROR_CODES = new Set(['EPIPE', 'ERR_STREAM_DESTROYED'])
 
-let mcpServer: ReturnType<typeof createCipherTalkMcpServer> | null = null
+let mcpServer: ReturnType<typeof createAIWCMcpServer> | null = null
 let isShuttingDown = false
 let processHandlersInstalled = false
 
@@ -36,7 +36,7 @@ async function shutdown(code = 0) {
     await mcpServer?.close?.()
   } catch (error) {
     if (!isClosedPipeError(error)) {
-      writeDiagnostic(`[CipherTalk MCP] close error: ${String(error)}\n`)
+      writeDiagnostic(`[AIWC MCP] close error: ${String(error)}\n`)
     }
   } finally {
     clearTimeout(forceExitTimer)
@@ -81,26 +81,26 @@ function installProcessHandlers() {
     if (isClosedPipeError(error)) {
       process.exit(0)
     }
-    writeDiagnostic(`[CipherTalk MCP] uncaughtException: ${String(error)}\n`)
+    writeDiagnostic(`[AIWC MCP] uncaughtException: ${String(error)}\n`)
     void shutdown(1)
   })
 
   process.on('unhandledRejection', (error) => {
-    writeDiagnostic(`[CipherTalk MCP] unhandledRejection: ${String(error)}\n`)
+    writeDiagnostic(`[AIWC MCP] unhandledRejection: ${String(error)}\n`)
     void shutdown(1)
   })
 }
 
-export async function bootstrapCipherTalkMcpServer() {
+export async function bootstrapAIWCMcpServer() {
   installProcessHandlers()
 
   try {
-    mcpServer = createCipherTalkMcpServer()
+    mcpServer = createAIWCMcpServer()
     const transport = new StdioServerTransport()
     await mcpServer.connect(transport)
-    writeDiagnostic('[CipherTalk MCP] stdio server started\n')
+    writeDiagnostic('[AIWC MCP] stdio server started\n')
   } catch (error) {
-    writeDiagnostic(`[CipherTalk MCP] startup failed: ${String(error)}\n`)
+    writeDiagnostic(`[AIWC MCP] startup failed: ${String(error)}\n`)
     await shutdown(1)
   }
 }

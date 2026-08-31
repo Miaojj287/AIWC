@@ -27,7 +27,7 @@ export interface ManifestPet {
 }
 
 const PETDEX_MANIFEST_URL = 'https://www.petdex.dev/api/manifest'
-const BUILTIN_PET_SLUG = 'miyuji'
+const BUILTIN_PET_SLUG = 'aiwcji'
 // 与 petdex CLI 一致：只信任官方资源域，防止 manifest 被塞入恶意 URL
 const TRUSTED_ASSET_HOSTS = new Set(['assets.petdex.dev'])
 
@@ -37,7 +37,7 @@ let manifestCache: { pets: ManifestPet[]; fetchedAt: number } | null = null
 const MANIFEST_TTL_MS = 10 * 60 * 1000
 
 function petsDir(configService?: ConfigService | null): string {
-  const cacheBasePath = configService?.getCacheBasePath() || path.join(app.getPath('userData'), 'CipherTalk')
+  const cacheBasePath = configService?.getCacheBasePath() || path.join(app.getPath('userData'), 'AIWC')
   return path.join(cacheBasePath, 'pets')
 }
 

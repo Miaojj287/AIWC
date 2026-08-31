@@ -106,7 +106,7 @@ export class VoiceTranscribeServiceWhisper {
     private downloadCancels = new Map<string, DownloadCancelState>()
 
     constructor() {
-        this.modelsDir = join(getAppDataPath(), 'ciphertalk', 'whisper-models')
+        this.modelsDir = join(getAppDataPath(), 'aiwc', 'whisper-models')
         
         // whisper.cpp 的可执行文件路径
         let resourcesPath: string

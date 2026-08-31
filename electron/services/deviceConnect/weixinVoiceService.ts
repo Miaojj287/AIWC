@@ -119,7 +119,7 @@ export async function synthesizeWeixinVoice(
   }
 
   ensureSilkWasmAvailable()
-  const tempDir = await mkdtemp(join(tmpdir(), 'ciphertalk-wechat-voice-'))
+  const tempDir = await mkdtemp(join(tmpdir(), 'aiwc-wechat-voice-'))
   const inputPath = join(tempDir, `tts${extensionFromMime(speech.mimeType)}`)
   const wavPath = join(tempDir, 'voice.wav')
 

@@ -362,7 +362,7 @@ const TEST_PAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>密语遥控 · 测试页</title>
+<title>AIWC遥控 · 测试页</title>
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 12px; background: #101014; color: #e6e6ea; font: 15px/1.6 system-ui, -apple-system, sans-serif; }
@@ -374,7 +374,7 @@ const TEST_PAGE_HTML = `<!DOCTYPE html>
   button.sec { background: #2a2a32; }
   button:disabled { opacity: .5; }
 </style></head><body>
-<h1>密语遥控 · 测试页</h1>
+<h1>AIWC遥控 · 测试页</h1>
 <div id="status" class="muted">未连接</div>
 <div id="out"></div>
 <textarea id="input" placeholder="给电脑上的 Agent 发消息…"></textarea>
@@ -480,7 +480,7 @@ fetch('/status?token=' + encodeURIComponent(token)).then(r => r.json()).then(d =
  * DataChannel 断开会 abort 全部在途 fetch，网关侧随即触发 agent:abort。
  */
 const BRIDGE_PAGE_HTML = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>密语远程桥</title></head><body>
+<html><head><meta charset="utf-8"><title>AIWC远程桥</title></head><body>
 <pre id="log" style="font: 12px/1.5 monospace"></pre>
 <script>
 const q = new URLSearchParams(location.search)

@@ -1,13 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { getAppVersion } from '../runtimePaths'
-import { registerCipherTalkMcpTools } from './tools'
+import { registerAIWCMcpTools } from './tools'
 
-export function createCipherTalkMcpServer() {
+export function createAIWCMcpServer() {
   const server = new McpServer({
-    name: 'ciphertalk-mcp',
+    name: 'aiwc-mcp',
     version: getAppVersion()
   })
 
-  registerCipherTalkMcpTools(server)
+  registerAIWCMcpTools(server)
   return server
 }

@@ -230,7 +230,7 @@ export class WcdbService extends EventEmitter {
       let worker: UtilityProcess
       try {
         worker = utilityProcess.fork(utilityPath, [], {
-          serviceName: 'CipherTalk WCDB',
+          serviceName: 'AIWC WCDB',
           stdio: 'pipe',
           env: getElectronWorkerEnv(),
           allowLoadingUnsignedLibraries: process.platform === 'darwin'

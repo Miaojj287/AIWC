@@ -75,10 +75,10 @@ xkey
 Agent示例UI/
 
 # Embedded CLI local outputs
-CipherTalk-CLI/node_modules/
-CipherTalk-CLI/dist/
-CipherTalk-CLI/coverage/
-CipherTalk-CLI/.miyu-test/
+AIWC-CLI/node_modules/
+AIWC-CLI/dist/
+AIWC-CLI/coverage/
+AIWC-CLI/.aiwc-test/
 .agents
 skills-lock.json
 # heroui-agents-md
@@ -86,7 +86,7 @@ skills-lock.json
 release-verify/
 /tools/
 # 手机遥控端：独立私有仓库，在本目录下开发但不进主仓库
-/CipherTalk-Mobile/
+/AIWC-Mobile/
 
 # 插件打包产物
 *.ctp
@@ -95,4 +95,4 @@ release-verify/
 # 本地插件开发工作区（制作/调试插件用，不纳入版本库）
 plugin-workspace/
 MomentsBridge/
-CipherTalk-Tauri-Lite/
+AIWC-Tauri-Lite/

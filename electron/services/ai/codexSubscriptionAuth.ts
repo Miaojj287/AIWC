@@ -3,14 +3,14 @@ import { readFileSync } from 'fs'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
 import os from 'os'
 import path from 'path'
-import { getCipherTalkCodexHome } from '../runtimePaths.ts'
+import { getAIWCCodexHome } from '../runtimePaths.ts'
 
 export const OPENAI_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const OPENAI_OAUTH_ISSUER = 'https://auth.openai.com'
 export const OPENAI_OAUTH_REDIRECT_URI = 'http://localhost:1455/auth/callback'
 export const OPENAI_OAUTH_SCOPE = 'openid profile email offline_access'
 export const CHATGPT_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
-export const CODEX_SUBSCRIPTION_DUMMY_API_KEY = 'ciphertalk-oauth-dummy-key'
+export const CODEX_SUBSCRIPTION_DUMMY_API_KEY = 'aiwc-oauth-dummy-key'
 
 const TOKEN_REFRESH_MARGIN_MS = 60_000
 const refreshPromises = new Map<string, Promise<CodexSubscriptionCredentials>>()
@@ -56,12 +56,12 @@ export type CodexSubscriptionFetchOptions = {
   userAgent?: string
 }
 
-/** 密语存放 ChatGPT 登录的根目录；禁止被 CIPHERTALK_CODEX_HOME 指向本机 Codex 的 ~/.codex。 */
+/** AIWC存放 ChatGPT 登录的根目录；禁止被 AIWC_CODEX_HOME 指向本机 Codex 的 ~/.codex。 */
 function getCodexHomeSafe(): string {
-  const home = path.resolve(getCipherTalkCodexHome())
+  const home = path.resolve(getAIWCCodexHome())
   const cliHome = path.resolve(path.dirname(getCodexCliAuthPath()))
   if (home.toLowerCase() === cliHome.toLowerCase()) {
-    throw new Error('密语的 ChatGPT 登录目录不能设置为电脑上的 ~/.codex')
+    throw new Error('AIWC的 ChatGPT 登录目录不能设置为电脑上的 ~/.codex')
   }
   return home
 }
@@ -201,7 +201,7 @@ export async function removeCodexAccount(id: string): Promise<void> {
   }
 }
 
-/** 本机 Codex CLI 的凭据文件路径（尊重 CODEX_HOME 覆盖），密语只读不写。 */
+/** 本机 Codex CLI 的凭据文件路径（尊重 CODEX_HOME 覆盖），AIWC只读不写。 */
 export function getCodexCliAuthPath(): string {
   const codexHome = String(process.env.CODEX_HOME || '').trim() || path.join(os.homedir(), '.codex')
   return path.resolve(codexHome, 'auth.json')
@@ -457,8 +457,8 @@ export function createCodexSubscriptionFetch(options: CodexSubscriptionFetchOpti
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
     headers.delete('authorization')
     headers.set('Authorization', `Bearer ${credentials.accessToken}`)
-    headers.set('originator', 'ciphertalk')
-    headers.set('User-Agent', options.userAgent || `CipherTalk/${process.platform}-${process.arch}`)
+    headers.set('originator', 'aiwc')
+    headers.set('User-Agent', options.userAgent || `AIWC/${process.platform}-${process.arch}`)
     if (credentials.accountId) headers.set('ChatGPT-Account-Id', credentials.accountId)
     else headers.delete('ChatGPT-Account-Id')
 

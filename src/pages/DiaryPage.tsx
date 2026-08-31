@@ -849,7 +849,7 @@ export default function DiaryPage() {
       <style>
         {`
           @font-face {
-            font-family: "CipherTalkDiaryHand";
+            font-family: "AIWCDiaryHand";
             src: url("/日记1.ttf") format("truetype");
             font-display: swap;
           }
@@ -1000,7 +1000,7 @@ export default function DiaryPage() {
             outline: 0 !important;
           }
           .diary-font-hand {
-            font-family: "CipherTalkDiaryHand", "LXGW WenKai", "霞鹜文楷", "Ma Shan Zheng", "华文行楷", "STXingkai", "STKaiti", "KaiTi", "楷体", cursive, serif;
+            font-family: "AIWCDiaryHand", "LXGW WenKai", "霞鹜文楷", "Ma Shan Zheng", "华文行楷", "STXingkai", "STKaiti", "KaiTi", "楷体", cursive, serif;
           }
           .diary-font-song {
             font-family: "Songti SC", "SimSun", "宋体", serif;

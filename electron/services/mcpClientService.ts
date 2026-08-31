@@ -174,7 +174,7 @@ export class McpClientService {
     this.lastErrors.delete(name)
     try {
       const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-      const client = new Client({ name: `ciphertalk-client-${name}`, version: '1.0.0' })
+      const client = new Client({ name: `aiwc-client-${name}`, version: '1.0.0' })
       const timeoutMs = normalizeTimeoutMs(config.timeoutMs)
 
       let transport: unknown

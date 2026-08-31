@@ -1,4 +1,4 @@
-# CipherTalk MCP Export Playbook
+# AIWC MCP Export Playbook
 
 ## Goal
 

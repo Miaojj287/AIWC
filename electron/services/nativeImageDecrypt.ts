@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
-const CURRENT_ADDON_NAME = 'ciphertalk-image-native'
-const NATIVE_IMAGE_DEBUG = process.env.CIPHERTALK_IMAGE_NATIVE_DEBUG === '1'
+const CURRENT_ADDON_NAME = 'aiwc-image-native'
+const NATIVE_IMAGE_DEBUG = process.env.AIWC_IMAGE_NATIVE_DEBUG === '1'
 
 type NativeDecryptResult = {
   data: Buffer
@@ -33,7 +33,7 @@ function logNativeImage(level: 'log' | 'warn' | 'error', ...args: any[]): void {
 }
 
 function shouldEnableNative(): boolean {
-  if (process.env.CIPHERTALK_IMAGE_NATIVE === '0') return false
+  if (process.env.AIWC_IMAGE_NATIVE === '0') return false
   const metadata = nativeAddonMetadata()
   const platformKey = `${getPlatformDir()}-${getArchDir()}`
 

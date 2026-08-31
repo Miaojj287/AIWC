@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import type { App, BrowserWindow } from 'electron'
 
-const LOG_DIR_NAME = 'ciphertalk'
+const LOG_DIR_NAME = 'aiwc'
 const LOG_FILE_NAME = 'startup.log'
 const MAX_LOG_BYTES = 2 * 1024 * 1024
 

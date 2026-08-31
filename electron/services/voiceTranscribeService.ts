@@ -112,7 +112,7 @@ export class VoiceTranscribeService {
 
     /**
      * 转写缓存固定落在 app userData，不跟微信账号的 cachePath。
-     * 旧版本曾把 stt-cache.db 写到 cachePath 或 appData/ciphertalk，启动时会合并进来。
+     * 旧版本曾把 stt-cache.db 写到 cachePath 或 appData/aiwc，启动时会合并进来。
      */
     private resolvePrimaryCacheDbPath(): string {
         return join(getUserDataPath(), 'stt-cache.db')
@@ -120,7 +120,7 @@ export class VoiceTranscribeService {
 
     private resolveLegacyCacheDbPaths(primaryPath: string): string[] {
         const candidates: string[] = [
-            join(getAppDataPath(), 'ciphertalk', 'stt-cache.db'),
+            join(getAppDataPath(), 'aiwc', 'stt-cache.db'),
             join(getUserDataPath(), 'stt-cache.db'),
         ]
         const accountCachePath = String(this.configService.get('cachePath') || '').trim()
@@ -479,8 +479,8 @@ export class VoiceTranscribeService {
      */
     private resolveModelDir(): string {
         // 强制使用 APPDATA 目录，避免中文路径问题
-        // Windows: C:\Users\<username>\AppData\Roaming\ciphertalk\models\sensevoice
-        return join(getAppDataPath(), 'ciphertalk', 'models', 'sensevoice')
+        // Windows: C:\Users\<username>\AppData\Roaming\aiwc\models\sensevoice
+        return join(getAppDataPath(), 'aiwc', 'models', 'sensevoice')
     }
 
     /**

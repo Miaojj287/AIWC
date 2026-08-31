@@ -140,7 +140,7 @@ function uiMessageId(message: UIMessage | undefined): string {
 }
 
 function internalTurnContextMeta(message: UIMessage | undefined): { targetUserMessageId?: string } | null {
-  const meta = (message as any)?.metadata?.ciphertalk?.internal
+  const meta = (message as any)?.metadata?.aiwc?.internal
   if (!meta || typeof meta !== 'object') return null
   if ((meta as any).kind !== INTERNAL_TURN_CONTEXT_KIND) return null
   return {
@@ -310,7 +310,7 @@ async function upsertDeepSeekHistoryTurnContextMessage(opts: {
     id: `ct-turn-context-${userId}-${shortHash(content)}`,
     role: 'system',
     metadata: {
-      ciphertalk: {
+      aiwc: {
         internal: {
           kind: INTERNAL_TURN_CONTEXT_KIND,
           targetUserMessageId: userId,
@@ -347,7 +347,7 @@ function uiMessageCompletenessScore(message: UIMessage): number {
   score += uiMessageTextLength(message)
   if (metadata?.usage) score += 100_000
   if (metadata?.finishReason || metadata?.rawFinishReason) score += 50_000
-  if (metadata?.ciphertalk?.trace?.finishedAt) score += 25_000
+  if (metadata?.aiwc?.trace?.finishedAt) score += 25_000
   for (const part of parts) {
     if (!part || typeof part !== 'object') continue
     if (part.type === 'text' && part.state === 'done') score += 1_000

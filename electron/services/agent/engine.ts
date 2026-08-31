@@ -586,7 +586,7 @@ export async function runAgent(
           rawFinishReason: part.rawFinishReason,
           modelProvider: input.providerConfig.name,
           modelId: input.providerConfig.model,
-          ciphertalk: {
+          aiwc: {
             providerCache,
             trace: snapshotTrace(trace),
           },
@@ -734,8 +734,8 @@ export async function runAgent(
       const finishMetadata = 'messageMetadata' in finishChunk && finishChunk.messageMetadata && typeof finishChunk.messageMetadata === 'object'
         ? finishChunk.messageMetadata as Record<string, any>
         : {}
-      const ciphertalkMetadata = finishMetadata.ciphertalk && typeof finishMetadata.ciphertalk === 'object'
-        ? finishMetadata.ciphertalk as Record<string, any>
+      const aiwcMetadata = finishMetadata.aiwc && typeof finishMetadata.aiwc === 'object'
+        ? finishMetadata.aiwc as Record<string, any>
         : {}
       const primaryUsage = finishMetadata.usage
       onChunk({
@@ -746,8 +746,8 @@ export async function runAgent(
           ...(recoveryUsage ? { usage: mergeNormalizedUsage(primaryUsage, recoveryUsage) } : {}),
           ...(recoveryFinishReason ? { finishReason: recoveryFinishReason } : {}),
           ...(recoveryRawFinishReason ? { rawFinishReason: recoveryRawFinishReason } : {}),
-          ciphertalk: {
-            ...ciphertalkMetadata,
+          aiwc: {
+            ...aiwcMetadata,
             providerCache,
             trace: snapshotTrace(trace),
           },

@@ -108,7 +108,7 @@ export function setUserSkillsCachePath(cacheBasePath: string): void {
 }
 
 function getUserSkillsDir(): string {
-  const base = _cacheBasePath || join(app.getPath('userData'), 'CipherTalk')
+  const base = _cacheBasePath || join(app.getPath('userData'), 'AIWC')
   return join(base, 'skills')
 }
 

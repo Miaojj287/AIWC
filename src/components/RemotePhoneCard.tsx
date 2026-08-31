@@ -30,7 +30,7 @@ type RemoteInfo = {
 const PHONE_ICON_SRC = './logo.png'
 
 const APP_LINKS = [
-  { label: '手机端密语安装包', url: 'https://miyuapp.aiqji.com/CipherTalk.ipa', icon: ArrowDownToLine },
+  { label: '手机端AIWC安装包', url: 'https://aiwcapp.aiqji.com/AIWC.ipa', icon: ArrowDownToLine },
   { label: 'ipa 签名安装教程', url: 'https://api.wnqapp.com/urlsss/video', icon: CirclePlay },
   { label: '爱思助手签名安装教程', url: 'https://www.i4.cn/news_detail_38195.html', icon: FileText },
 ]
@@ -204,7 +204,7 @@ export function RemotePhoneCard() {
 
       {showQr ? (
         <>
-          <p className="text-center text-xs text-muted">用密语手机 App 扫描二维码完成配对</p>
+          <p className="text-center text-xs text-muted">用AIWC手机 App 扫描二维码完成配对</p>
           {!showCode && (
             <Button size="sm" variant="ghost" onPress={() => setShowCode(true)}>
               没法扫码？手动输入

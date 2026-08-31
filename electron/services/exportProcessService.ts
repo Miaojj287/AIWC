@@ -242,7 +242,7 @@ export class ExportProcessService {
       let worker: UtilityProcess
       try {
         worker = utilityProcess.fork(utilityPath, [], {
-          serviceName: 'CipherTalk Export',
+          serviceName: 'AIWC Export',
           stdio: 'pipe',
           env: { ...getElectronWorkerEnv(), CT_AGENT_WCDB_PROXY: '1' },
         })

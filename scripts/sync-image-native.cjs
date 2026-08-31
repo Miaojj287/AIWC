@@ -4,7 +4,7 @@ const path = require('node:path')
 const projectRoot = path.resolve(__dirname, '..')
 const crateRoot = path.join(projectRoot, 'native', 'image-decrypt')
 const releaseDir = path.join(crateRoot, 'target', 'release')
-const addonName = 'ciphertalk-image-native'
+const addonName = 'aiwc-image-native'
 
 function parseArgs(argv) {
   const parsed = {}
@@ -41,13 +41,13 @@ function resolveBuiltLibrary(platformDir, customLibPath) {
     return path.resolve(projectRoot, customLibPath)
   }
   if (platformDir === 'win32') {
-    return path.join(releaseDir, 'ciphertalk_image_native.dll')
+    return path.join(releaseDir, 'aiwc_image_native.dll')
   }
   if (platformDir === 'macos') {
-    return path.join(releaseDir, 'libciphertalk_image_native.dylib')
+    return path.join(releaseDir, 'libaiwc_image_native.dylib')
   }
   if (platformDir === 'linux') {
-    return path.join(releaseDir, 'libciphertalk_image_native.so')
+    return path.join(releaseDir, 'libaiwc_image_native.so')
   }
   throw new Error(`Unsupported platform: ${platformDir}`)
 }
@@ -105,7 +105,7 @@ function buildManifest(safePlatformKey) {
   const manifest = {
     name: addonName,
     version: 'source-present-selfbuilt',
-    vendor: 'CipherTalk',
+    vendor: 'AIWC',
     source: 'native/image-decrypt',
     safeNativePlatforms,
     activeBinaries,
@@ -118,9 +118,9 @@ function buildManifest(safePlatformKey) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
-  const platformDir = resolvePlatformDir(args.platform || process.env.CIPHERTALK_IMAGE_NATIVE_PLATFORM || process.platform)
-  const archDir = resolveArchDir(args.arch || process.env.CIPHERTALK_IMAGE_NATIVE_ARCH || process.arch)
-  const builtLibrary = resolveBuiltLibrary(platformDir, args.lib || process.env.CIPHERTALK_IMAGE_NATIVE_LIB)
+  const platformDir = resolvePlatformDir(args.platform || process.env.AIWC_IMAGE_NATIVE_PLATFORM || process.platform)
+  const archDir = resolveArchDir(args.arch || process.env.AIWC_IMAGE_NATIVE_ARCH || process.arch)
+  const builtLibrary = resolveBuiltLibrary(platformDir, args.lib || process.env.AIWC_IMAGE_NATIVE_LIB)
 
   if (!fs.existsSync(builtLibrary)) {
     throw new Error(`Built library not found: ${builtLibrary}`)

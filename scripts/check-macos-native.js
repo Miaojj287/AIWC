@@ -81,10 +81,10 @@ function main() {
   }
   console.log('[macos-native-check] no closed compatibility artifacts present')
 
-  const imageNativeArch = process.env.CIPHERTALK_IMAGE_NATIVE_ARCH || process.arch
+  const imageNativeArch = process.env.AIWC_IMAGE_NATIVE_ARCH || process.arch
   const imageNativeAddon = path.join(
     imageNativeBaseDir,
-    `ciphertalk-image-native-macos-${imageNativeArch}.node`
+    `aiwc-image-native-macos-${imageNativeArch}.node`
   )
 
   const imageNativeStat = statSafe(imageNativeAddon)

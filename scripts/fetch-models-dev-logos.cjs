@@ -4,7 +4,7 @@ const path = require('path')
 // 发版时把 models.dev 的 provider logo 抓成一份随包快照。models.dev 在国内被墙，不内置的话
 // 第三方 provider 在设置页一个图标都显示不出来。合成单文件是为了不往 R2/仓库里堆几百个碎文件。
 // 抓取失败不阻断发布：保留仓库里已有的快照即可（跟 fetch-models-dev-snapshot.cjs 一个路子）。
-const SOURCE = (process.env.CIPHERTALK_MODELS_URL || 'https://models.dev').replace(/\/+$/, '')
+const SOURCE = (process.env.AIWC_MODELS_URL || 'https://models.dev').replace(/\/+$/, '')
 const SNAPSHOT_PATH = path.join(__dirname, '../electron/assets/models-dev.json')
 const OUTPUT_PATH = path.join(__dirname, '../src/assets/models-dev-logos.json')
 const TIMEOUT_MS = 15000
@@ -24,7 +24,7 @@ async function fetchLogo(providerId) {
   try {
     const response = await fetch(`${SOURCE}/logos/${providerId}.svg`, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'CipherTalk' }
+      headers: { 'User-Agent': 'AIWC' }
     })
     if (!response.ok) return ''
     const svg = await response.text()

@@ -36,7 +36,7 @@ async function transcribe(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      user: { uid: 'ciphertalk' },
+      user: { uid: 'aiwc' },
       audio: { data: wavData.toString('base64'), format: 'wav' },
       request: { model_name: 'bigmodel' }
     }),
@@ -84,7 +84,7 @@ async function test(config: OnlineTranscribeConfig, signal: AbortSignal): Promis
     method: 'POST',
     headers: buildHeaders(config),
     body: JSON.stringify({
-      user: { uid: 'ciphertalk' },
+      user: { uid: 'aiwc' },
       audio: { data: '', format: 'wav' },
       request: { model_name: 'bigmodel' }
     }),

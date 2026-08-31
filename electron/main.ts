@@ -53,7 +53,7 @@ function configureWindowsGpuPolicy(): void {
   }
 
   const hardwareAccelerationEnabled = configService?.get('hardwareAccelerationEnabled') !== false
-  const shouldDisableGpu = process.env.CIPHERTALK_DISABLE_GPU === '1'
+  const shouldDisableGpu = process.env.AIWC_DISABLE_GPU === '1'
     || process.argv.includes('--disable-gpu')
     || process.argv.includes('--disable-hardware-acceleration')
 
@@ -74,7 +74,7 @@ function configureWindowsGpuPolicy(): void {
 
 configureWindowsGpuPolicy()
 installElectronStartupDiagnostics(app)
-initAiTelemetry('ciphertalk-main')
+initAiTelemetry('aiwc-main')
 
 // 注册自定义协议为特权协议（必须在 app ready 之前）
 protocol.registerSchemesAsPrivileged([
@@ -203,12 +203,12 @@ ctx.setWindowManager(createWindowManager(ctx))
 markStartupMilestone('startup:window-manager-created')
 
 // Windows 通知用 AppUserModelID 作为显示的应用名，必须与 electron-builder 的 appId 一致，
-// 否则 toast 标题会回退成 Electron 默认的 "electron.app.CipherTalk"。
+// 否则 toast 标题会回退成 Electron 默认的 "electron.app.AIWC"。
 if (process.platform === 'win32') {
-  let configuredAppId = process.env.CIPHERTALK_APP_ID || 'com.ciphertalk.app'
+  let configuredAppId = process.env.AIWC_APP_ID || 'com.aiwc.app'
   try {
     const packageMetadata = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8'))
-    if (!process.env.CIPHERTALK_APP_ID && typeof packageMetadata?.build?.appId === 'string') {
+    if (!process.env.AIWC_APP_ID && typeof packageMetadata?.build?.appId === 'string') {
       configuredAppId = packageMetadata.build.appId
     }
   } catch {

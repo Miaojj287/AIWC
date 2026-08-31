@@ -1,6 +1,6 @@
-# CipherTalk 插件开发指南
+# AIWC 插件开发指南
 
-CipherTalk 插件是纯前端应用（HTML/JS/CSS），运行在独立沙箱 iframe 中，
+AIWC 插件是纯前端应用（HTML/JS/CSS），运行在独立沙箱 iframe 中，
 通过 SDK 调用宿主能力（数据查询、媒体、转写、搜索、导出、AI 等）。
 任何框架都可以用（React/Vue/Svelte/原生），构建产物是静态文件即可。
 
@@ -32,31 +32,31 @@ my-plugin/
   manifest.json               # 插件声明（id、开发者、权限、贡献点）
   index.html                  # 视图入口（沙箱 CSP 禁止内联 <script>）
   main.js                     # 外部脚本
-  ciphertalk-plugin-sdk.js    # SDK（自动复制）
-  ciphertalk-plugin-sdk.d.ts  # TS 类型（可选，编辑器提示用）
+  aiwc-plugin-sdk.js    # SDK（自动复制）
+  aiwc-plugin-sdk.d.ts  # TS 类型（可选，编辑器提示用）
 ```
 
 **main.js：**
 
 ```js
-import { connect } from './ciphertalk-plugin-sdk.js'
+import { connect } from './aiwc-plugin-sdk.js'
 
 const api = await connect()
 const { sessions } = await api.data.sessions.list({ limit: 50 })
 document.body.textContent = `共 ${sessions.length} 个会话`
 ```
 
-**加载调试：** CipherTalk 设置 → 插件 → 打开「插件开发者模式」→
+**加载调试：** AIWC 设置 → 插件 → 打开「插件开发者模式」→
 「加载本地插件目录」选中 `my-plugin/`，启用（确认权限）后侧边栏出现菜单入口。
 
 ## 2. 脚手架 CLI
 
-CLI 位于 `plugin-sdk/cli.cjs`，零依赖（Node 18+）；发布 npm 后等价 `npx ciphertalk-plugin`：
+CLI 位于 `plugin-sdk/cli.cjs`，零依赖（Node 18+）；发布 npm 后等价 `npx aiwc-plugin`：
 
 | 命令 | 作用 |
 |---|---|
 | `init <目录>` | 纯静态骨架（询问 id、名称、**开发者名称（必填）**、邮箱），自动复制 SDK |
-| `init <目录> --vite` | Vite + TypeScript 工程（`import from 'ciphertalk-plugin-sdk'`，热更新 + 构建） |
+| `init <目录> --vite` | Vite + TypeScript 工程（`import from 'aiwc-plugin-sdk'`，热更新 + 构建） |
 | `init <目录> --react` | React 19 + HeroUI v3 工程（真 HeroUI 组件，主题随宿主自动切换） |
 | `pack [目录]` | 校验 manifest（与宿主同一套规则）+ 检查视图入口文件存在 → 打包为 `<id>-<version>.ctp` |
 
@@ -81,7 +81,7 @@ CLI 位于 `plugin-sdk/cli.cjs`，零依赖（Node 18+）；发布 npm 后等价
 ### 安装 SDK
 
 ```bash
-npm install ciphertalk-plugin-sdk        # Vite 模板已在依赖里声明
+npm install aiwc-plugin-sdk        # Vite 模板已在依赖里声明
 ```
 
 纯静态模板由 CLI 自动把 SDK 文件拷进目录，无需 npm。SDK 依赖浏览器 API
@@ -481,15 +481,15 @@ await api.window.open(viewId, { width?, height? })       // 需 window:create
 **完整活文档**：示例插件 `examples/plugins/ui-gallery` 把上述每个组件都渲染出来
 （含表格排序、柱状图、弹窗、Tabs 交互），开发模式加载该目录即可对照抄用。
 
-### 6.1 React 组件库（ciphertalk-plugin-sdk/ui）
+### 6.1 React 组件库（aiwc-plugin-sdk/ui）
 
 用 React 写插件时，不必手拼 `.ct-*` 类——SDK 包自带 UI 组件库（`/ui` 子路径导出，
 无需另装包），它是这些类的**薄封装**（不自带 CSS，观感仍由宿主注入），并额外提供
 `LazyList`（滚动懒加载）、`DataTable`（排序 + 分页）与 `BarChart`：
 
 ```jsx
-import { connect } from 'ciphertalk-plugin-sdk'
-import { Button, Card, LazyList, ListItem, DataTable, BarChart } from 'ciphertalk-plugin-sdk/ui'
+import { connect } from 'aiwc-plugin-sdk'
+import { Button, Card, LazyList, ListItem, DataTable, BarChart } from 'aiwc-plugin-sdk/ui'
 
 const api = await connect()           // connect 负责注入 .ct-* 样式
 
@@ -592,7 +592,7 @@ node plugin-sdk/cli.cjs pack my-plugin
 
 ### 如何调试插件
 
-宿主的 DevTools 只在**从源码运行的开发版**（`npm run dev` 起的 CipherTalk）里可用；
+宿主的 DevTools 只在**从源码运行的开发版**（`npm run dev` 起的 AIWC）里可用；
 **正式安装版禁用了 DevTools**（F12 / 右键「检查」都没有，与「插件开发者模式」无关）。
 所以按场景选调试方式：
 
@@ -600,7 +600,7 @@ node plugin-sdk/cli.cjs pack my-plugin
   `npm run dev` 后浏览器直接打开它，Chrome DevTools 全功能断点、实时改样式。
   局限：`connect()` 依赖宿主握手，浏览器里不会 resolve，涉及 `api.*` 的代码会一直
   等待——把它们放在「已连接才执行」分支里，或先用假数据 mock。
-- **完整联调（含 `api.*` 真实数据）** → 需要开发版宿主：从 CipherTalk 源码
+- **完整联调（含 `api.*` 真实数据）** → 需要开发版宿主：从 AIWC 源码
   `npm run dev` 启动，`F12` 或 `Ctrl+Shift+I` 开 DevTools，在 Console / Sources
   顶部的 frame（iframe）下拉里切到插件帧（`localhost:5173` 或 `ct-plugin://…`）断点。
 - **正式安装版里排错** → 没有 DevTools，用 `api.ui.toast()` 或直接在页面上渲染

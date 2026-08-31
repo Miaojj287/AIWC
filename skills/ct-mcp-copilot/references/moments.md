@@ -1,4 +1,4 @@
-# CipherTalk MCP Moments Playbook
+# AIWC MCP Moments Playbook
 
 ## When to switch to moments
 

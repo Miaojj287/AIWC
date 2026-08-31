@@ -10,8 +10,8 @@ $outDir = Join-Path $root 'build'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $logo = [System.Drawing.Image]::FromFile($logoPath)
-# 'MiYu' (CJK) built from codepoints to keep this file ASCII-safe
-$miyu = -join ([char]0x5BC6, [char]0x8BED)
+# 'AIWC' (CJK) built from codepoints to keep this file ASCII-safe
+$aiwc = -join ([char]0x5BC6, [char]0x8BED)
 
 function New-Canvas([int]$w, [int]$h) {
   $bmp = New-Object System.Drawing.Bitmap($w, $h)
@@ -80,8 +80,8 @@ Draw-LogoTile $g ([int](($w - $tile) / 2)) 128 $tile
 $fontName = New-Object System.Drawing.Font('Segoe UI', 34, [System.Drawing.FontStyle]::Bold)
 $fontCjk = New-Object System.Drawing.Font('Microsoft YaHei UI', 22, [System.Drawing.FontStyle]::Regular)
 $dim = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(190, 255, 255, 255))
-$g.DrawString('CipherTalk', $fontName, $white, ($w / 2), 320, $center)
-$g.DrawString($miyu, $fontCjk, $dim, ($w / 2), 390, $center)
+$g.DrawString('AIWC', $fontName, $white, ($w / 2), 320, $center)
+$g.DrawString($aiwc, $fontCjk, $dim, ($w / 2), 390, $center)
 $accent = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(160, 168, 130, 255))
 $g.FillRectangle($accent, (($w - 56) / 2), 456, 56, 5)
 $accent.Dispose()
@@ -94,7 +94,7 @@ $bmp, $g = New-Canvas $w $h
 Draw-Background $g $w $h
 Draw-LogoTile $g 22 21 72
 $fontSmall = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
-$g.DrawString('CipherTalk', $fontSmall, $white, 110, 36)
+$g.DrawString('AIWC', $fontSmall, $white, 110, 36)
 Save-Bmp24 $bmp (Join-Path $outDir 'installerHeader.bmp')
 $g.Dispose(); $bmp.Dispose()
 

@@ -85,7 +85,7 @@ function stableToolSignature(tools: ToolSet): string {
 }
 
 export function buildPromptCacheKey(parts: AgentPromptParts, tools: ToolSet): string {
-  return `ciphertalk:agent:${shortHash(parts.cacheableSystem)}:${shortHash(stableToolSignature(tools))}`
+  return `aiwc:agent:${shortHash(parts.cacheableSystem)}:${shortHash(stableToolSignature(tools))}`
 }
 
 function isReasoningEffortSet(effort?: AgentReasoningEffort): effort is AgentReasoningEffort {

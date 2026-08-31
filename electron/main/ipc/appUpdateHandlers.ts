@@ -143,8 +143,8 @@ async function downloadAndOpenMacDmg(ctx: MainProcessContext, targetVersion?: st
   }
 
   const safeVersion = (targetVersion || 'latest').replace(/[^0-9A-Za-z._-]/g, '_')
-  const downloadDir = path.join(app.getPath('temp'), 'ciphertalk-updates')
-  const finalPath = path.join(downloadDir, `CipherTalk-${safeVersion}-Setup.dmg`)
+  const downloadDir = path.join(app.getPath('temp'), 'aiwc-updates')
+  const finalPath = path.join(downloadDir, `AIWC-${safeVersion}-Setup.dmg`)
   const partialPath = `${finalPath}.download`
   await mkdir(downloadDir, { recursive: true })
   await rm(partialPath, { force: true })

@@ -16,8 +16,8 @@ interface AboutTabProps {
   onCheckUpdate: () => void
 }
 
-const PROJECT_URL = 'https://github.com/ILoveBingLu/CipherTalk'
-const WEBSITE_URL = 'https://miyu.aiqji.com'
+const PROJECT_URL = 'https://github.com/Miaojj287/AIWC'
+const WEBSITE_URL = 'https://aiwc.aiqji.com'
 
 function AboutTab({
   appVersion,
@@ -115,13 +115,13 @@ function AboutTab({
         <div className="flex min-w-0 flex-col items-start gap-5 sm:flex-row sm:items-center">
           <img
             src="./About.png"
-            alt="密语 CipherTalk"
+            alt="AIWC"
             className="pointer-events-none h-auto w-32 shrink-0 object-contain select-none"
           />
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Typography.Heading level={2} className="text-2xl font-semibold text-foreground">
-                密语 CipherTalk
+                AIWC
               </Typography.Heading>
               <Chip size="sm" variant="soft">
                 <Chip.Label>{appVersion ? formatDisplayVersion(appVersion) : 'v...'}</Chip.Label>
@@ -177,7 +177,7 @@ function AboutTab({
       <section className="space-y-3">
         <div className="space-y-1">
           <Typography.Heading level={3} className="text-lg font-semibold text-foreground">项目与链接</Typography.Heading>
-          <Typography.Paragraph size="sm" color="muted">密语项目、官方网站与用户协议。</Typography.Paragraph>
+          <Typography.Paragraph size="sm" color="muted">AIWC项目、官方网站与用户协议。</Typography.Paragraph>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <Button
@@ -187,7 +187,7 @@ function AboutTab({
             onPress={() => openExternal(PROJECT_URL)}
           >
             <LogoGithub width={16} height={16} />
-            密语项目地址
+            AIWC项目地址
             <ArrowUpRightFromSquare width={14} height={14} className="ml-auto" />
           </Button>
           <Button
@@ -217,7 +217,7 @@ function AboutTab({
           </Alert.Content>
         </Alert>
         <Typography.Paragraph size="xs" color="muted" className="text-center">
-          © {currentYear} 密语-CipherTalk. All rights reserved.
+          © {currentYear} AIWC-AIWC. All rights reserved.
         </Typography.Paragraph>
       </section>
     </div>

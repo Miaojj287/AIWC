@@ -1,13 +1,13 @@
 /**
- * CipherTalk 插件 UI 组件库（React，单文件 ESM，SDK 的 `/ui` 子路径导出）。
+ * AIWC 插件 UI 组件库（React，单文件 ESM，SDK 的 `/ui` 子路径导出）。
  *
  * 这些组件是宿主注入的 `.ct-*` 样式类的薄封装——**不自带 CSS**，观感与暗色
  * 全部由宿主在握手时注入的组件库提供（见本包 connect()）。
  * 因此组件极小，且天然与宿主主题一致、随宿主切换暗色。
  *
  * 用法：
- *   import { connect } from 'ciphertalk-plugin-sdk'
- *   import { Button, Card, LazyList } from 'ciphertalk-plugin-sdk/ui'
+ *   import { connect } from 'aiwc-plugin-sdk'
+ *   import { Button, Card, LazyList } from 'aiwc-plugin-sdk/ui'
  *   const api = await connect()   // connect 会注入 .ct-* 样式
  *   // 之后正常渲染 React 组件即可
  *

@@ -14,7 +14,7 @@ const cliPath = require.resolve('electron-builder/cli.js')
 const configPath = path.join(__dirname, 'electron-builder.config.cjs')
 const env = {
   ...process.env,
-  CIPHERTALK_BUILD_TARGET: target,
+  AIWC_BUILD_TARGET: target,
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 }
 

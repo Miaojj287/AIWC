@@ -1043,7 +1043,7 @@ function mapChatError(errorMessage?: string): never {
     throw new McpToolError('SESSION_NOT_FOUND', 'Session not found.', message)
   }
 
-  throw new McpToolError('INTERNAL_ERROR', 'Failed to query CipherTalk data.', message)
+  throw new McpToolError('INTERNAL_ERROR', 'Failed to query AIWC data.', message)
 }
 
 async function getEmojiLocalPath(message: Message): Promise<string | null> {

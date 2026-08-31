@@ -7,7 +7,7 @@ import { execSync } from 'child_process'
 const ACTIVATION_ENABLED = false
 
 // API 配置
-const API_BASE = 'https://miyu.admin.aiqji.com'
+const API_BASE = 'https://aiwc.admin.aiqji.com'
 
 // 加密密钥（混淆存储）
 const _k1 = [0x43, 0x69, 0x70, 0x68, 0x65, 0x72] // Cipher

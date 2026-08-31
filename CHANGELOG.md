@@ -1,6 +1,6 @@
 # 更新日志
 
-本文档记录了密语 CipherTalk 的所有重要更改。
+本文档记录了AIWC 的所有重要更改。
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目自 2026.6.8 起使用年月日日期版本号；
@@ -32,7 +32,7 @@
 ## [2026.812.0] - 2026-08-12
 
 ### 新增
-- 新增密语 App 手机遥控入口，支持通过二维码或手动信息完成局域网 HTTP、SSE 与 WebRTC P2P 配对。
+- 新增AIWC App 手机遥控入口，支持通过二维码或手动信息完成局域网 HTTP、SSE 与 WebRTC P2P 配对。
 - 手机遥控支持查看微信状态与账号信息、切换 AI 服务商及模型、筛选 Agent 会话、合成 TTS、下载和识别表情包，以及发起克隆构建。
 - 聊天媒体新增实况照片和视频类型支持。
 - 克隆联系人新增最近联系时间，并按联系时间优化展示顺序。
@@ -57,7 +57,7 @@
 
 ### 优化
 - 优化朋友圈窗口尺寸、圆角裁切、悬浮滚动条、头图过渡和个人信息布局。
-- 合并设置页关于界面的项目与链接，只保留密语项目、官网和用户协议。
+- 合并设置页关于界面的项目与链接，只保留AIWC项目、官网和用户协议。
 - 日记生成改为 24 小时滑动窗口，避免凌晨任务遗漏当天内容。
 - 升级整套 AI SDK 稳定版，改善 Agent 超时、流式响应和工具调用兼容性。
 
@@ -480,7 +480,7 @@
 ## [4.2.0] - 2026-04-21
 
 ### 新增
-- 新增 CipherTalk 自研图片 DAT 原生解密模块接入，支持 Windows x64 与 macOS arm64 预编译 `.node` 资源，并在打包时按平台保留对应产物。
+- 新增 AIWC 自研图片 DAT 原生解密模块接入，支持 Windows x64 与 macOS arm64 预编译 `.node` 资源，并在打包时按平台保留对应产物。
 - 新增图片 native 解密运行时检查与同步脚本，便于验证本机原生模块是否可加载、是否为当前平台正确产物。
 - 聊天图片消息新增 XML 宽高解析，支持从 `cdnthumbwidth/cdnthumbheight`、`cdnmidwidth/cdnmidheight`、`cdnhdwidth/cdnhdheight` 等字段提取比例信息。
 
@@ -661,4 +661,4 @@
 
 ---
 
-更多详细信息请查看 [GitHub Releases](https://github.com/ILoveBingLu/CipherTalk/releases)。
+更多详细信息请查看 [GitHub Releases](https://github.com/Miaojj287/AIWC/releases)。

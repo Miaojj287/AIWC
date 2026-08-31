@@ -162,13 +162,13 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
 }
 let modelsDevCache: { updatedAt: number; data: any } | null = null
 const MODELS_DEV_CACHE_MS = 1000 * 60 * 60 * 6
-const MODELS_DEV_SOURCE = process.env.CIPHERTALK_MODELS_URL || 'https://models.dev'
+const MODELS_DEV_SOURCE = process.env.AIWC_MODELS_URL || 'https://models.dev'
 // 国内直连 models.dev 必失败，没挂代理的用户只能靠自家 R2 镜像（域名国内可达，api.json 和 logo 都由
 // 发版流水线上传，见 .github/workflows/release.yml 的 mirror-r2）。自建了主源又没指定镜像的，就只认主源。
-const MODELS_DEV_MIRROR_BASE = (process.env.CIPHERTALK_MODELS_MIRROR_BASE
-  ?? (process.env.CIPHERTALK_MODELS_URL ? '' : 'https://miyuapp.aiqji.com')).replace(/\/+$/, '')
+const MODELS_DEV_MIRROR_BASE = (process.env.AIWC_MODELS_MIRROR_BASE
+  ?? (process.env.AIWC_MODELS_URL ? '' : 'https://aiwcapp.aiqji.com')).replace(/\/+$/, '')
 const MODELS_DEV_MIRROR_URL = MODELS_DEV_MIRROR_BASE ? `${MODELS_DEV_MIRROR_BASE}/models-dev.json` : ''
-const MODELS_DEV_CACHE_PATH = process.env.CIPHERTALK_MODELS_PATH || path.join(
+const MODELS_DEV_CACHE_PATH = process.env.AIWC_MODELS_PATH || path.join(
   getUserDataPath(),
   MODELS_DEV_SOURCE === 'https://models.dev' ? 'models-dev.json' : `models-dev-${Buffer.from(MODELS_DEV_SOURCE).toString('hex').slice(0, 16)}.json`
 )
@@ -340,7 +340,7 @@ async function fetchModelsDevData(): Promise<any> {
     try {
       const response = await fetchImpl(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'CipherTalk' }
+        headers: { 'User-Agent': 'AIWC' }
       })
       if (!response.ok) {
         throw new Error(`请求失败: ${response.status}`)
@@ -386,7 +386,7 @@ async function getModelsDevData(): Promise<any> {
     if (diskCache) modelsDevCache = diskCache
   }
 
-  const offlineOnly = process.env.CIPHERTALK_DISABLE_MODELS_FETCH === '1'
+  const offlineOnly = process.env.AIWC_DISABLE_MODELS_FETCH === '1'
   const stale = modelsDevCache?.data ?? readBundledModelsDevData()
   if (stale) {
     // 内置快照没有真实时间，按"最旧"记，后台刷新成功后会被覆盖
@@ -414,7 +414,7 @@ export async function refreshModelsDevCache(force = false): Promise<void> {
     return
   }
 
-  if (process.env.CIPHERTALK_DISABLE_MODELS_FETCH === '1') {
+  if (process.env.AIWC_DISABLE_MODELS_FETCH === '1') {
     if (diskCache) modelsDevCache = diskCache
     return
   }
@@ -556,8 +556,9 @@ function sortProviderDefinitions(providers: AIProviderMetadata[]): AIProviderMet
 }
 
 function withCustomProvider(providers: AIProviderMetadata[]): AIProviderMetadata[] {
+  // AIWC：不再内置「官方推荐」中转站入口（上游变现渠道），用户自行配置 API。
+  // RELAYONE_PROVIDER_DEFINITION 保留，供已配置过该供应商的旧账号继续解析，不再出现在可选列表中。
   return [
-    cloneMetadata(RELAYONE_PROVIDER_DEFINITION),
     cloneMetadata(CUSTOM_PROVIDER_DEFINITION),
     cloneMetadata(CODEX_SUBSCRIPTION_PROVIDER_DEFINITION),
     ...providers.filter(provider => provider.id !== RELAYONE_PROVIDER_DEFINITION.id && provider.id !== CUSTOM_PROVIDER_DEFINITION.id && provider.id !== CODEX_SUBSCRIPTION_PROVIDER_ID)

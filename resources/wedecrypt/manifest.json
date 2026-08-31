@@ -1,7 +1,7 @@
 {
-  "name": "ciphertalk-image-native",
+  "name": "aiwc-image-native",
   "version": "source-present-selfbuilt",
-  "vendor": "CipherTalk",
+  "vendor": "AIWC",
   "source": "native/image-decrypt",
   "safeNativePlatforms": [
     "macos-arm64"

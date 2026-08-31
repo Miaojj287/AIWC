@@ -193,7 +193,7 @@ export class SourceWcdbBridge {
 
   initialize(userDataPath: string): { success: boolean; error?: string } {
     try {
-      const fallbackRoot = join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'ciphertalk')
+      const fallbackRoot = join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'aiwc')
       this.cacheDir = join(userDataPath.trim() || fallbackRoot, 'wcdb-source-cache')
       this.metaPath = join(this.cacheDir, 'metadata.json')
       mkdirSync(this.cacheDir, { recursive: true })

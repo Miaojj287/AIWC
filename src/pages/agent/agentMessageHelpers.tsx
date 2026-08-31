@@ -10,8 +10,8 @@ import { Source, Sources, SourcesContent, SourcesTrigger } from '@/components/ai
 import { Shimmer } from '@/components/ai-elements/shimmer'
 
 // ====== 计划模式控制标记 ======
-const PLAN_DELEGATE_ANALYSIS_REQUIRED_PATTERN = /<!--\s*ciphertalk:delegate_analysis=required\s*-->/i
-const PLAN_CONTROL_MARKER_PATTERN = /<!--\s*ciphertalk:delegate_analysis=(?:required|not_required)\s*-->/gi
+const PLAN_DELEGATE_ANALYSIS_REQUIRED_PATTERN = /<!--\s*aiwc:delegate_analysis=required\s*-->/i
+const PLAN_CONTROL_MARKER_PATTERN = /<!--\s*aiwc:delegate_analysis=(?:required|not_required)\s*-->/gi
 
 export function stripPlanControlMarkers(text: string): string {
   return text.replace(PLAN_CONTROL_MARKER_PATTERN, '').trim()

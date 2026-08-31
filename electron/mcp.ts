@@ -1,3 +1,3 @@
-import { bootstrapCipherTalkMcpServer } from './services/mcp/bootstrap'
+import { bootstrapAIWCMcpServer } from './services/mcp/bootstrap'
 
-void bootstrapCipherTalkMcpServer()
+void bootstrapAIWCMcpServer()

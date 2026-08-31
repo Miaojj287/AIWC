@@ -1,8 +1,8 @@
 {
-  "name": "ciphertalk",
+  "name": "aiwc",
   "version": "2026.814.1",
-  "description": "密语 - 微信聊天记录查看工具",
-  "author": "ILoveBingLu",
+  "description": "AIWC - 微信聊天记录查看工具",
+  "author": "Miaojj287",
   "license": "CC-BY-NC-SA-4.0",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -38,11 +38,11 @@
     "mcp": "node scripts/mcp-runner.js",
     "mcp:probe": "node scripts/mcp-probe.js",
     "test:mcp-lifecycle": "npm run build:mcp && node scripts/test-mcp-stdio-lifecycle.cjs",
-    "cli": "npm --prefix CipherTalk-CLI run dev --",
-    "cli:install": "npm --prefix CipherTalk-CLI install",
-    "cli:typecheck": "npm --prefix CipherTalk-CLI run typecheck",
-    "cli:test": "npm --prefix CipherTalk-CLI test -- --run",
-    "cli:sync": "npm --prefix CipherTalk-CLI run sync:upstream",
+    "cli": "npm --prefix AIWC-CLI run dev --",
+    "cli:install": "npm --prefix AIWC-CLI install",
+    "cli:typecheck": "npm --prefix AIWC-CLI run typecheck",
+    "cli:test": "npm --prefix AIWC-CLI test -- --run",
+    "cli:sync": "npm --prefix AIWC-CLI run sync:upstream",
     "test:agent-qa": "node scripts/test-agent-qa-independent.cjs",
     "test:agent-stream-sanitizer": "node --experimental-strip-types scripts/test-openai-compatible-stream-sanitizer.ts",
     "test:agent-context-reset": "node --experimental-strip-types scripts/test-agent-context-reset.ts",
@@ -158,8 +158,8 @@
     "zustand": "^5.0.2"
   },
   "build": {
-    "appId": "com.ciphertalk.app",
-    "productName": "CipherTalk",
+    "appId": "com.aiwc.app",
+    "productName": "AIWC",
     "compression": "maximum",
     "npmRebuild": false,
     "afterPack": "scripts/clean-locales.js",
@@ -169,8 +169,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "ILoveBingLu",
-      "repo": "CipherTalk",
+      "owner": "Miaojj287",
+      "repo": "AIWC",
       "publishAutoUpdate": false
     },
     "win": {
@@ -246,8 +246,8 @@
         "to": "tray-mac.png"
       },
       {
-        "from": "public/miyuji",
-        "to": "builtin-pets/miyuji"
+        "from": "public/aiwcji",
+        "to": "builtin-pets/aiwcji"
       },
       {
         "from": ".tmp/release-announcement.json",
@@ -264,19 +264,19 @@
     ],
     "extraFiles": [
       {
-        "from": "scripts/ciphertalk-mcp.cmd",
-        "to": "ciphertalk-mcp.cmd"
+        "from": "scripts/aiwc-mcp.cmd",
+        "to": "aiwc-mcp.cmd"
       },
       {
-        "from": "scripts/ciphertalk-mcp-bootstrap.cjs",
-        "to": "ciphertalk-mcp-bootstrap.cjs"
+        "from": "scripts/aiwc-mcp-bootstrap.cjs",
+        "to": "aiwc-mcp-bootstrap.cjs"
       }
     ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "skills/**/*",
-      "!CipherTalk-CLI/**/*",
+      "!AIWC-CLI/**/*",
       "!resources/whisper/**/*",
       "!native-dlls/**/*",
       "!native/image-decrypt/**/*",

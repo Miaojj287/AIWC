@@ -15,9 +15,9 @@ fi
 "${CARGO_BIN}" test --manifest-path "${SCRIPT_DIR}/Cargo.toml"
 "${CARGO_BIN}" build --manifest-path "${SCRIPT_DIR}/Cargo.toml" --release
 
-SOURCE="${SCRIPT_DIR}/target/release/libciphertalk_image_native.dylib"
-DESKTOP_OUTPUT="${PROJECT_ROOT}/resources/wedecrypt/ciphertalk-image-native-macos-arm64.node"
-CLI_OUTPUT="${PROJECT_ROOT}/CipherTalk-CLI/native/darwin-arm64/ciphertalk-image-native-macos-arm64.node"
+SOURCE="${SCRIPT_DIR}/target/release/libaiwc_image_native.dylib"
+DESKTOP_OUTPUT="${PROJECT_ROOT}/resources/wedecrypt/aiwc-image-native-macos-arm64.node"
+CLI_OUTPUT="${PROJECT_ROOT}/AIWC-CLI/native/darwin-arm64/aiwc-image-native-macos-arm64.node"
 node "${PROJECT_ROOT}/scripts/sync-image-native.cjs" \
   --platform macos --arch arm64 --lib "${SOURCE}"
 cp "${SOURCE}" "${CLI_OUTPUT}"

@@ -36,7 +36,7 @@ export class CacheService {
     // 开发环境使用文档目录
     if (process.env.VITE_DEV_SERVER_URL) {
       const documentsPath = app.getPath('documents')
-      return join(documentsPath, 'CipherTalkData')
+      return join(documentsPath, 'AIWCData')
     }
 
     // 生产环境
@@ -48,14 +48,14 @@ export class CacheService {
 
     if (isOnCDrive) {
       const documentsPath = app.getPath('documents')
-      return join(documentsPath, 'CipherTalkData')
+      return join(documentsPath, 'AIWCData')
     }
 
-    return join(installDir, 'CipherTalkData')
+    return join(installDir, 'AIWCData')
   }
 
   /**
-   * 获取图片缓存目录（兼容旧的 CipherTalk/Images 路径）
+   * 获取图片缓存目录（兼容旧的 AIWC/Images 路径）
    */
   private getImagesCachePaths(): string[] {
     const cachePath = this.configService.get('cachePath')
@@ -72,8 +72,8 @@ export class CacheService {
     paths.push(join(defaultPath, 'Images'))
     paths.push(join(defaultPath, 'images'))
 
-    // 兼容旧的 CipherTalk/Images 路径
-    paths.push(join(documentsPath, 'CipherTalk', 'Images'))
+    // 兼容旧的 AIWC/Images 路径
+    paths.push(join(documentsPath, 'AIWC', 'Images'))
 
     return Array.from(new Set(paths))
   }
@@ -103,7 +103,7 @@ export class CacheService {
       const documentsPath = app.getPath('documents')
       const emojiPaths = [
         join(cachePath, 'Emojis'),
-        join(documentsPath, 'CipherTalk', 'Emojis'),
+        join(documentsPath, 'AIWC', 'Emojis'),
       ]
       for (const emojiPath of emojiPaths) {
         if (existsSync(emojiPath)) {
@@ -176,12 +176,12 @@ export class CacheService {
       const cachePath = this.getEffectiveCachePath()
 
       if (!existsSync(cachePath)) {
-        // 同时清理旧 CipherTalk 目录下可能的图片/表情残留
+        // 同时清理旧 AIWC 目录下可能的图片/表情残留
         const documentsPath = app.getPath('documents')
-        const oldCipherTalkDir = join(documentsPath, 'CipherTalk')
-        if (existsSync(oldCipherTalkDir)) {
+        const oldAIWCDir = join(documentsPath, 'AIWC')
+        if (existsSync(oldAIWCDir)) {
           for (const sub of ['Images', 'images', 'Emojis', 'logs']) {
-            const p = join(oldCipherTalkDir, sub)
+            const p = join(oldAIWCDir, sub)
             if (existsSync(p)) {
               try {
                 rmSync(p, { recursive: true, force: true })
@@ -291,9 +291,9 @@ export class CacheService {
         imagesSize += await this.getFolderSize(imgPath)
       }
 
-      // 表情包（新目录 + 旧 CipherTalk 目录）
+      // 表情包（新目录 + 旧 AIWC 目录）
       let emojisSize = await this.getFolderSize(join(cachePath, 'Emojis'))
-      emojisSize += await this.getFolderSize(join(documentsPath, 'CipherTalk', 'Emojis'))
+      emojisSize += await this.getFolderSize(join(documentsPath, 'AIWC', 'Emojis'))
 
       // 日志
       const logsSize = await this.getFolderSize(join(cachePath, 'logs'))

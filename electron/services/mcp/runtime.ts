@@ -6,7 +6,7 @@ import { findSessionDbPath } from '../dbStoragePaths'
 import type { McpHealthPayload, McpLaunchConfig, McpLauncherMode, McpStatusPayload } from './types'
 import { MCP_TOOL_NAMES } from './types'
 
-const MCP_SERVICE_NAME = 'ciphertalk-mcp'
+const MCP_SERVICE_NAME = 'aiwc-mcp'
 export const DEFAULT_MCP_PROXY_PORT = 5032
 export const DEFAULT_MCP_PROXY_TIMEOUT_MS = 30000
 
@@ -77,20 +77,20 @@ function getDecryptedDbDir(configService: ConfigService): string {
   if (cachePath) return cachePath
 
   if (!isElectronPackaged()) {
-    return join(getDocumentsPath(), 'CipherTalkData')
+    return join(getDocumentsPath(), 'AIWCData')
   }
 
   const installDir = dirname(getExePath())
   const isOnCDrive = /^[cC]:/i.test(installDir) || installDir.startsWith('\\')
   if (isOnCDrive) {
-    return join(getDocumentsPath(), 'CipherTalkData')
+    return join(getDocumentsPath(), 'AIWCData')
   }
 
-  return join(installDir, 'CipherTalkData')
+  return join(installDir, 'AIWCData')
 }
 
 function getLauncherMode(): McpLauncherMode {
-  const mode = String(process.env.CIPHERTALK_MCP_LAUNCHER || '').trim()
+  const mode = String(process.env.AIWC_MCP_LAUNCHER || '').trim()
   if (mode === 'dev-runner' || mode === 'packaged-launcher') {
     return mode
   }
@@ -120,10 +120,10 @@ function parsePositiveInt(value: unknown, fallback: number): number {
 
 export function getPackagedLauncherPath(): string {
   if (process.platform === 'darwin') {
-    return join(dirname(getExePath()), 'ciphertalk-mcp')
+    return join(dirname(getExePath()), 'aiwc-mcp')
   }
 
-  return join(dirname(getExePath()), 'ciphertalk-mcp.cmd')
+  return join(dirname(getExePath()), 'aiwc-mcp.cmd')
 }
 
 export function getMcpLaunchConfig(): McpLaunchConfig {
@@ -197,19 +197,19 @@ export function getMcpProxyConfig(config?: ConfigService): McpProxyConfig {
   try {
     const host = '127.0.0.1' as const
     const port = parsePositiveInt(
-      process.env.CIPHERTALK_MCP_PROXY_PORT || configService.get('mcpProxyPort'),
+      process.env.AIWC_MCP_PROXY_PORT || configService.get('mcpProxyPort'),
       DEFAULT_MCP_PROXY_PORT
     )
-    const token = String(process.env.CIPHERTALK_MCP_PROXY_TOKEN || configService.get('mcpProxyToken') || '')
+    const token = String(process.env.AIWC_MCP_PROXY_TOKEN || configService.get('mcpProxyToken') || '')
     const timeoutMs = parsePositiveInt(
-      process.env.CIPHERTALK_MCP_PROXY_TIMEOUT_MS,
+      process.env.AIWC_MCP_PROXY_TIMEOUT_MS,
       DEFAULT_MCP_PROXY_TIMEOUT_MS
     )
 
     return {
       host,
       port,
-      url: process.env.CIPHERTALK_MCP_PROXY_URL || `http://${host}:${port}`,
+      url: process.env.AIWC_MCP_PROXY_URL || `http://${host}:${port}`,
       token,
       timeoutMs
     }

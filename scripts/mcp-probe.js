@@ -37,8 +37,8 @@ async function main() {
   if (mode === 'packaged') {
     const launcherPath = process.argv[3] || (
       process.platform === 'darwin'
-        ? path.join(cwd, `${process.env.CIPHERTALK_PRODUCT_NAME || pkg.build?.productName || 'CipherTalk'}.app`, 'Contents', 'MacOS', 'ciphertalk-mcp')
-        : path.join(cwd, 'ciphertalk-mcp.cmd')
+        ? path.join(cwd, `${process.env.AIWC_PRODUCT_NAME || pkg.build?.productName || 'AIWC'}.app`, 'Contents', 'MacOS', 'aiwc-mcp')
+        : path.join(cwd, 'aiwc-mcp.cmd')
     )
     command = launcherPath
     args = []
@@ -56,7 +56,7 @@ async function main() {
   })
 
   const client = new Client({
-    name: 'ciphertalk-mcp-probe',
+    name: 'aiwc-mcp-probe',
     version: '1.0.0'
   })
 
@@ -92,6 +92,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('[CipherTalk MCP Probe] failed:', error)
+  console.error('[AIWC MCP Probe] failed:', error)
   process.exit(1)
 })

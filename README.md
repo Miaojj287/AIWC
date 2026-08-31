@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="welcome.jpg" alt="密语 CipherTalk" width="100%" />
+<img src="welcome.jpg" alt="AIWC" width="100%" />
 
-# 🔐 密语 CipherTalk
+# 🔐 AIWC
 
 **一款现代化的微信聊天记录查看与分析工具**
 
@@ -11,16 +11,16 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg?logo=windows)]()
 [![Electron](https://img.shields.io/badge/Electron-39-47848F.svg?logo=electron)]()
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react)]()
-[![Telegram](https://img.shields.io/badge/Telegram-Join%20Group-26A5E4.svg?logo=telegram)](https://t.me/CipherTalk)
+[![Telegram](https://img.shields.io/badge/Telegram-Join%20Group-26A5E4.svg?logo=telegram)](https://t.me/AIWC)
 
-[![使用教程](https://img.shields.io/badge/使用教程-阅读文档-000000?style=for-the-badge&logo=notion&logoColor=white)](https://ilovebinglu.notion.site/ciphertalk)
+[![使用教程](https://img.shields.io/badge/使用教程-阅读文档-000000?style=for-the-badge&logo=notion&logoColor=white)](https://ilovebinglu.notion.site/aiwc)
 
 [功能特性](#-功能特性) • [快速开始](#-快速开始) • [技术栈](#️-技术栈) • [贡献指南](#-贡献指南) • [许可证](#-许可证) • 
 [Verified on MseeP](https://mseep.ai/app/d00c9dc5-12ec-4594-895c-342550430b11)
 
-[MseeP.ai Security Assessment Badge](https://mseep.ai/app/ilovebinglu-ciphertalk)
+[MseeP.ai Security Assessment Badge](https://mseep.ai/app/ilovebinglu-aiwc)
 
-[![oosmetrics 分析加速排名前 5](https://api.oosmetrics.com/api/v1/badge/achievement/c3d78809-e411-40e7-ba11-cc1d5ba76259.svg)](https://oosmetrics.com/repo/ILoveBingLu/CipherTalk)
+[![oosmetrics 分析加速排名前 5](https://api.oosmetrics.com/api/v1/badge/achievement/c3d78809-e411-40e7-ba11-cc1d5ba76259.svg)](https://oosmetrics.com/repo/Miaojj287/AIWC)
 
 ---
 
@@ -32,7 +32,7 @@
 
 <div align="center">
 
-<a href="https://afdian.com/a/ILoveBingLu">
+<a href="https://afdian.com/a/Miaojj287">
   <img src="aifadian.jpg" alt="爱发电" width="300" />
 </a>
 
@@ -92,55 +92,55 @@ npm run dev
 
 ### 🧰 命令行子项目
 
-`CipherTalk-CLI/` 是密语仓库内的独立 CLI 子项目，提供 `miyu` 命令骨架和基础数据链路。它属于同一个 Git 仓库，但拥有自己的 `package.json`、锁文件、依赖、测试、构建产物和单独发布工作流，不参与桌面端 Electron 构建。
+`AIWC-CLI/` 是AIWC仓库内的独立 CLI 子项目，提供 `aiwc` 命令骨架和基础数据链路。它属于同一个 Git 仓库，但拥有自己的 `package.json`、锁文件、依赖、测试、构建产物和单独发布工作流，不参与桌面端 Electron 构建。
 
 **直接安装使用：**
 
 ## npm：
 
 ```bash
-npm install -g ciphertalk-cli
-miyu status
+npm install -g aiwc-cli
+aiwc status
 ```
 
 国内用户可使用 npmmirror 镜像加速：
 
 ```bash
-npm install -g ciphertalk-cli --registry https://registry.npmmirror.com
+npm install -g aiwc-cli --registry https://registry.npmmirror.com
 ```
 
 更新：
 
 ```bash
-npm install -g ciphertalk-cli@latest
+npm install -g aiwc-cli@latest
 ```
 
 卸载：
 
 ```bash
-npm uninstall -g ciphertalk-cli
+npm uninstall -g aiwc-cli
 ```
 
 ## pnpm：
 
 ```bash
-pnpm add -g ciphertalk-cli
-miyu status
+pnpm add -g aiwc-cli
+aiwc status
 ```
 
 更新：
 
 ```bash
-pnpm update -g ciphertalk-cli
+pnpm update -g aiwc-cli
 ```
 
 卸载：
 
 ```bash
-pnpm remove -g ciphertalk-cli
+pnpm remove -g aiwc-cli
 ```
 
-桌面端打包配置已显式排除 `CipherTalk-CLI/**/*`，CLI 只通过自己的工作流单独构建和发布。
+桌面端打包配置已显式排除 `AIWC-CLI/**/*`，CLI 只通过自己的工作流单独构建和发布。
 
 **参与开发：**
 
@@ -211,8 +211,8 @@ npm run build
 ## 🤝 Contributors
 感谢所有贡献者
 
-<a href="https://github.com/ILoveBingLu/CipherTalk/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ILoveBingLu/CipherTalk" />
+<a href="https://github.com/Miaojj287/AIWC/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Miaojj287/AIWC" />
 </a>
 
 ---
@@ -221,11 +221,11 @@ npm run build
 
 <div align="center">
 
-<a href="https://www.star-history.com/#ILoveBingLu/CipherTalk&type=date&legend=top-left">
+<a href="https://www.star-history.com/#Miaojj287/AIWC&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ILoveBingLu/CipherTalk&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ILoveBingLu/CipherTalk&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ILoveBingLu/CipherTalk&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Miaojj287/AIWC&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Miaojj287/AIWC&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Miaojj287/AIWC&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -233,7 +233,7 @@ npm run build
 
 <sub>一鲸落，万物生 · 愿每一段对话都被温柔以待</sub>
 
-<sub>❤️ by the CipherTalk</sub>
+<sub>❤️ by the AIWC</sub>
 
 </div>
 

@@ -11,7 +11,7 @@ const STATUS_TEXT: Record<WechatStatus, string> = {
 }
 
 const WECHAT_LOGO_SRC = './微信logo.png'
-const CIPHERTALK_LOGO_SRC = './logo.png'
+const AIWC_LOGO_SRC = './logo.png'
 
 /**
  * 设备连接弹窗 —— 单一卡片弹窗，目前只有微信扫码连接。
@@ -125,7 +125,7 @@ export function DeviceConnectDialog({ isOpen, onClose }: { isOpen: boolean; onCl
                       {qrcodeImage ? (
                         <>
                           <img src={qrcodeImage} alt="微信连接二维码" className="size-60 rounded-xl" />
-                          <img src={CIPHERTALK_LOGO_SRC} alt="" className="pointer-events-none absolute size-10 rounded-lg" />
+                          <img src={AIWC_LOGO_SRC} alt="" className="pointer-events-none absolute size-10 rounded-lg" />
                         </>
                       ) : (
                         <Spinner />

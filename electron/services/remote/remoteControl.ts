@@ -12,7 +12,7 @@ import { registerRemoteWechatHandlers } from './wechatHandlers'
 import { registerRemoteVoiceHandlers } from './voiceHandlers'
 import { registerRemoteAiSettingsHandlers } from './aiSettingsHandlers'
 
-const DEFAULT_SIGNALING_URL = 'wss://ctapp.aiqji.com'
+const DEFAULT_SIGNALING_URL = 'wss://aiwcapp.aiqji.com'
 
 let bridgeWindow: BrowserWindow | null = null
 /**
@@ -247,7 +247,7 @@ export async function startRemoteControl(ctx: MainProcessContext): Promise<{ suc
   }
 
   const signaling = String(
-    process.env.CIPHERTALK_REMOTE_SIGNALING || configService.get('remoteSignalingUrl') || DEFAULT_SIGNALING_URL
+    process.env.AIWC_REMOTE_SIGNALING || configService.get('remoteSignalingUrl') || DEFAULT_SIGNALING_URL
   )
   const port = Number(configService.get('remoteGatewayPort')) || 5033
   openBridgeWindow(

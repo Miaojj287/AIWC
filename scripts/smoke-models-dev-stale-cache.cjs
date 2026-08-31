@@ -53,7 +53,7 @@ function writeStaleCache(cachePath, data) {
 
 // ========== 用例 2：跑在子进程里，因为源地址是模块加载时读的 env ==========
 async function runMirrorFallbackCase() {
-  const cachePath = process.env.CIPHERTALK_MODELS_PATH
+  const cachePath = process.env.AIWC_MODELS_PATH
 
   // 镜像服务器起在本进程：父进程 spawnSync 期间事件循环是停的，服务端必须跟请求同进程
   const server = http.createServer((_req, res) => {
@@ -62,7 +62,7 @@ async function runMirrorFallbackCase() {
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   // 端口是 listen 后才知道的，所以必须先起服务再 require（源地址在模块加载时求值）
-  process.env.CIPHERTALK_MODELS_MIRROR_BASE = `http://127.0.0.1:${server.address().port}`
+  process.env.AIWC_MODELS_MIRROR_BASE = `http://127.0.0.1:${server.address().port}`
 
   const { getProviderDefinitions } = require(process.env.SMOKE_CATALOG_PATH)
 
@@ -88,10 +88,10 @@ async function runStaleCacheCase() {
   const cachePath = path.join(workDir, 'models-dev.json')
   writeStaleCache(cachePath, CACHE_FIXTURE)
 
-  process.env.CIPHERTALK_MODELS_PATH = cachePath
+  process.env.AIWC_MODELS_PATH = cachePath
   // 不可路由地址：TCP 连接一直挂着，模拟 models.dev 连不上
-  process.env.CIPHERTALK_MODELS_URL = 'http://10.255.255.1:81'
-  process.env.CIPHERTALK_MODELS_MIRROR_BASE = ''
+  process.env.AIWC_MODELS_URL = 'http://10.255.255.1:81'
+  process.env.AIWC_MODELS_MIRROR_BASE = ''
 
   const catalogPath = buildCatalog(workDir)
   const { getProviderDefinitions } = require(catalogPath)
@@ -115,10 +115,10 @@ function runMirrorFallbackInChild({ workDir, catalogPath }) {
   const result = spawnSync(process.execPath, [__filename, 'mirror-case'], {
     env: {
       ...process.env,
-      CIPHERTALK_MODELS_PATH: childCachePath,
+      AIWC_MODELS_PATH: childCachePath,
       // 127.0.0.1:1 立刻 ECONNREFUSED，不用等 10s 超时就会换下一个源
-      CIPHERTALK_MODELS_URL: 'http://127.0.0.1:1',
-      CIPHERTALK_MODELS_MIRROR_BASE: '',
+      AIWC_MODELS_URL: 'http://127.0.0.1:1',
+      AIWC_MODELS_MIRROR_BASE: '',
       SMOKE_CATALOG_PATH: catalogPath,
     },
     encoding: 'utf-8',

@@ -3,7 +3,7 @@
  * 检索评测 runner（L1）—— 量化语义向量检索的召回质量，不跑 agent、不调 LLM 对话。
  *
  * 自包含、读已建好的派生库：
- *   - 经 ConfigService 读 cachePath + embeddingConfig（getUserDataPath 在非 Electron 下回退 %APPDATA%/ciphertalk）。
+ *   - 经 ConfigService 读 cachePath + embeddingConfig（getUserDataPath 在非 Electron 下回退 %APPDATA%/aiwc）。
  *   - 直接 better-sqlite3 只读打开 chat_vectors.db 的 message_chunks（不经 wcdb/子进程）。
  *   - 查询向量用 fetch 直连嵌入 API（OpenAI 兼容 /embeddings）。
  *   - cosine 排序 → score.cjs 算 recall@k / MRR。

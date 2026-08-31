@@ -878,7 +878,7 @@ export class ImageDecryptService {
     totalMs: number
     error?: string
   }): void {
-    if (process.env.CIPHERTALK_IMAGE_DECRYPT_DEBUG !== '1') return
+    if (process.env.AIWC_IMAGE_DECRYPT_DEBUG !== '1') return
 
     const shouldLog =
       details.status !== 'success' ||
@@ -2775,7 +2775,7 @@ export class ImageDecryptService {
 
   /**
    * 获取所有可能的缓存根路径（用于查找已缓存的图片）
-   * 包含新路径和旧的 CipherTalk/Images 路径
+   * 包含新路径和旧的 AIWC/Images 路径
    */
   private getAllCacheRoots(): string[] {
     const roots: string[] = []
@@ -2797,8 +2797,8 @@ export class ImageDecryptService {
     roots.push(join(defaultPath, 'Images'))
     roots.push(join(defaultPath, 'images'))
 
-    // 兼容旧的 CipherTalk/Images 路径
-    const oldPath = join(documentsPath, 'CipherTalk', 'Images')
+    // 兼容旧的 AIWC/Images 路径
+    const oldPath = join(documentsPath, 'AIWC', 'Images')
     roots.push(oldPath)
 
     // 去重
@@ -2895,7 +2895,7 @@ export class ImageDecryptService {
     const result = decryptDatViaNative(inputPath, xorKey, aesKeyText || undefined)
     if (!this.nativeLogged) {
       this.nativeLogged = true
-      if (process.env.CIPHERTALK_IMAGE_DECRYPT_DEBUG === '1') {
+      if (process.env.AIWC_IMAGE_DECRYPT_DEBUG === '1') {
         if (result) {
           const metadata = nativeAddonMetadata()
           console.info('[ImageDecrypt] Native DAT 解密已启用', {

@@ -5,9 +5,9 @@ import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { OpenWcdbBridge } from '../electron/services/openWcdbBridge.ts'
 import { WcdbCore } from '../electron/services/wcdbCore.ts'
-import { WcdbCore as CliWcdbCore } from '../CipherTalk-CLI/src/services/db/wcdbCore.ts'
-import { decodeMessageContent } from '../CipherTalk-CLI/src/services/db/rowDecoders.ts'
-import { LocalKeyService } from '../CipherTalk-CLI/src/services/keyService.ts'
+import { WcdbCore as CliWcdbCore } from '../AIWC-CLI/src/services/db/wcdbCore.ts'
+import { decodeMessageContent } from '../AIWC-CLI/src/services/db/rowDecoders.ts'
+import { LocalKeyService } from '../AIWC-CLI/src/services/keyService.ts'
 
 type ConfigRow = { key: string; value: string }
 type Account = { id?: string; dbPath?: string; decryptKey?: string; wxid?: string }
@@ -79,8 +79,8 @@ const configPath = process.env.CT_CONFIG_DB || join(
   homedir(),
   'Library',
   'Application Support',
-  'ciphertalk',
-  'ciphertalk-config.db'
+  'aiwc',
+  'aiwc-config.db'
 )
 const libraryPath = process.env.CT_OPEN_WCDB_LIBRARY || join(
   process.cwd(),
@@ -89,7 +89,7 @@ const libraryPath = process.env.CT_OPEN_WCDB_LIBRARY || join(
   'libWCDBOpen.dylib'
 )
 
-if (!existsSync(configPath)) throw new Error(`CipherTalk config not found: ${configPath}`)
+if (!existsSync(configPath)) throw new Error(`AIWC config not found: ${configPath}`)
 if (!existsSync(libraryPath)) throw new Error(`Open WCDB library not found: ${libraryPath}`)
 
 const query = spawnSync('/usr/bin/sqlite3', [
@@ -97,7 +97,7 @@ const query = spawnSync('/usr/bin/sqlite3', [
   configPath,
   "select key,value from config where key in ('accounts','activeAccountId','dbPath','decryptKey','myWxid')"
 ], { encoding: 'utf8' })
-if (query.status !== 0) throw new Error(query.stderr || 'Failed to read CipherTalk config')
+if (query.status !== 0) throw new Error(query.stderr || 'Failed to read AIWC config')
 
 const values = new Map<string, string>()
 for (const row of JSON.parse(query.stdout || '[]') as ConfigRow[]) values.set(row.key, row.value)
@@ -116,7 +116,7 @@ const dbPath = String(account.dbPath || '')
 const key = String(account.decryptKey || '')
 const wxid = String(account.wxid || '')
 if (!dbPath || !/^[0-9a-fA-F]{64}$/.test(key)) {
-  throw new Error('Active CipherTalk account has no usable database path or 64-hex key')
+  throw new Error('Active AIWC account has no usable database path or 64-hex key')
 }
 
 const storage = resolveDbStoragePath(dbPath, wxid)
@@ -241,7 +241,7 @@ if (snsDbs.length) {
 core.close()
 
 const cliCore = new CliWcdbCore()
-cliCore.setPaths(join(process.cwd(), 'CipherTalk-CLI', 'native'), join(process.cwd(), '.tmp'))
+cliCore.setPaths(join(process.cwd(), 'AIWC-CLI', 'native'), join(process.cwd(), '.tmp'))
 const cliOpened = await cliCore.open(dbPath, key, wxid)
 if (!cliOpened) throw new Error('CLI open-backend integration failed to open the active account')
 const cliMetadata = await cliCore.execQueryWithParams(

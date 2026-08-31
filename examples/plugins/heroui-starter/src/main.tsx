@@ -1,6 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { connect } from 'ciphertalk-plugin-sdk'
+import { connect } from 'aiwc-plugin-sdk'
 import App from './App'
 import './styles.css'
 

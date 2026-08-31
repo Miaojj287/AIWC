@@ -66,8 +66,8 @@ function findSseDelimiterIndex(buffer: string): { index: number; length: number 
 function getSpawnEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
-  delete env.CIPHERTALK_MCP_ENTRY
-  delete env.CIPHERTALK_MCP_LAUNCHER
+  delete env.AIWC_MCP_ENTRY
+  delete env.AIWC_MCP_LAUNCHER
   return env
 }
 
@@ -119,7 +119,7 @@ export class McpReadService {
 
     if (!this.launchAttempted) {
       this.launchAttempted = true
-      process.stderr.write('[CipherTalk MCP] proxy unavailable, launching desktop app\n')
+      process.stderr.write('[AIWC MCP] proxy unavailable, launching desktop app\n')
       launchMainApplication()
     }
 
@@ -136,7 +136,7 @@ export class McpReadService {
 
     throw new McpToolError(
       'APP_NOT_RUNNING',
-      'CipherTalk 主应用未就绪，无法代理查询。',
+      'AIWC 主应用未就绪，无法代理查询。',
       '已尝试自动拉起主应用，但内部 MCP 代理未在限定时间内就绪。'
     )
   }
@@ -259,7 +259,7 @@ export class McpReadService {
       headers: proxyConfig.token ? { Authorization: `Bearer ${proxyConfig.token}` } : {}
     })
     if (!response.ok) {
-      throw new McpToolError('APP_NOT_RUNNING', 'CipherTalk 主应用内部 MCP 代理不可用。')
+      throw new McpToolError('APP_NOT_RUNNING', 'AIWC 主应用内部 MCP 代理不可用。')
     }
     return this.callProxy<McpHealthPayload>('health_check')
   }

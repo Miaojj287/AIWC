@@ -39,7 +39,7 @@ function portPair() {
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-const { connect, API_VERSION, SDK_VERSION } = await import('../ciphertalk-plugin-sdk.js')
+const { connect, API_VERSION, SDK_VERSION } = await import('../aiwc-plugin-sdk.js')
 assert.strictEqual(API_VERSION, 1, 'API_VERSION 应导出为 1')
 assert.ok(typeof SDK_VERSION === 'string', 'SDK_VERSION 应为字符串')
 
@@ -58,7 +58,7 @@ hostPort.onmessage = (e) => {
 // 投递宿主握手消息给 SDK 注册的 window message 监听器
 assert.ok(listeners.message.length > 0, 'connect 应注册 message 监听')
 listeners.message[0]({
-  data: { type: 'ciphertalk:connect', pluginId: 'com.test.p', viewId: 'index', context: { sessionId: 's1' }, theme: { vars: {} }, uiKit: '' },
+  data: { type: 'aiwc:connect', pluginId: 'com.test.p', viewId: 'index', context: { sessionId: 's1' }, theme: { vars: {} }, uiKit: '' },
   ports: [pluginPort],
 })
 

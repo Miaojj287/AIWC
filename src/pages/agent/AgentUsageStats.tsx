@@ -123,7 +123,7 @@ function truncateCacheKey(value: string | undefined): string | undefined {
 }
 
 function cacheHitRateNote(metadata: AgentMessageMetadata, cacheReadTokens: number | undefined): string | undefined {
-  const providerCache = metadata.ciphertalk?.providerCache
+  const providerCache = metadata.aiwc?.providerCache
   if (providerCache?.promptCacheEnabled === false) {
     return providerCache.reason || '当前 provider 未启用可控 prompt cache'
   }
@@ -162,7 +162,7 @@ export function buildUsageDetailRows(metadata: AgentMessageMetadata, modelInfoBy
   add('model', '模型', [metadata.modelProvider, metadata.modelId].filter(Boolean).join(' / '))
   if (metadata.finishReason) add('finishReason', '结束原因', formatFinishReason(metadata.finishReason), metadata.rawFinishReason)
 
-  const providerCache = metadata.ciphertalk?.providerCache
+  const providerCache = metadata.aiwc?.providerCache
   if (providerCache) {
     add(
       'providerCacheStatus',
@@ -200,7 +200,7 @@ export function buildUsageDetailRows(metadata: AgentMessageMetadata, modelInfoBy
   const cacheSavings = estimateCacheSavings(metadata, modelInfoByKey)
   if (cacheSavings !== null && cacheSavings > 0) add('cacheSavings', '缓存节省', formatEstimatedCost(cacheSavings), '按普通输入价与缓存读价差估算')
 
-  const trace = metadata.ciphertalk?.trace
+  const trace = metadata.aiwc?.trace
   if (trace) {
     add('traceTotalElapsed', '总耗时', trace.totalElapsedMs !== undefined ? formatDurationMs(trace.totalElapsedMs) : undefined, 'Agent 本轮端到端耗时')
     add('traceFirstOutput', '首个输出', trace.firstOutputMs !== undefined ? formatDurationMs(trace.firstOutputMs) : undefined, '从开始到首次文本/推理/工具输入')

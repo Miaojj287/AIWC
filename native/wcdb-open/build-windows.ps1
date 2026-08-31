@@ -2,11 +2,11 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
-$SourceDir = Join-Path $env:TEMP 'ciphertalk-wcdb-open-v2.1.15'
-$BuildDir = Join-Path $SourceDir 'build-ciphertalk-win64'
+$SourceDir = Join-Path $env:TEMP 'aiwc-wcdb-open-v2.1.15'
+$BuildDir = Join-Path $SourceDir 'build-aiwc-win64'
 $ExpectedCommit = 'a62d7f12191843e1f095e3c37f46785ed04ebde8'
 $OutputPath = Join-Path $ProjectRoot 'resources\wcdb_open.dll'
-$CliOutputPath = Join-Path $ProjectRoot 'CipherTalk-CLI\native\win32-x64\wcdb_open.dll'
+$CliOutputPath = Join-Path $ProjectRoot 'AIWC-CLI\native\win32-x64\wcdb_open.dll'
 
 if (-not (Test-Path (Join-Path $SourceDir '.git'))) {
   git clone --filter=blob:none --no-checkout https://github.com/Tencent/wcdb.git $SourceDir

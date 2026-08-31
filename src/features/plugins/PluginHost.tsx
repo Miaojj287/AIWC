@@ -215,7 +215,7 @@ export default function PluginHost({
     // 仅发给这个具体 iframe 的 window；端口即信道，pluginId 由宿主侧闭包绑定
     iframe.contentWindow.postMessage(
       {
-        type: 'ciphertalk:connect',
+        type: 'aiwc:connect',
         pluginId,
         viewId,
         context: context ?? {},

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Arch } = require('electron-builder');
 
-const IMAGE_NATIVE_PREFIX = 'ciphertalk-image-native-';
+const IMAGE_NATIVE_PREFIX = 'aiwc-image-native-';
 const IMAGE_NATIVE_SUFFIX = '.node';
 
 function resolveNativePlatform(electronPlatformName) {
@@ -45,7 +45,7 @@ function pruneImageNativeAddons(context) {
     const archDir = resolveNativeArch(context.arch);
     const targetFileName = `${IMAGE_NATIVE_PREFIX}${platformDir}-${archDir}${IMAGE_NATIVE_SUFFIX}`;
     const targetKey = `${platformDir}-${archDir}`;
-    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const productName = context.packager?.appInfo?.productFilename || 'AIWC';
     const resourceRoots = uniqueExistingDirs([
         path.join(context.appOutDir, 'resources'),
         path.join(context.appOutDir, 'Contents', 'Resources'),
@@ -95,7 +95,7 @@ function verifyImageNativePacked(context) {
         return;
     }
 
-    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const productName = context.packager?.appInfo?.productFilename || 'AIWC';
     const resourceRoots = uniqueExistingDirs([
         path.join(context.appOutDir, 'resources'),
         path.join(context.appOutDir, 'Contents', 'Resources'),
@@ -139,7 +139,7 @@ function verifySharpVipsPacked(context) {
         return;
     }
 
-    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const productName = context.packager?.appInfo?.productFilename || 'AIWC';
     const resourceRoots = uniqueExistingDirs([
         path.join(context.appOutDir, 'resources'),
         path.join(context.appOutDir, 'Contents', 'Resources'),
@@ -176,7 +176,7 @@ function verifyFfmpegStaticPacked(context) {
         );
     }
 
-    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const productName = context.packager?.appInfo?.productFilename || 'AIWC';
     const resourceRoots = uniqueExistingDirs([
         path.join(context.appOutDir, 'resources'),
         path.join(context.appOutDir, 'Contents', 'Resources'),
@@ -197,7 +197,7 @@ function verifyFfmpegStaticPacked(context) {
     );
 }
 
-// ChatGPT 订阅 Provider 由密语直接发起 OAuth/Responses 请求，不需要 Codex CLI 运行时。
+// ChatGPT 订阅 Provider 由AIWC直接发起 OAuth/Responses 请求，不需要 Codex CLI 运行时。
 function verifyCodexRuntimeAbsent(context) {
     const stack = [context.appOutDir];
     while (stack.length > 0) {
@@ -225,7 +225,7 @@ function verifyCodexRuntimeAbsent(context) {
 function pruneWhisperResources(context) {
     if (context.electronPlatformName !== 'win32') return;
 
-    const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+    const productName = context.packager?.appInfo?.productFilename || 'AIWC';
     const resourceRoots = uniqueExistingDirs([
         path.join(context.appOutDir, 'resources'),
         path.join(context.appOutDir, 'Contents', 'Resources'),
@@ -288,10 +288,10 @@ exports.default = async function (context) {
     verifyCodexRuntimeAbsent(context);
 
     if (context.electronPlatformName === 'darwin') {
-        const productName = context.packager?.appInfo?.productFilename || 'CipherTalk';
+        const productName = context.packager?.appInfo?.productFilename || 'AIWC';
         const launcherCandidates = [
-            path.join(context.appOutDir, 'ciphertalk-mcp'),
-            path.join(context.appOutDir, `${productName}.app`, 'Contents', 'MacOS', 'ciphertalk-mcp')
+            path.join(context.appOutDir, 'aiwc-mcp'),
+            path.join(context.appOutDir, `${productName}.app`, 'Contents', 'MacOS', 'aiwc-mcp')
         ];
 
         for (const launcherPath of launcherCandidates) {

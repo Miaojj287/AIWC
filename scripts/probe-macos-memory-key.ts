@@ -14,15 +14,15 @@ function parseStored(value: string | undefined): any {
 }
 
 const configPath = process.env.CT_CONFIG_DB || join(
-  homedir(), 'Library', 'Application Support', 'ciphertalk', 'ciphertalk-config.db'
+  homedir(), 'Library', 'Application Support', 'aiwc', 'aiwc-config.db'
 )
-if (!existsSync(configPath)) throw new Error('CipherTalk config not found')
+if (!existsSync(configPath)) throw new Error('AIWC config not found')
 
 const query = spawnSync('/usr/bin/sqlite3', [
   '-json', configPath,
   "select key,value from config where key in ('accounts','activeAccountId','dbPath','decryptKey')"
 ], { encoding: 'utf8' })
-if (query.status !== 0) throw new Error('Failed to read CipherTalk config')
+if (query.status !== 0) throw new Error('Failed to read AIWC config')
 const values = new Map<string, string>()
 for (const row of JSON.parse(query.stdout || '[]') as ConfigRow[]) values.set(row.key, row.value)
 const accounts = parseStored(values.get('accounts')) as Account[] | undefined

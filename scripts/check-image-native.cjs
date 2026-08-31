@@ -3,7 +3,7 @@ const path = require('node:path')
 
 const rootDir = path.resolve(__dirname, '..')
 const baseDir = path.join(rootDir, 'resources', 'wedecrypt')
-const addonName = 'ciphertalk-image-native'
+const addonName = 'aiwc-image-native'
 
 function resolvePlatformDir(value = process.platform) {
   if (value === 'win32') return 'win32'
@@ -19,8 +19,8 @@ function resolveArchDir(value = process.arch) {
 }
 
 function main() {
-  const platformDir = resolvePlatformDir(process.env.CIPHERTALK_IMAGE_NATIVE_PLATFORM || process.platform)
-  const archDir = resolveArchDir(process.env.CIPHERTALK_IMAGE_NATIVE_ARCH || process.arch)
+  const platformDir = resolvePlatformDir(process.env.AIWC_IMAGE_NATIVE_PLATFORM || process.platform)
+  const archDir = resolveArchDir(process.env.AIWC_IMAGE_NATIVE_ARCH || process.arch)
   const addonPath = path.join(baseDir, `${addonName}-${platformDir}-${archDir}.node`)
 
   console.log(`[image-native-check] target: ${platformDir}/${archDir}`)

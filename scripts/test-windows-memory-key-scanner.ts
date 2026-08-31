@@ -50,7 +50,7 @@ assert.deepEqual(parseWeChatTasklist(tasklist), [
   { pid: 1036, workingSetKb: 22028 },
 ])
 
-const tempDir = mkdtempSync(join(tmpdir(), 'ciphertalk-key-scan-'))
+const tempDir = mkdtempSync(join(tmpdir(), 'aiwc-key-scan-'))
 try {
   const encrypted = join(tempDir, 'encrypted.db')
   writeFileSync(encrypted, Buffer.concat([Buffer.from(salt, 'hex'), Buffer.alloc(32)]))

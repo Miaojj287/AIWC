@@ -22,7 +22,7 @@ export function getDecryptedDbDir(state: ChatServiceState): string {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     const documentsPath = getDocumentsPath()
-    return path.join(documentsPath, 'CipherTalkData')
+    return path.join(documentsPath, 'AIWCData')
   }
 
   const exePath = getExePath()
@@ -32,10 +32,10 @@ export function getDecryptedDbDir(state: ChatServiceState): string {
 
   if (isOnCDrive) {
     const documentsPath = getDocumentsPath()
-    return path.join(documentsPath, 'CipherTalkData')
+    return path.join(documentsPath, 'AIWCData')
   }
 
-  return path.join(installDir, 'CipherTalkData')
+  return path.join(installDir, 'AIWCData')
 }
 
 /**

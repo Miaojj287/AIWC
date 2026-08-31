@@ -17,7 +17,7 @@ const libraryPath = process.env.CT_OPEN_WCDB_LIBRARY || join(
 )
 assert.ok(existsSync(libraryPath), `missing open WCDB library: ${libraryPath}`)
 
-const dbPath = join(tmpdir(), `ciphertalk-open-wcdb-${process.pid}.db`)
+const dbPath = join(tmpdir(), `aiwc-open-wcdb-${process.pid}.db`)
 rmSync(dbPath, { force: true })
 const seed = spawnSync('/usr/bin/sqlite3', [
   dbPath,
@@ -78,7 +78,7 @@ function removeDatabaseFiles(path: string): void {
   rmSync(`${path}-shm`, { force: true })
 }
 
-const encryptedDbPath = join(tmpdir(), `ciphertalk-open-wcdb-encrypted-${process.pid}.db`)
+const encryptedDbPath = join(tmpdir(), `aiwc-open-wcdb-encrypted-${process.pid}.db`)
 removeDatabaseFiles(encryptedDbPath)
 const encryptedKey = '42'.repeat(32)
 
@@ -108,7 +108,7 @@ try {
 
 console.log('openWcdbBridge encrypted database tests passed')
 
-const walDbPath = join(tmpdir(), `ciphertalk-open-wcdb-wal-${process.pid}.db`)
+const walDbPath = join(tmpdir(), `aiwc-open-wcdb-wal-${process.pid}.db`)
 removeDatabaseFiles(walDbPath)
 try {
   const finishSeed = seedEncryptedDatabase(walDbPath, encryptedKey, 'wal-visible', true)
@@ -127,7 +127,7 @@ try {
 
 console.log('openWcdbBridge WAL visibility tests passed')
 
-const accountRoot = join(tmpdir(), `ciphertalk-open-wcdb-accounts-${process.pid}`)
+const accountRoot = join(tmpdir(), `aiwc-open-wcdb-accounts-${process.pid}`)
 rmSync(accountRoot, { recursive: true, force: true })
 const accountA = join(accountRoot, 'account-a')
 const accountB = join(accountRoot, 'account-b')

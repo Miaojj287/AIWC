@@ -3,7 +3,7 @@ const path = require('path')
 
 // 发版时刷新随包的 models.dev 快照。客户端被墙/离线时靠它兜底模型列表。
 // 抓取失败不阻断发布：保留仓库里已有的快照即可。
-const SOURCE = (process.env.CIPHERTALK_MODELS_URL || 'https://models.dev').replace(/\/+$/, '')
+const SOURCE = (process.env.AIWC_MODELS_URL || 'https://models.dev').replace(/\/+$/, '')
 const OUTPUT_PATH = path.join(__dirname, '../electron/assets/models-dev.json')
 const TIMEOUT_MS = 30000
 const MIN_PROVIDERS = 50
@@ -14,7 +14,7 @@ async function main() {
   try {
     const response = await fetch(`${SOURCE}/api.json`, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'CipherTalk' }
+      headers: { 'User-Agent': 'AIWC' }
     })
     if (!response.ok) {
       throw new Error(`models.dev 请求失败: ${response.status}`)

@@ -28,7 +28,7 @@ import { useAuthStore } from '../stores/authStore'
 import { resolveWelcomeConfig } from './welcomeConfig'
 import './WelcomePage.css'
 
-const GUIDE_URL = 'https://ilovebinglu.notion.site/ciphertalk'
+const GUIDE_URL = 'https://ilovebinglu.notion.site/aiwc'
 
 const steps = [
   { id: 'intro', title: '欢迎', desc: '准备开始你的本地数据探索' },
@@ -550,7 +550,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
 
         // 发送系统通知
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('CipherTalk - 图片密钥获取成功', {
+          new Notification('AIWC - 图片密钥获取成功', {
             body: '已成功获取图片密钥，可以继续下一步操作',
             icon: './logo.png'
           })
@@ -772,7 +772,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             缓存目录用于存储头像、表情与图片等本地媒体缓存。
           </Typography.Paragraph>
           {renderInfoList([
-            isMac ? '默认使用文稿目录下的 CipherTalkData' : '自动选择更适合存储的磁盘',
+            isMac ? '默认使用文稿目录下的 AIWCData' : '自动选择更适合存储的磁盘',
             '需要预留足够空间',
             '后续仍可在设置中修改'
           ])}
@@ -874,7 +874,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
   const renderCacheStep = () => (
     <div className="flex min-w-0 flex-col gap-3.5">
       {renderTextField('缓存目录', cachePath, setCachePath, {
-        placeholder: isMac ? '~/Documents/CipherTalkData' : 'D:\\CipherTalkDB',
+        placeholder: isMac ? '~/Documents/AIWCData' : 'D:\\AIWCDB',
         description: isMac ? '用于头像、表情与图片缓存，默认已选文稿目录。' : '用于头像、表情与图片缓存，已自动选择最佳磁盘。'
       })}
       <div className="flex flex-wrap items-center gap-2.5">
@@ -1221,7 +1221,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             </Modal.Header>
             <Modal.Body>
               <p className="text-sm leading-6 text-muted">
-                直接读取微信内存未获取到密钥。继续后，密语会关闭并自动重新启动微信，然后在启动过程中再次尝试获取。
+                直接读取微信内存未获取到密钥。继续后，AIWC会关闭并自动重新启动微信，然后在启动过程中再次尝试获取。
               </p>
               <p className="mt-2 text-sm font-medium text-foreground">请先保存微信中正在编辑的内容。</p>
             </Modal.Body>
@@ -1251,9 +1251,9 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
           <Card.Content className="grid grid-cols-[minmax(260px,0.78fr)_minmax(360px,1fr)] items-center gap-6 pb-2 max-[940px]:grid-cols-1">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <img src="./logo.png" alt="CipherTalk" className="size-11 shrink-0 rounded-lg shadow-[0_10px_24px_color-mix(in_oklch,var(--foreground)_12%,transparent)]" />
+                <img src="./logo.png" alt="AIWC" className="size-11 shrink-0 rounded-lg shadow-[0_10px_24px_color-mix(in_oklch,var(--foreground)_12%,transparent)]" />
                 <div className="min-w-0">
-                  <Typography.Heading level={3} className="truncate">CipherTalk 初始化</Typography.Heading>
+                  <Typography.Heading level={3} className="truncate">AIWC 初始化</Typography.Heading>
                   <Typography.Paragraph size="sm" color="muted" className="truncate">{currentStep.desc}</Typography.Paragraph>
                 </div>
               </div>

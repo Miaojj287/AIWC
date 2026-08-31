@@ -648,7 +648,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
       tray.setIgnoreDoubleClickEvents(true)
     }
 
-    tray.setToolTip('密语 CipherTalk')
+    tray.setToolTip('AIWC')
     tray.on('click', () => { void showTrayMenu() })
     tray.on('right-click', () => { void showTrayMenu() })
 
@@ -1343,7 +1343,7 @@ export function createWindowManager(ctx: MainProcessContext): WindowManager {
           nodeIntegration: false,
           webSecurity: false
         },
-        title: '获取激活码 - 密语',
+        title: '获取激活码 - AIWC',
         show: false,
         backgroundColor: '#FFFFFF',
         autoHideMenuBar: true

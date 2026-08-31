@@ -1,17 +1,17 @@
 {
-  "name": "com.ciphertalk.example.heroui-starter",
+  "name": "com.aiwc.example.heroui-starter",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "pack": "npm run build && node ./node_modules/ciphertalk-plugin-sdk/cli.cjs pack ."
+    "pack": "npm run build && node ./node_modules/aiwc-plugin-sdk/cli.cjs pack ."
   },
   "dependencies": {
     "@heroui/react": "^3.1.0",
     "@heroui/styles": "^3.1.0",
-    "ciphertalk-plugin-sdk": "^1.0.0",
+    "aiwc-plugin-sdk": "^1.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

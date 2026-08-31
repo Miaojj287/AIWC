@@ -9,7 +9,7 @@ import { scanMacosMemoryForDbKey } from './macosMemoryKeyScanner'
 import { DB_PAGE_SIZE, parseLldbKeyBytes, validateRawDbKey } from './macosLldbKeyCapture'
 
 const execFileAsync = promisify(execFile)
-const MAC_KEY_DEBUG = process.env.CIPHERTALK_MAC_KEY_DEBUG === '1'
+const MAC_KEY_DEBUG = process.env.AIWC_MAC_KEY_DEBUG === '1'
 
 function logMacKey(level: 'log' | 'warn' | 'error', ...args: any[]): void {
   if (!MAC_KEY_DEBUG) return
@@ -225,7 +225,7 @@ export class WxKeyServiceMac {
    * so any matching derivation yields the usable key; we verify the captured
    * bytes against the selected account database before returning.
    *
-   * This is source-only and account-independent: no CipherTalk DLL or persisted
+   * This is source-only and account-independent: no AIWC DLL or persisted
    * key cache is involved.
    */
   async captureDbKeyOnLaunch(

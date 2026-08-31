@@ -481,7 +481,7 @@ export class RelayOneService {
 
   private applyApiKeyToAI(apiKey: string): void {
     const configService = this.getConfigService()
-    if (!configService) throw new Error('CipherTalk 配置服务尚未就绪')
+    if (!configService) throw new Error('AIWC 配置服务尚未就绪')
     const existing = configService.getAIProviderConfig('relayone')
     configService.setAIProviderConfigAndActivate('relayone', {
       apiKey,

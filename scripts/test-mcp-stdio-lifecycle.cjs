@@ -9,7 +9,7 @@ const electronBinary = require('electron')
 
 const rootDir = path.resolve(__dirname, '..')
 const mcpEntry = path.join(rootDir, 'dist-electron', 'mcp.js')
-const readyLine = '[CipherTalk MCP] stdio server started'
+const readyLine = '[AIWC MCP] stdio server started'
 
 function startMcpServer() {
   assert.ok(
@@ -22,7 +22,7 @@ function startMcpServer() {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
-      CIPHERTALK_MCP_LAUNCHER: 'stdio-lifecycle-test'
+      AIWC_MCP_LAUNCHER: 'stdio-lifecycle-test'
     },
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true

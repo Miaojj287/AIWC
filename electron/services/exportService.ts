@@ -1023,7 +1023,7 @@ class ExportService {
         chatlab: {
           version: '0.0.2',
           exportedAt: Math.floor(Date.now() / 1000),
-          generator: 'CipherTalk'
+          generator: 'AIWC'
         },
         meta,
         members: Array.from(memberSet.values()),
@@ -1631,7 +1631,7 @@ class ExportService {
         exportInfo: {
           version: '0.0.2',
           exportedAt: Math.floor(Date.now() / 1000),
-          generator: 'CipherTalk',
+          generator: 'AIWC',
           format: 'detailed-json'
         },
         session: {
@@ -2218,7 +2218,7 @@ class ExportService {
 
       // 文件头注释
       lines.push('-- ============================================================')
-      lines.push('-- 密语 CipherTalk - 聊天记录导出')
+      lines.push('-- AIWC - 聊天记录导出')
       lines.push(`-- 生成时间: ${timestamp}`)
       lines.push(`-- 会话: ${displayName}`)
       lines.push(`-- 类型: ${isGroup ? '群聊' : '私聊'}`)
@@ -2576,7 +2576,7 @@ class ExportService {
 
       if (options.format === 'json') {
         const data = {
-          generator: 'CipherTalk',
+          generator: 'AIWC',
           exportedAt: Math.floor(Date.now() / 1000),
           total: items.length,
           moments: items
@@ -2675,7 +2675,7 @@ class ExportService {
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>朋友圈导出 - CipherTalk</title>
+<title>朋友圈导出 - AIWC</title>
 <style>
   body { margin:0; background:#f0f2f5; font-family:-apple-system,"Microsoft YaHei",sans-serif; color:#1a1a1a; }
   .m-wrap { max-width:600px; margin:0 auto; padding:24px 16px; }
@@ -2700,7 +2700,7 @@ class ExportService {
 <body>
 <div class="m-wrap">
   <div class="m-title">朋友圈导出</div>
-  <div class="m-sub">CipherTalk · 共 ${items.length} 条 · ${this.escapeHtmlText(this.formatTimestamp(Math.floor(Date.now() / 1000)))}</div>
+  <div class="m-sub">AIWC · 共 ${items.length} 条 · ${this.escapeHtmlText(this.formatTimestamp(Math.floor(Date.now() / 1000)))}</div>
   ${cards}
 </div>
 </body>
@@ -3730,7 +3730,7 @@ class ExportService {
           exportInfo: {
             version: '1.0.0',
             exportedAt: Math.floor(Date.now() / 1000),
-            generator: 'CipherTalk',
+            generator: 'AIWC',
             platform: 'wechat'
           },
           statistics: {

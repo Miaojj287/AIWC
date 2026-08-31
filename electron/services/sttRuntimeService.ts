@@ -212,7 +212,7 @@ class SttRuntimeService {
       return { success: false, sttMode, error: ready.error, errorCode: 'STT_NOT_READY' }
     }
 
-    const tempDir = await mkdtemp(join(tmpdir(), 'ciphertalk-stt-'))
+    const tempDir = await mkdtemp(join(tmpdir(), 'aiwc-stt-'))
     const wavPath = join(tempDir, 'input.wav')
 
     try {

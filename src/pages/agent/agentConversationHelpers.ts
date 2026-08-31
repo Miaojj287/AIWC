@@ -34,7 +34,7 @@ export type AgentConversationLoaded = AgentConversationRecord & {
   messages: UIMessage[]
 }
 
-export const ACTIVE_AGENT_CONVERSATION_KEY = 'ciphertalk.agent.activeConversationId'
+export const ACTIVE_AGENT_CONVERSATION_KEY = 'aiwc.agent.activeConversationId'
 export const NEW_AGENT_CONVERSATION_MARKER = 'new'
 export const STREAMING_AGENT_SAVE_INTERVAL_MS = 2000
 
@@ -212,7 +212,7 @@ export type AgentMessageMetadata = {
   modelId?: string
   /** 计划模式生成的消息：正文是"执行计划"，前端用可折叠卡片展示（默认收起）。 */
   planMode?: boolean
-  ciphertalk?: {
+  aiwc?: {
     subAgentProgress?: AgentProgressEvent[]
     toolElapsed?: Record<string, number>
     providerCache?: AgentProviderCacheStatus
@@ -230,7 +230,7 @@ function isAgentProgressEvent(value: unknown): value is AgentProgressEvent {
 
 export function readSubAgentProgressFromMessage(message: UIMessage): AgentProgressEvent[] {
   const metadata = (message as { metadata?: AgentMessageMetadata }).metadata
-  const value = metadata?.ciphertalk?.subAgentProgress
+  const value = metadata?.aiwc?.subAgentProgress
   return Array.isArray(value) ? value.filter(isAgentProgressEvent) : []
 }
 
@@ -264,8 +264,8 @@ function attachSubAgentProgressToLastAssistant(messages: UIMessage[], progress: 
       ...message,
       metadata: {
         ...metadata,
-        ciphertalk: {
-          ...(metadata.ciphertalk || {}),
+        aiwc: {
+          ...(metadata.aiwc || {}),
           subAgentProgress: progress,
         },
       },
@@ -274,7 +274,7 @@ function attachSubAgentProgressToLastAssistant(messages: UIMessage[], progress: 
 }
 
 export function readToolElapsedFromMessage(message: UIMessage): Record<string, number> {
-  const value = (message as { metadata?: AgentMessageMetadata }).metadata?.ciphertalk?.toolElapsed
+  const value = (message as { metadata?: AgentMessageMetadata }).metadata?.aiwc?.toolElapsed
   if (!value || typeof value !== 'object') return {}
   const out: Record<string, number> = {}
   for (const [key, ms] of Object.entries(value)) {
@@ -309,8 +309,8 @@ function attachToolElapsedToMessages(messages: UIMessage[], toolElapsedByKey: Re
       ...message,
       metadata: {
         ...metadata,
-        ciphertalk: {
-          ...(metadata.ciphertalk || {}),
+        aiwc: {
+          ...(metadata.aiwc || {}),
           toolElapsed: elapsed,
         },
       },

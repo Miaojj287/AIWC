@@ -292,7 +292,7 @@ class CodexSubscriptionService {
       code_challenge_method: 'S256',
       id_token_add_organizations: 'true',
       codex_cli_simplified_flow: 'true',
-      originator: 'ciphertalk',
+      originator: 'aiwc',
       state,
     })
     return {
@@ -369,8 +369,8 @@ class CodexSubscriptionService {
     const requestUsage = (accessToken: string, accountId?: string) => {
       const headers = new Headers({
         Authorization: `Bearer ${accessToken}`,
-        originator: 'ciphertalk',
-        'User-Agent': `CipherTalk/${process.platform}-${process.arch}`,
+        originator: 'aiwc',
+        'User-Agent': `AIWC/${process.platform}-${process.arch}`,
       })
       if (accountId) headers.set('ChatGPT-Account-Id', accountId)
       return usageFetch(USAGE_URL, { method: 'GET', headers })
@@ -467,8 +467,8 @@ class CodexSubscriptionService {
     const requestModels = (accessToken: string, accountId?: string) => {
       const headers = new Headers({
         Authorization: `Bearer ${accessToken}`,
-        originator: 'ciphertalk',
-        'User-Agent': `CipherTalk/${process.platform}-${process.arch}`,
+        originator: 'aiwc',
+        'User-Agent': `AIWC/${process.platform}-${process.arch}`,
       })
       if (accountId) headers.set('ChatGPT-Account-Id', accountId)
       return modelsFetch(`${MODELS_URL}?client_version=${MODELS_CLIENT_VERSION}`, { method: 'GET', headers })
@@ -535,7 +535,7 @@ class CodexSubscriptionService {
     const state = url.searchParams.get('state')
     if (!pending || state !== pending.state) {
       response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-      response.end(callbackHtml(false, '登录状态无效或已经过期，请回到密语重新登录。'))
+      response.end(callbackHtml(false, '登录状态无效或已经过期，请回到AIWC重新登录。'))
       return
     }
 
@@ -556,7 +556,7 @@ class CodexSubscriptionService {
       await upsertCodexAccount(credentials)
       this.resetCaches()
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-      response.end(callbackHtml(true, '授权信息已保存到密语，可以关闭这个页面。'))
+      response.end(callbackHtml(true, '授权信息已保存到AIWC，可以关闭这个页面。'))
       this.closeServer()
       this.emitStatus(await this.getStatus())
     } catch (error) {

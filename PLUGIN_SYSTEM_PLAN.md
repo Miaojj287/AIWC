@@ -1,4 +1,4 @@
-# CipherTalk 插件系统设计方案
+# AIWC 插件系统设计方案
 
 > 目标：让第三方插件扩展 UI（侧边栏入口、设置 tab、聊天工具栏按钮、主区域页面、独立窗口）并使用数据查询能力。
 > 两条硬约束：**不影响主进程性能（零卡顿）**、**不允许危险操作**。
@@ -110,8 +110,8 @@
 - iframe 拿不到 `electronAPI`（sandbox + 跨 origin），所有能力必经宿主中转，
   pluginId 由宿主按 iframe 实例绑定，插件无法冒充别人。
 - 每个 iframe 一条独立 `MessageChannel`，避免广播风暴。
-- 提供一个小 SDK 包（`ciphertalk-plugin-sdk`，就是 postMessage 的类型化封装），
-  插件开发者 `import { connect } from 'ciphertalk-plugin-sdk'` 即可，带完整 TS 类型。
+- 提供一个小 SDK 包（`aiwc-plugin-sdk`，就是 postMessage 的类型化封装），
+  插件开发者 `import { connect } from 'aiwc-plugin-sdk'` 即可，带完整 TS 类型。
 
 ## 4. 权限模型
 
@@ -252,7 +252,7 @@ iframe 隔离决定了插件不能直接 import 宿主运行时的组件实例�
 2. **主题 tokens 由宿主注入**。连接时注入当前主题变量（色板、字体、圆角、
    暗/亮模式），用户切换主题时宿主实时推送 `theme` 消息，SDK 自动应用到插件页
    `:root`——无需插件开发者写一行适配代码。
-3. **SDK 内置 UI 组件库**（`ciphertalk-plugin-sdk/ui` 子路径导出）：
+3. **SDK 内置 UI 组件库**（`aiwc-plugin-sdk/ui` 子路径导出）：
    `.ct-*` 类的 React 薄封装（Button / Dialog / DataTable / LazyList 等，
    react 为可选 peer 依赖），让"做一个和宿主原生观感无差别的插件页"
    成为默认体验而不是高级技巧。
@@ -264,7 +264,7 @@ iframe 隔离决定了插件不能直接 import 宿主运行时的组件实例�
 对标 Chrome 扩展 / Figma 插件的成熟流程：
 
 ```
-npx ciphertalk-plugin init my-plugin --vite   # 脚手架：Vite + TS + SDK + 类型 + 示例视图
+npx aiwc-plugin init my-plugin --vite   # 脚手架：Vite + TS + SDK + 类型 + 示例视图
 cd my-plugin && npm run dev    # 本地开发，HMR 热更新
 npm run build                  # 产出 dist/ + manifest 校验
 npm run pack                   # 打包成 <id>-1.0.0.ctp（zip）
@@ -276,7 +276,7 @@ npm run pack                   # 打包成 <id>-1.0.0.ctp（zip）
   （devServer 仅在用户显式开启"插件开发者模式"时允许，正式安装的插件忽略该字段。）
 - **安装**：`.ctp` 文件拖入插件管理页或文件选择安装 = 校验 manifest + 解压到
   `<userData>/plugins/`。卸载 = 删目录 + 清权限与私有存储。
-- **SDK 与文档**：`ciphertalk-plugin-sdk` 单包发布到 npm（类型化 API +
+- **SDK 与文档**：`aiwc-plugin-sdk` 单包发布到 npm（类型化 API +
   `/ui` 组件库 + 脚手架 CLI）；官方文档含 quickstart、API reference、2~3 个完整示例插件
   （词频统计、会话导出增强、自定义面板），示例即模板。
 - **版本兼容**：manifest `apiVersion` + SDK 内置运行时能力探测
@@ -321,7 +321,7 @@ npm run pack                   # 打包成 <id>-1.0.0.ctp（zip）
 2. `plugin:invoke` 路由 + `data.*`（sessions/contacts/messages 全量读取）+ storage + toast + clipboard → 验证：示例插件查询消息并渲染，limit/超时/并发限制生效
 3. 侧边栏菜单 + 主区域视图（PluginHost iframe 懒加载） → 验证：菜单出现、点击进入插件页、禁用后消失
 4. 设置页「插件」管理 tab → 验证：启用/禁用/卸载/权限展示全流程
-5. DX 基线：`create-ciphertalk-plugin` 脚手架 + SDK + `theme.css` 主题注入 + 开发者模式（本地目录 / devServer 热更新）+ 开发文档与示例插件 → 验证：按文档从零写出一个观感与宿主一致、支持 HMR 开发的插件
+5. DX 基线：`create-aiwc-plugin` 脚手架 + SDK + `theme.css` 主题注入 + 开发者模式（本地目录 / devServer 热更新）+ 开发文档与示例插件 → 验证：按文档从零写出一个观感与宿主一致、支持 HMR 开发的插件
 
 **第二期（功能能力开放 + 全部贡献点）**
 - 贡献点补齐：设置 tab、聊天工具栏按钮 + 会话上下文注入、独立窗口

@@ -18,7 +18,7 @@ const NAV_ICON_SIZE = 23
 const SIDEBAR_ACTION_ICON_SIZE = 23
 const APP_DISPLAY_NAME = packageJson.build?.productName || packageJson.name
 const WECHAT_LOGO_SRC = './微信logo.png'
-const CIPHERTALK_LOGO_SRC = './logo.png'
+const AIWC_LOGO_SRC = './logo.png'
 
 type RouteItem = {
   key: string
@@ -228,7 +228,7 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
   const remotePhoneIcon = (
     <span className="relative inline-flex">
       <img
-        src={CIPHERTALK_LOGO_SRC}
+        src={AIWC_LOGO_SRC}
         alt=""
         className="shrink-0 object-contain"
         style={{ width: SIDEBAR_ACTION_ICON_SIZE, height: SIDEBAR_ACTION_ICON_SIZE }}
@@ -308,7 +308,7 @@ function Sidebar({ autoCollapse = false }: { autoCollapse?: boolean }) {
 
         <div className={cn('flex flex-col gap-1', collapsed && 'items-center')}>
           {renderNavButton({
-            label: '密语 App',
+            label: 'AIWC App',
             icon: remotePhoneIcon,
             onPress: () => setRemotePhoneOpen(true),
           })}

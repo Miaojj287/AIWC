@@ -12,7 +12,7 @@ const addonPath = process.env.CT_IMAGE_NATIVE_LIBRARY || join(
   process.cwd(),
   'resources',
   'wedecrypt',
-  `ciphertalk-image-native-${platform}-${process.arch}.node`
+  `aiwc-image-native-${platform}-${process.arch}.node`
 )
 assert.ok(existsSync(addonPath), `native image addon not found: ${addonPath}`)
 const addon = requireNative(addonPath) as {
@@ -38,7 +38,7 @@ function makeV4(version: 1 | 2, aesPlain: Buffer, raw: Buffer, xorPlain: Buffer,
   return Buffer.concat([header, encryptEcbPkcs7(aesPlain, key), raw, encryptedXor])
 }
 
-const tempDir = mkdtempSync(join(tmpdir(), 'ciphertalk-native-parity-'))
+const tempDir = mkdtempSync(join(tmpdir(), 'aiwc-native-parity-'))
 try {
   const xorKey = 0x73
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Buffer.alloc(48, 0x31), 0xff, 0xd9])

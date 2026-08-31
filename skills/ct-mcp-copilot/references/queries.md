@@ -1,4 +1,4 @@
-# CipherTalk MCP Query Playbook
+# AIWC MCP Query Playbook
 
 ## Quick playbooks
 

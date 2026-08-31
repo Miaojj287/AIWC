@@ -2,7 +2,7 @@ const pkg = require('../package.json')
 const fs = require('fs')
 const path = require('path')
 
-const target = process.env.CIPHERTALK_BUILD_TARGET
+const target = process.env.AIWC_BUILD_TARGET
 const base = pkg.build || {}
 
 function appendUnique(items = [], extras = []) {
@@ -26,8 +26,8 @@ function getExtraResources(buildTarget) {
       to: 'release-announcement.json'
     },
     {
-      from: 'public/miyuji',
-      to: 'builtin-pets/miyuji',
+      from: 'public/aiwcji',
+      to: 'builtin-pets/aiwcji',
       filter: ['**/*']
     }
   ]
@@ -86,12 +86,12 @@ function getExtraFiles(buildTarget) {
   if (buildTarget === 'mac') {
     return [
       {
-        from: 'scripts/ciphertalk-mcp',
-        to: 'MacOS/ciphertalk-mcp'
+        from: 'scripts/aiwc-mcp',
+        to: 'MacOS/aiwc-mcp'
       },
       {
-        from: 'scripts/ciphertalk-mcp-bootstrap.cjs',
-        to: 'MacOS/ciphertalk-mcp-bootstrap.cjs'
+        from: 'scripts/aiwc-mcp-bootstrap.cjs',
+        to: 'MacOS/aiwc-mcp-bootstrap.cjs'
       }
     ]
   }
@@ -111,7 +111,7 @@ function getFiles(buildTarget) {
     '!.tmp/**/*',
     '!.tmp-*/**/*',
     '!.vscode/**/*',
-    '!CipherTalk-CLI/**/*',
+    '!AIWC-CLI/**/*',
     '!Docs/**/*',
     '!evaluation/**/*',
     '!examples/**/*',

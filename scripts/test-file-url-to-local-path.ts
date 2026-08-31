@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { pathToFileURL } from 'node:url'
 import { localPathFromFileUrl } from '../electron/services/fileUrlPath.ts'
 
-const abs = '/Users/kelaocai/Documents/CipherTalkData/Images/meeaaw/2021-04/x_hd.jpg'
+const abs = '/Users/kelaocai/Documents/AIWCData/Images/meeaaw/2021-04/x_hd.jpg'
 const withQuery = `${pathToFileURL(abs).toString()}?v=1785329966729`
 
 assert.equal(

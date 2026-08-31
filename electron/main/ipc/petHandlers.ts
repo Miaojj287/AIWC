@@ -19,8 +19,8 @@ export function registerPetHandlers(ctx: MainProcessContext): void {
     if (!config || config.get('petDefaultInitialized')) return
 
     if (!config.get('petCurrent') && hasBuiltinPet()) {
-      config.set('petCurrent', 'miyuji')
-      ctx.broadcastToWindows('config:changed', { key: 'petCurrent', value: 'miyuji' })
+      config.set('petCurrent', 'aiwcji')
+      ctx.broadcastToWindows('config:changed', { key: 'petCurrent', value: 'aiwcji' })
     }
     config.set('petDesktopEnabled', true)
     ctx.broadcastToWindows('config:changed', { key: 'petDesktopEnabled', value: true })

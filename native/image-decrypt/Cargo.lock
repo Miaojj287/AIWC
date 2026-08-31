@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ciphertalk-image-native"
+name = "aiwc-image-native"
 version = "0.1.0"
 dependencies = [
  "aes",

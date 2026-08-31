@@ -92,12 +92,12 @@ GitHub Release 资产包括：
 
 Windows 依赖产物为：
 
-- `CipherTalk-x.y.z-Setup.exe`
+- `AIWC-x.y.z-Setup.exe`
 - `latest.yml`
 
 macOS 依赖产物为：
 
-- `CipherTalk-x.y.z-Setup.dmg`（手动安装和应用内更新）
+- `AIWC-x.y.z-Setup.dmg`（手动安装和应用内更新）
 - `latest-mac.yml`
 
 macOS 客户端使用自定义下载流程读取 `latest-mac.yml`。下载并校验 DMG 后，

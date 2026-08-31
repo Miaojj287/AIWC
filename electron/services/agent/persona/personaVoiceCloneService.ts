@@ -129,7 +129,7 @@ function makeCustomSpeakerId(sessionId: string): string {
   const digest = createHash('sha1').update(sessionId).digest('hex').slice(0, 12)
   const nonce = `${Date.now().toString(36)}${randomUUID().replace(/-/g, '').slice(0, 8)}`
   // 豆包端到端 Realtime SC2.0 只接受 S_ / saturn_ 前缀的克隆音色。
-  return `S_ciphertalk_${digest}_${nonce}`
+  return `S_aiwc_${digest}_${nonce}`
 }
 
 function makeXiaomiVoiceId(sessionId: string, sampleHash: string): string {

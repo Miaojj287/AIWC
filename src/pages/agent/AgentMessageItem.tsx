@@ -113,7 +113,7 @@ function AgentMessageItemImpl({
   const assistantText = message.role === 'assistant' ? messageTextOf(message) : ''
   const userMessageText = message.role === 'user' ? messageTextOf(message) : ''
   const assistantTextStreaming = message.role === 'assistant' && isLastMessage && status === 'streaming'
-  const persistedTrace = (message.metadata as AgentMessageMetadata | undefined)?.ciphertalk?.trace
+  const persistedTrace = (message.metadata as AgentMessageMetadata | undefined)?.aiwc?.trace
   const persistedProcessingElapsedMs = persistedTrace?.totalElapsedMs
   // 计划模式生成的消息：正文(执行计划)走 PlanCard 折叠卡片，不再走普通 Markdown 渲染。
   // 完成后看 metadata.planMode；流式期间 metadata 还没回来，靠在途标记 runIsPlan 判定。

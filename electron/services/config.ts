@@ -502,7 +502,7 @@ export class ConfigService {
 
   constructor() {
     const userDataPath = getUserDataPath()
-    this.dbPath = path.join(userDataPath, 'ciphertalk-config.db')
+    this.dbPath = path.join(userDataPath, 'aiwc-config.db')
     this.initDatabase()
   }
 
@@ -1123,6 +1123,6 @@ export class ConfigService {
     if (configured && configured.trim().length > 0) {
       return configured
     }
-    return path.join(getUserDataPath(), 'CipherTalk')
+    return path.join(getUserDataPath(), 'AIWC')
   }
 }

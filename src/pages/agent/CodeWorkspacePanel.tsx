@@ -8,7 +8,7 @@ import type {
   CodeWorkspaceState,
 } from '@/types/electron'
 
-export const CODE_WORKSPACE_FILE_REF_MIME = 'application/x-ciphertalk-code-workspace-file'
+export const CODE_WORKSPACE_FILE_REF_MIME = 'application/x-aiwc-code-workspace-file'
 
 export type CodeWorkspaceFileDragReference = {
   name: string

@@ -26,7 +26,7 @@ import {
   useOverlayState,
   type Key
 } from '@heroui/react'
-import { ArrowUpRight, ArrowsRotateLeft, Bulb, CircleCheck, CircleQuestion, CurlyBrackets, Eye, EyeSlash, FileText, GearDot, Pencil, Picture, Plus, Rocket, Sparkles, Speedometer, TrashBin, Wallet, Wrench } from '@gravity-ui/icons'
+import { ArrowUpRight, ArrowsRotateLeft, Bulb, CircleCheck, CircleQuestion, CurlyBrackets, Eye, EyeSlash, FileText, GearDot, Pencil, Picture, Plus, Sparkles, Speedometer, TrashBin, Wallet, Wrench } from '@gravity-ui/icons'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { getAIProviders, type AIModelInfo, type AIProviderInfo } from '../../types/ai'
@@ -934,27 +934,6 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
           </div>
         )}
 
-        {configMode === 'llm' && provider !== 'relayone' && (
-          <Alert status="accent">
-            <Alert.Indicator>
-              <Rocket width={20} height={20} />
-            </Alert.Indicator>
-            <Alert.Content>
-              <Alert.Title>还没有 API Key？</Alert.Title>
-              <Alert.Description>RelayOne 官方中转：一个 Key 直连全模型，国内可用，低于官方价，注册即用。</Alert.Description>
-            </Alert.Content>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              className="shrink-0 self-center"
-              onPress={() => void window.electronAPI.shell.openExternal('https://hicccc.cc')}
-            >
-              注册获取 Key
-            </Button>
-          </Alert>
-        )}
-
         {configMode === 'llm' && isCodexSubscription && (
           <Card>
             <Card.Content>
@@ -1228,7 +1207,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
             <Alert status="default">
               <Alert.Content>
                 <Alert.Title>本地保存</Alert.Title>
-                <Alert.Description>{isCodexSubscription ? 'ChatGPT 登录凭据仅保存在密语的数据目录中，不会读取或修改电脑上的 Codex 登录。' : 'API 密钥仅保存在本地。连接测试与模型刷新会向当前服务商发起请求。'}</Alert.Description>
+                <Alert.Description>{isCodexSubscription ? 'ChatGPT 登录凭据仅保存在AIWC的数据目录中，不会读取或修改电脑上的 Codex 登录。' : 'API 密钥仅保存在本地。连接测试与模型刷新会向当前服务商发起请求。'}</Alert.Description>
               </Alert.Content>
             </Alert>
           </aside>

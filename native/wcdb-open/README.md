@@ -18,12 +18,12 @@ npm run native:wcdb-open:windows
 ```
 
 This generates `resources/wcdb_open.dll` and
-`CipherTalk-CLI/native/win32-x64/wcdb_open.dll` with the same official C Bridge. The
+`AIWC-CLI/native/win32-x64/wcdb_open.dll` with the same official C Bridge. The
 Windows build script is source-pinned but has not yet been executed in the
 current macOS-only audit environment.
 
 The generated `libWCDBOpen.dylib` contains SQLCipher and the WCDB C bridge. It
-does not contain CipherTalk's previous device binding or cloud lease client.
+does not contain AIWC's previous device binding or cloud lease client.
 
 Current status: the source build and generic row query adapter work on macOS
 arm64 in both the desktop app and CLI.

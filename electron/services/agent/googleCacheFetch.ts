@@ -61,7 +61,7 @@ async function resolveCacheEntry(
         'content-type': 'application/json',
         ...(apiKeyHeader ? { 'x-goog-api-key': apiKeyHeader } : {}),
       },
-      body: JSON.stringify({ ...prefix, ttl: `${GOOGLE_CACHE_TTL_SECONDS}s`, displayName: 'ciphertalk-agent-prefix' }),
+      body: JSON.stringify({ ...prefix, ttl: `${GOOGLE_CACHE_TTL_SECONDS}s`, displayName: 'aiwc-agent-prefix' }),
     })
     if (response.ok) {
       const payload = (await response.json().catch(() => null)) as { name?: unknown } | null

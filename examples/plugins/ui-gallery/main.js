@@ -1,4 +1,4 @@
-import { connect } from './ciphertalk-plugin-sdk.js'
+import { connect } from './aiwc-plugin-sdk.js'
 
 // 画廊纯展示 .ct-* 类；仅 toast/clipboard 用到宿主 API
 const api = await connect()

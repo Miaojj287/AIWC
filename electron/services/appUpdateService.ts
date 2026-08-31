@@ -1,11 +1,11 @@
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
-const GITHUB_OWNER = 'ILoveBingLu'
-const GITHUB_REPO = 'CipherTalk'
+const GITHUB_OWNER = 'Miaojj287'
+const GITHUB_REPO = 'AIWC'
 const GITHUB_FORCE_UPDATE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/force-update.json`
 const GITHUB_MAC_UPDATE_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/latest-mac.yml`
-const R2_UPDATE_BASE_URL = 'https://miyuapp.aiqji.com'
+const R2_UPDATE_BASE_URL = 'https://aiwcapp.aiqji.com'
 
 export type ForceUpdateReason = 'minimum-version' | 'blocked-version'
 export type AppUpdateSource = 'r2' | 'github' | 'custom' | 'none'
