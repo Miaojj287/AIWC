@@ -1,12 +1,56 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import { createHash } from 'crypto'
+import { Worker } from 'worker_threads'
 import { wxKeyService } from './wxKeyService'
+import { findElectronWorkerPath } from '../main/workers/electronWorkerPath'
+import { verifyWindowsImageAesKey } from './windowsMemoryKeyScanner'
 
 /**
  * 图片密钥服务。
- * Windows AES 密钥只通过 Rust native 内存扫描获取；macOS 走 wxKeyServiceMac。
+ * Windows AES 密钥通过开放的只读内存扫描获取；macOS 走 wxKeyServiceMac。
  */
 class ImageKeyService {
+  /**
+   * WeChat 4.x also writes the image-key code to kvcomm on Windows. The old
+   * implementation only used this deterministic source on macOS.
+   */
+  private getAesKeyFromWindowsKvcomm(userDir: string, ciphertext: Buffer): string | null {
+    if (process.platform !== 'win32') return null
+    const appData = process.env.APPDATA
+    if (!appData) return null
+    const xwechatNetRoot = path.join(appData, 'Tencent', 'xwechat')
+    if (!fs.existsSync(xwechatNetRoot)) return null
+
+    const accountDirName = path.basename(path.resolve(userDir))
+    const wxid = accountDirName.toLowerCase().startsWith('wxid_')
+      ? accountDirName.match(/^(wxid_[^_]+)/i)?.[1] || accountDirName
+      : accountDirName.replace(/_[a-zA-Z0-9]{4}$/, '')
+    const codes = new Set<number>()
+
+    try {
+      for (const entry of fs.readdirSync(xwechatNetRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^net(?:_\d+)?$/i.test(entry.name)) continue
+        const kvcommDir = path.join(xwechatNetRoot, entry.name, 'kvcomm')
+        if (!fs.existsSync(kvcommDir)) continue
+        for (const fileName of fs.readdirSync(kvcommDir)) {
+          const match = fileName.match(/^key_(\d+)_.+\.statistic$/i)
+          if (!match) continue
+          const code = Number(match[1])
+          if (Number.isInteger(code) && code > 0 && code <= 0xffff_ffff) codes.add(code)
+        }
+      }
+    } catch {
+      return null
+    }
+
+    for (const code of codes) {
+      const aesKey = createHash('md5').update(`${code}${wxid}`).digest('hex').slice(0, 16)
+      if (verifyWindowsImageAesKey(Buffer.from(aesKey, 'ascii'), ciphertext)) return aesKey
+    }
+    return null
+  }
+
   /**
    * 查找模板文件 (_t.dat)
    */
@@ -124,18 +168,51 @@ class ImageKeyService {
    * 从进程内存获取 AES 密钥
    */
   private async getAesKeyFromMemory(ciphertext: Buffer, onProgress?: (msg: string) => void): Promise<string | null> {
-    try {
-      onProgress?.('正在调用 Rust 内存扫描获取 AES 密钥...')
-      const rustKey = wxKeyService.scanImageAesKey(ciphertext)
-      if (rustKey) {
-        onProgress?.('Rust 内存扫描命中 AES 密钥')
-        return rustKey
+    const pids = wxKeyService.getWeChatPids()
+    if (!pids.length) return null
+    const workerPath = findElectronWorkerPath('imageKeyWorker.js')
+    if (!workerPath) throw new Error('图片密钥扫描组件未构建，请重新安装或构建 AIWC')
+
+    onProgress?.(`正在扫描 ${pids.length} 个微信进程的内存...`)
+    return new Promise<string | null>((resolve, reject) => {
+      const worker = new Worker(workerPath)
+      let settled = false
+      const timer = setTimeout(() => {
+        void worker.terminate()
+        reject(new Error('图片密钥内存扫描超时'))
+      }, 35_000)
+      timer.unref?.()
+
+      const finish = (error?: Error, key?: string | null) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        void worker.terminate()
+        if (error) reject(error)
+        else resolve(key || null)
       }
-    } catch (e) {
-      console.error('Rust 图片密钥扫描异常:', e)
-    }
-    onProgress?.('Rust 内存扫描未命中 AES 密钥')
-    return null
+      worker.once('error', (error: unknown) => finish(error instanceof Error ? error : new Error(String(error))))
+      worker.once('exit', (code) => {
+        if (!settled) finish(new Error(`图片密钥扫描组件意外退出（代码 ${code}）`))
+      })
+      worker.on('message', (message: any) => {
+        if (message?.ready) return
+        if (message?.progress) {
+          onProgress?.(String(message.progress))
+          return
+        }
+        if (message?.success && message?.key) {
+          onProgress?.(`内存扫描命中图片 AES 密钥（已检查 ${message.opened || 0} 个进程）`)
+          finish(undefined, String(message.key))
+          return
+        }
+        if (message?.success === false) {
+          onProgress?.(String(message.error || '内存扫描未命中图片 AES 密钥'))
+          finish(undefined, null)
+        }
+      })
+      worker.postMessage({ id: Date.now(), pids, ciphertext, timeoutMs: 30_000 })
+    })
   }
 
   /**
@@ -173,8 +250,17 @@ class ImageKeyService {
         }
       }
 
-      // 重试机制：最多尝试 3 次，每次间隔 2 秒
-      const maxRetries = 3
+      onProgress?.('正在读取微信本地 kvcomm 密钥码...')
+      const derivedAesKey = this.getAesKeyFromWindowsKvcomm(userDir, ciphertext)
+      if (derivedAesKey) {
+        onProgress?.('kvcomm 图片 AES 密钥校验成功')
+        return { success: true, xorKey, aesKey: derivedAesKey }
+      }
+      onProgress?.('kvcomm 未匹配，切换到微信进程内存扫描...')
+
+      // 扫描器会覆盖全部微信进程；保留一次短重试，以捕获刚打开图片
+      // 后才短暂进入内存的密钥，同时避免连续三次全量扫描拖得过久。
+      const maxRetries = 2
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         onProgress?.(`正在扫描微信进程内存获取 AES 密钥... (第 ${attempt}/${maxRetries} 次)`)
 
@@ -188,7 +274,7 @@ class ImageKeyService {
         }
 
         if (attempt < maxRetries) {
-          onProgress?.(`未找到密钥，等待 2 秒后重试... 请确保已打开朋友圈图片`)
+          onProgress?.(`未找到密钥，等待 2 秒后重试... 请保持刚打开的图片窗口可见`)
           await new Promise(resolve => setTimeout(resolve, 2000))
         }
       }

@@ -9,6 +9,11 @@ import { WcdbCore } from '../electron/services/wcdbCore.ts'
 
 const requireNative = createRequire(import.meta.url)
 
+if (process.platform !== 'darwin' && !process.env.CT_OPEN_WCDB_LIBRARY) {
+  console.log(JSON.stringify({ skipped: true, reason: 'open WCDB native bridge test requires macOS or CT_OPEN_WCDB_LIBRARY' }))
+  process.exit(0)
+}
+
 const libraryPath = process.env.CT_OPEN_WCDB_LIBRARY || join(
   process.cwd(),
   'resources',

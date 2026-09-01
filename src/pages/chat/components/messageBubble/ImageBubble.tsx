@@ -376,6 +376,10 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu, onImageRead
         }
       } catch { /* continue */ }
 
+      // 不要把已经无法解码、且重解也失败的路径继续留在 <img> 中。
+      // 否则浏览器会一直显示白色/灰色空块，用户也看不到可重试状态。
+      imageDataUrlCache.delete(imageCacheKey)
+      setImageLocalPath(undefined)
       setImageError(true)
     } finally {
       setImageLoading(false)

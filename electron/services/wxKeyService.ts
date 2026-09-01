@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import {
   parseWeChatTasklist,
+  scanWindowsMemoryForImageAesKey,
   scanWindowsMemoryForDbKey,
   type WindowsMemoryKeyScanResult,
 } from './windowsMemoryKeyScanner'
@@ -36,6 +37,7 @@ export interface WxAccountInfo {
 export class WxKeyService {
   private rawCandidateProcessSignature = ''
   private readonly seenRawCandidatesByDb = new Map<string, Set<string>>()
+  private readonly configCipherCandidates = new Set<string>()
 
   /**
    * 检查微信进程是否运行 (仅微信4.x Weixin.exe)
@@ -192,9 +194,9 @@ export class WxKeyService {
 
   /**
    * 使用本仓库的 TypeScript 内存扫描器获取数据库密钥和读取诊断。
-   * @param contactDbPath contact.db 完整路径（决定校验用的 salt）
+   * @param targetDbPath 要获取密钥的具体数据库路径（决定校验用的 salt）
    */
-  scanDbKeyDiag(contactDbPath: string): WxScanDiag | null {
+  scanDbKeyDiag(targetDbPath: string): WxScanDiag | null {
     const pids = this.getWeChatPids()
     if (pids.length === 0) return null
     // Helper processes appear progressively during login. Only the largest
@@ -204,12 +206,13 @@ export class WxKeyService {
     if (processSignature !== this.rawCandidateProcessSignature) {
       this.rawCandidateProcessSignature = processSignature
       this.seenRawCandidatesByDb.clear()
+      this.configCipherCandidates.clear()
     }
 
     // The IPC handler may try several account databases. Candidate history
     // must be isolated per database: a key rejected against account A still
     // needs to be validated against account B in the same polling round.
-    const dbIdentity = contactDbPath.toLowerCase()
+    const dbIdentity = targetDbPath.toLowerCase()
     let seenRawCandidates = this.seenRawCandidatesByDb.get(dbIdentity)
     if (!seenRawCandidates) {
       seenRawCandidates = new Set<string>()
@@ -232,9 +235,10 @@ export class WxKeyService {
     for (const pid of pids.slice(0, 2)) {
       if (Date.now() >= deadline) break
       try {
-        const scan = scanWindowsMemoryForDbKey(pid, contactDbPath, {
+        const scan = scanWindowsMemoryForDbKey(pid, targetDbPath, {
           deadline,
           seenRawCandidates,
+          configCipherCandidates: this.configCipherCandidates,
         })
         aggregate.dbOk ||= scan.dbOk
         aggregate.opened += scan.opened
@@ -250,8 +254,8 @@ export class WxKeyService {
   }
 
   /** 仅取密钥（诊断版的薄封装）。 */
-  scanDbKey(contactDbPath: string): string | null {
-    return this.scanDbKeyDiag(contactDbPath)?.key ?? null
+  scanDbKey(targetDbPath: string): string | null {
+    return this.scanDbKeyDiag(targetDbPath)?.key ?? null
   }
 
   /**
@@ -261,11 +265,19 @@ export class WxKeyService {
     return null
   }
 
-  /**
-   * Windows 图片 AES key 开放扫描尚未实现。
-   */
+  /** Windows 图片 AES key 只读内存扫描（同步兼容入口）。 */
   scanImageAesKey(ciphertext: Buffer): string | null {
     if (!ciphertext || ciphertext.length < 16) return null
+    const deadline = Date.now() + 30_000
+    for (const pid of this.getWeChatPids()) {
+      if (Date.now() >= deadline) break
+      try {
+        const result = scanWindowsMemoryForImageAesKey(pid, ciphertext.subarray(0, 16), deadline)
+        if (result.key) return result.key
+      } catch (error) {
+        console.warn(`微信进程 ${pid} 图片密钥扫描未完成:`, error)
+      }
+    }
     return null
   }
 
@@ -273,6 +285,7 @@ export class WxKeyService {
   dispose(): void {
     this.rawCandidateProcessSignature = ''
     this.seenRawCandidatesByDb.clear()
+    this.configCipherCandidates.clear()
   }
 
   /**

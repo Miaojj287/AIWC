@@ -106,6 +106,17 @@ export function findMessageDbPaths(): string[] {
 export function findSessionDbPath(): string | null {
   const root = getDbStoragePath()
   if (!root) return null
+  return findSessionDbPathInStorage(root)
+}
+
+/** Resolve and return the exact session database used by WCDB connection checks. */
+export function findSessionDbPathFor(dbPath: string, wxid: string): string | null {
+  const root = resolveDbStoragePath(dbPath, wxid)
+  if (!root) return null
+  return findSessionDbPathInStorage(root)
+}
+
+function findSessionDbPathInStorage(root: string): string | null {
   const candidates = collectByName(root, (name) => name === 'session.db')
   if (candidates.length === 0) return null
   candidates.sort((a, b) => scoreSession(b) - scoreSession(a) || a.localeCompare(b))

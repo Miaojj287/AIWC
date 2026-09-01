@@ -857,14 +857,14 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
                     {renderSecretField({
                       id: 'imageAesKey',
                       label: 'AES 密钥',
-                      helperText: isMac ? '16位字符串；优先走 kvcomm + wxid 验真，失败才回退到内存扫描' : '至少16个字符；自动获取时使用 Rust native 内存扫描',
+                      helperText: '16位字符串；优先走 kvcomm + wxid 验真，失败才回退到内存扫描',
                       placeholder: '例如: b123456789012345...',
                       value: imageAesKey,
                       onChange: setImageAesKey
                     })}
                     {renderStatus(imageKeyStatus)}
                     <Description>
-                      {isMac ? '优先扫描 kvcomm 和模板文件；只有前者不可用时才回退到微信进程内存扫描。' : 'Windows 使用 Rust native 扫描微信进程内存；请先在电脑微信中打开几张图片，再执行自动获取。'}
+                      优先扫描 kvcomm 和模板文件；只有前者不可用时才回退到微信进程内存扫描。
                     </Description>
                   </Fieldset.Group>
                 </Fieldset>
@@ -897,7 +897,7 @@ function DatabaseTab({ showMessage }: DatabaseTabProps) {
     }
 
     setIsGettingImageKey(true)
-    setImageKeyStatus(isMac ? '正在从 kvcomm / 模板文件获取图片密钥...' : '正在通过 Rust native 扫描微信内存...')
+    setImageKeyStatus('正在从 kvcomm / 模板文件获取图片密钥...')
 
     try {
       // 构建用户目录路径（用于 wxid 匹配）

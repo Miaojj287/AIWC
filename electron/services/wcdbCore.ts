@@ -1,9 +1,11 @@
 import { basename, join } from 'path'
-import { existsSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { createHash } from 'crypto'
 import { decodeMessageContent, getRowField, coerceRowNumber } from './chat/rowDecoders'
 import { formatWcdbOpenFailure } from './wcdbOpenFailure'
 import { OpenWcdbBridge } from './openWcdbBridge'
 import { SourceWcdbBridge } from './sourceWcdbBridge'
+import { wxKeyService } from './wxKeyService'
 
 // 消息表 local_type 列在不同微信版本下的可能列名
 const MSG_TYPE_COLUMNS = [
@@ -29,10 +31,17 @@ export class WcdbCore {
   private userDataPath: string | null = null
   private openBridge: OpenWcdbBridge | SourceWcdbBridge | null = null
   private openDefaultDbPath: string | null = null
+  private readonly databaseKeys = new Map<string, string>()
+  private readonly databaseKeyFailures = new Map<string, number>()
+  private databaseKeyCachePath = ''
 
   setPaths(resourcesPath: string, userDataPath: string, appVersion = ''): void {
     this.resourcesPath = resourcesPath
     this.userDataPath = userDataPath
+    this.databaseKeyCachePath = userDataPath
+      ? join(userDataPath, 'wcdb-source-cache', 'database-keys.json')
+      : ''
+    this.loadDatabaseKeyCache()
     void appVersion
   }
 
@@ -44,6 +53,69 @@ export class WcdbCore {
     const baseDir = this.resourcesPath || join(process.cwd(), 'resources')
     if (process.platform === 'darwin') return join(baseDir, 'macos', 'libWCDBOpen.dylib')
     return join(baseDir, 'wcdb_open.dll')
+  }
+
+  private databaseIdentity(dbPath: string): string {
+    return createHash('sha256').update(dbPath.toLowerCase()).digest('hex')
+  }
+
+  private loadDatabaseKeyCache(): void {
+    this.databaseKeys.clear()
+    if (!this.databaseKeyCachePath || !existsSync(this.databaseKeyCachePath)) return
+    try {
+      const saved = JSON.parse(readFileSync(this.databaseKeyCachePath, 'utf8')) as Record<string, string>
+      for (const [identity, key] of Object.entries(saved)) {
+        if (/^[0-9a-fA-F]{64}$/.test(key)) this.databaseKeys.set(identity, key.toLowerCase())
+      }
+    } catch {
+      // 缓存损坏不影响主数据库连接；需要时会从微信内存重新建立。
+    }
+  }
+
+  private saveDatabaseKeyCache(): void {
+    if (!this.databaseKeyCachePath) return
+    try {
+      mkdirSync(join(this.userDataPath || '', 'wcdb-source-cache'), { recursive: true })
+      writeFileSync(
+        this.databaseKeyCachePath,
+        JSON.stringify(Object.fromEntries(this.databaseKeys), null, 2),
+        'utf8'
+      )
+    } catch (error) {
+      console.warn('[wcdbCore] 保存分库密钥缓存失败:', error)
+    }
+  }
+
+  /**
+   * 微信 4.x Windows 版的 session/contact/message 数据库使用各自的直连密钥。
+   * 配置页保存的是 session.db 密钥；其他数据库首次访问时只读扫描一次，之后按路径缓存。
+   */
+  private resolveQueryKey(dbPath: string): string | null {
+    const defaultKey = this.currentKey || ''
+    if (!(this.openBridge instanceof SourceWcdbBridge) || process.platform !== 'win32') {
+      return defaultKey || null
+    }
+    if (this.openDefaultDbPath && dbPath.toLowerCase() === this.openDefaultDbPath.toLowerCase()) {
+      return defaultKey || null
+    }
+
+    const identity = this.databaseIdentity(dbPath)
+    const cached = this.databaseKeys.get(identity)
+    if (cached && this.openBridge.canOpen(dbPath, cached)) return cached
+    if (cached) this.databaseKeys.delete(identity)
+
+    const failedAt = this.databaseKeyFailures.get(identity) || 0
+    if (Date.now() - failedAt < 30_000) return null
+
+    const scanned = wxKeyService.scanDbKey(dbPath)
+    if (scanned && this.openBridge.canOpen(dbPath, scanned)) {
+      this.databaseKeys.set(identity, scanned.toLowerCase())
+      this.databaseKeyFailures.delete(identity)
+      this.saveDatabaseKeyCache()
+      return scanned
+    }
+    this.databaseKeyFailures.set(identity, Date.now())
+    return null
   }
 
   async initialize(): Promise<{ success: boolean; error?: string }> {
@@ -220,6 +292,10 @@ export class WcdbCore {
       this.currentWxid = wxid
       this.currentDbStoragePath = dbStoragePath
       this.openDefaultDbPath = openResult.matchedPath || null
+      if (this.openDefaultDbPath) {
+        this.databaseKeys.set(this.databaseIdentity(this.openDefaultDbPath), hexKey.toLowerCase())
+        this.saveDatabaseKeyCache()
+      }
       this.initialized = true
 
       return true
@@ -283,7 +359,9 @@ export class WcdbCore {
       if (!this.openBridge) return { success: false, error: '数据库后端尚未初始化' }
       const dbPath = this.resolveOpenDbPath(kind, path)
       if (!dbPath) return { success: false, error: `数据库后端缺少 ${kind || '默认'} 数据库路径` }
-      return this.openBridge.execQuery(dbPath, sql, this.currentKey || undefined)
+      const queryKey = this.resolveQueryKey(dbPath)
+      if (!queryKey) return { success: false, error: `尚未获取数据库 ${basename(dbPath)} 的独立密钥` }
+      return this.openBridge.execQuery(dbPath, sql, queryKey)
     } catch (e: any) {
       return { success: false, error: e.message || String(e) }
     }
@@ -301,6 +379,8 @@ export class WcdbCore {
     if (!this.openBridge) return { success: false, error: '数据库后端尚未初始化' }
     const dbPath = this.resolveOpenDbPath(kind, path)
     if (!dbPath) return { success: false, error: `数据库后端缺少 ${kind || '默认'} 数据库路径` }
+    const queryKey = this.resolveQueryKey(dbPath)
+    if (!queryKey) return { success: false, error: `尚未获取数据库 ${basename(dbPath)} 的独立密钥` }
     const values = (params || []).map((value: any) => {
       const descriptor = this.inferParamDescriptor(value)
       if (descriptor.type === 'null') return null
@@ -313,7 +393,7 @@ export class WcdbCore {
       if (descriptor.type === 'double') return Number(descriptor.value)
       return String(descriptor.value ?? '')
     })
-    return this.openBridge.execQueryWithParams(dbPath, sql, values, this.currentKey || undefined)
+    return this.openBridge.execQueryWithParams(dbPath, sql, values, queryKey)
   }
 
   private inferParamDescriptor(value: any): { type: string; value: any } {

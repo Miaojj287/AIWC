@@ -42,6 +42,8 @@ const CONFIG_XOR_MASK = Buffer.from(
   'hex'
 )
 const MAX_MEMORY_HITS = 128
+const IMAGE_KEY_OVERLAP_SIZE = 65
+const MAX_IMAGE_REGION_SIZE = 100 * 1024 * 1024
 
 export type WindowsMemoryKeyCandidate = MemoryDbKeyCandidate
 
@@ -61,6 +63,8 @@ export interface WindowsMemoryKeyScanOptions {
   deadline?: number
   /** Candidates retained across polling rounds so only newly loaded keys need PBKDF validation. */
   seenRawCandidates?: Set<string>
+  /** Config.Cipher 中已发现的直连密钥；后续数据库可直接本地校验，避免再次遍历进程内存。 */
+  configCipherCandidates?: Set<string>
 }
 
 export interface WeChatProcessInfo {
@@ -169,6 +173,117 @@ function isWritableReadablePage(protect: number): boolean {
     base === PAGE_EXECUTE_READWRITE ||
     base === PAGE_EXECUTE_WRITECOPY
   )
+}
+
+export interface WindowsImageKeyScanResult {
+  key: string | null
+  opened: boolean
+  bytes: number
+  candidates: number
+}
+
+function isAsciiAlphaNumeric(value: number): boolean {
+  return (
+    (value >= 0x30 && value <= 0x39) ||
+    (value >= 0x41 && value <= 0x5a) ||
+    (value >= 0x61 && value <= 0x7a)
+  )
+}
+
+function isPrintableAscii(value: number): boolean {
+  return value >= 0x20 && value <= 0x7e
+}
+
+function imageHeaderMatches(plain: Buffer): boolean {
+  return (
+    (plain[0] === 0xff && plain[1] === 0xd8 && plain[2] === 0xff) ||
+    plain.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) ||
+    plain.subarray(0, 4).equals(Buffer.from('RIFF', 'ascii')) ||
+    plain.subarray(0, 4).equals(Buffer.from('wxgf', 'ascii')) ||
+    plain.subarray(0, 3).equals(Buffer.from('GIF', 'ascii'))
+  )
+}
+
+/** Validate the first encrypted V2 image block with an AES-128-ECB candidate. */
+export function verifyWindowsImageAesKey(candidate: Buffer, ciphertext: Buffer): boolean {
+  if (candidate.length < 16 || ciphertext.length !== 16) return false
+  try {
+    const decipher = createDecipheriv('aes-128-ecb', candidate.subarray(0, 16), null)
+    decipher.setAutoPadding(false)
+    const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+    return imageHeaderMatches(plain)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Extract and verify image-key representations used by WeChat 4.x. Keeping
+ * this separate from Win32 memory access makes the matching rules testable.
+ */
+export function findWindowsImageAesKey(data: Buffer, ciphertext: Buffer): { key: string | null; candidates: number } {
+  const tested = new Set<string>()
+  let candidates = 0
+  const test = (candidate: Buffer): string | null => {
+    const key = Buffer.from(candidate.subarray(0, 16))
+    const identity = key.toString('hex')
+    if (tested.has(identity)) return null
+    tested.add(identity)
+    candidates += 1
+    return verifyWindowsImageAesKey(key, ciphertext) ? key.toString('ascii') : null
+  }
+
+  // The common representation is a delimited 32-character alphanumeric token.
+  let index = 0
+  while (index < data.length) {
+    if (!isAsciiAlphaNumeric(data[index])) {
+      index += 1
+      continue
+    }
+    const start = index
+    while (index < data.length && isAsciiAlphaNumeric(data[index])) index += 1
+    if (index - start === 32) {
+      const key = test(data.subarray(start, start + 32))
+      if (key) return { key, candidates }
+    }
+  }
+
+  // Some WeChat builds retain the same token as UTF-16LE.
+  for (let start = 0; start + 64 <= data.length; start += 1) {
+    let valid = true
+    for (let offset = 0; offset < 64; offset += 2) {
+      if (!isAsciiAlphaNumeric(data[start + offset]) || data[start + offset + 1] !== 0) {
+        valid = false
+        break
+      }
+    }
+    if (!valid) continue
+    const compact = Buffer.allocUnsafe(32)
+    for (let offset = 0; offset < 32; offset += 1) compact[offset] = data[start + offset * 2]
+    const key = test(compact)
+    if (key) return { key, candidates }
+    start += 63
+  }
+
+  // Legacy builds can store an isolated printable 16-byte key without the
+  // 32-character wrapper. Only test bounded printable runs to avoid attempting
+  // AES at every byte of ordinary text regions.
+  index = 0
+  while (index < data.length) {
+    if (!isPrintableAscii(data[index])) {
+      index += 1
+      continue
+    }
+    const start = index
+    while (index < data.length && isPrintableAscii(data[index])) index += 1
+    const length = index - start
+    if (length === 16) {
+      const key = test(data.subarray(start, start + 16))
+      if (key) return { key, candidates }
+    }
+  }
+
+  return { key: null, candidates }
 }
 
 function isReadablePage(protect: number): boolean {
@@ -302,11 +417,103 @@ export function verifyWindowsDirectDbKey(key: Buffer, encryptedFirstPage: Buffer
   }
 }
 
+/** Read-only Windows memory scan for the WeChat V2 image AES key. */
+export function scanWindowsMemoryForImageAesKey(
+  pid: number,
+  ciphertext: Buffer,
+  deadline?: number
+): WindowsImageKeyScanResult {
+  const result: WindowsImageKeyScanResult = { key: null, opened: false, bytes: 0, candidates: 0 }
+  if (
+    process.platform !== 'win32' ||
+    !Number.isInteger(pid) ||
+    pid <= 0 ||
+    ciphertext.length !== 16
+  ) return result
+
+  const kernel32 = koffi.load('kernel32.dll')
+  const openProcess = kernel32.func(
+    'uintptr_t OpenProcess(uint32_t desiredAccess, int inheritHandle, uint32_t processId)'
+  )
+  const virtualQueryEx = kernel32.func(
+    'size_t VirtualQueryEx(uintptr_t process, uintptr_t address, _Out_ uint8_t *info, size_t length)'
+  )
+  const readProcessMemory = kernel32.func(
+    'int ReadProcessMemory(uintptr_t process, uintptr_t address, _Out_ uint8_t *buffer, size_t size, _Out_ size_t *bytesRead)'
+  )
+  const closeHandle = kernel32.func('int CloseHandle(uintptr_t handle)')
+
+  const processHandle = BigInt(openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
+  if (!processHandle) return result
+  result.opened = true
+
+  try {
+    let address = 0n
+    const memoryInfo = Buffer.alloc(MEMORY_BASIC_INFORMATION_X64_SIZE)
+    while (address < MAX_USER_ADDRESS && !result.key && (!deadline || Date.now() < deadline)) {
+      memoryInfo.fill(0)
+      if (!Number(virtualQueryEx(processHandle, address, memoryInfo, memoryInfo.length))) break
+      const baseAddress = memoryInfo.readBigUInt64LE(0)
+      const regionSizeBig = memoryInfo.readBigUInt64LE(24)
+      const state = memoryInfo.readUInt32LE(32)
+      const protect = memoryInfo.readUInt32LE(36)
+
+      if (
+        state === MEM_COMMIT &&
+        isWritableReadablePage(protect) &&
+        regionSizeBig > 0n &&
+        regionSizeBig <= BigInt(MAX_IMAGE_REGION_SIZE)
+      ) {
+        const regionSize = Number(regionSizeBig)
+        let regionOffset = 0
+        let trailing = Buffer.alloc(0)
+        while (regionOffset < regionSize && !result.key && (!deadline || Date.now() < deadline)) {
+          const requested = Math.min(CHUNK_SIZE, regionSize - regionOffset)
+          const chunk = Buffer.allocUnsafe(requested)
+          const bytesReadBuffer = Buffer.alloc(8)
+          readProcessMemory(
+            processHandle,
+            baseAddress + BigInt(regionOffset),
+            chunk,
+            requested,
+            bytesReadBuffer
+          )
+          const bytesReadBig = readSizeT(bytesReadBuffer)
+          const bytesRead = bytesReadBig <= BigInt(requested) ? Number(bytesReadBig) : 0
+          if (bytesRead > 0) {
+            result.bytes += bytesRead
+            const current = chunk.subarray(0, bytesRead)
+            const searchable = trailing.length ? Buffer.concat([trailing, current]) : current
+            const found = findWindowsImageAesKey(searchable, ciphertext)
+            result.candidates += found.candidates
+            if (found.key) {
+              result.key = found.key
+              break
+            }
+            trailing = Buffer.from(searchable.subarray(Math.max(0, searchable.length - IMAGE_KEY_OVERLAP_SIZE)))
+          } else {
+            trailing = Buffer.alloc(0)
+          }
+          regionOffset += requested
+        }
+      }
+
+      const nextAddress = baseAddress + regionSizeBig
+      if (nextAddress <= address) break
+      address = nextAddress
+    }
+  } finally {
+    closeHandle(processHandle)
+  }
+  return result
+}
+
 function scanConfigCipherKey(
   virtualQueryEx: VirtualQueryExFn,
   readProcessMemory: ReadProcessMemoryFn,
   processHandle: bigint,
   encryptedFirstPage: Buffer,
+  retainedCandidates?: Set<string>,
   deadline?: number
 ): { key: string | null; candidates: number } {
   const nameAddresses = findProcessBytes(
@@ -361,6 +568,7 @@ function scanConfigCipherKey(
           tested.add(hex)
           const candidate = Buffer.from(hex, 'hex')
           if (candidate.length !== V4_KEY_SIZE || new Set(candidate).size < 15) continue
+          retainedCandidates?.add(hex)
           candidates += 1
           if (verifyWindowsDirectDbKey(candidate, encryptedFirstPage)) {
             return { key: hex, candidates }
@@ -402,6 +610,17 @@ export function scanWindowsMemoryForDbKey(
   if (!targetSalt || !encryptedFirstPage) return result
   result.dbOk = true
 
+  // Config.Cipher 同时保存多个数据库的直连密钥。第一次扫描后，联系人库、
+  // 消息库等只需用首页在本地挑出自己的密钥，不应再次扫描整个微信进程。
+  for (const hex of options.configCipherCandidates || []) {
+    const candidate = Buffer.from(hex, 'hex')
+    result.candidates += 1
+    if (verifyWindowsDirectDbKey(candidate, encryptedFirstPage)) {
+      result.key = hex
+      return result
+    }
+  }
+
   const kernel32 = koffi.load('kernel32.dll')
   const openProcess = kernel32.func(
     'uintptr_t OpenProcess(uint32_t desiredAccess, int inheritHandle, uint32_t processId)'
@@ -429,6 +648,7 @@ export function scanWindowsMemoryForDbKey(
       readProcessMemory as ReadProcessMemoryFn,
       processHandle,
       encryptedFirstPage,
+      options.configCipherCandidates,
       options.deadline
     )
   } catch {

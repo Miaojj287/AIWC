@@ -31,7 +31,11 @@ type CacheEntry = {
   walMtimeMs: number
   keyHash: string
   cachePath: string
+  /** 仅运行时使用；短时间的一组查询共享同一个数据库快照。 */
+  preparedAt?: number
 }
+
+const PREPARED_SNAPSHOT_TTL_MS = 1_000
 
 function normalizeInteger(value: bigint): number | string {
   if (value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)) {
@@ -190,6 +194,7 @@ export class SourceWcdbBridge {
   private metaPath = ''
   private cache = new Map<string, CacheEntry>()
   private resolvedKeys = new Map<string, Buffer>()
+  private rejectedKeys = new Set<string>()
 
   initialize(userDataPath: string): { success: boolean; error?: string } {
     try {
@@ -243,29 +248,45 @@ export class SourceWcdbBridge {
   }
 
   private prepareDatabase(dbPath: string, hexKey: string): string {
-    const sourceStat = statSync(dbPath)
-    const walPath = `${dbPath}-wal`
-    const walMtimeMs = existsSync(walPath) ? statSync(walPath).mtimeMs : 0
     const identity = createHash('sha256').update(dbPath.toLowerCase()).digest('hex')
     const keyHash = createHash('sha256').update(hexKey.toLowerCase()).digest('hex')
     const cachePath = join(this.cacheDir, `${identity}.db`)
     const cached = this.cache.get(identity)
+    if (
+      cached && cached.keyHash === keyHash && existsSync(cachePath) &&
+      cached.preparedAt && Date.now() - cached.preparedAt < PREPARED_SNAPSHOT_TTL_MS
+    ) {
+      return cachePath
+    }
+
+    const sourceStat = statSync(dbPath)
+    const walPath = `${dbPath}-wal`
+    const walMtimeMs = existsSync(walPath) ? statSync(walPath).mtimeMs : 0
     const key = this.resolveKey(dbPath, hexKey)
     const encrypted = !isPlaintextDatabase(dbPath)
+    let changed = false
 
     if (cached && cached.dbMtimeMs === sourceStat.mtimeMs && cached.keyHash === keyHash && existsSync(cachePath)) {
       if (cached.walMtimeMs !== walMtimeMs && existsSync(walPath)) {
         removeSqliteSidecars(cachePath)
         applyWal(walPath, cachePath, key, encrypted)
+        changed = true
       }
     } else {
       if (encrypted) decryptDatabase(dbPath, cachePath, key)
       else copyDatabase(dbPath, cachePath)
       if (existsSync(walPath)) applyWal(walPath, cachePath, key, encrypted)
+      changed = true
     }
 
-    this.cache.set(identity, { dbMtimeMs: sourceStat.mtimeMs, walMtimeMs, keyHash, cachePath })
-    writeFileSync(this.metaPath, JSON.stringify(Object.fromEntries(this.cache), null, 2), 'utf8')
+    this.cache.set(identity, { dbMtimeMs: sourceStat.mtimeMs, walMtimeMs, keyHash, cachePath, preparedAt: Date.now() })
+    if (changed) {
+      const persisted = Object.fromEntries(Array.from(this.cache.entries()).map(([key, value]) => {
+        const { preparedAt: _preparedAt, ...entry } = value
+        return [key, entry]
+      }))
+      writeFileSync(this.metaPath, JSON.stringify(persisted, null, 2), 'utf8')
+    }
     return cachePath
   }
 
@@ -273,13 +294,20 @@ export class SourceWcdbBridge {
     const identity = `${dbPath.toLowerCase()}\0${hexKey.toLowerCase()}`
     const cached = this.resolvedKeys.get(identity)
     if (cached) return cached
-    const resolved = resolveDatabaseKey(dbPath, hexKey)
-    this.resolvedKeys.set(identity, resolved)
-    return resolved
+    if (this.rejectedKeys.has(identity)) throw new Error('数据库密钥与加密首页不匹配')
+    try {
+      const resolved = resolveDatabaseKey(dbPath, hexKey)
+      this.resolvedKeys.set(identity, resolved)
+      return resolved
+    } catch (error) {
+      this.rejectedKeys.add(identity)
+      throw error
+    }
   }
 
   dispose(): void {
     // Queries use short-lived read-only SQLite handles; there is nothing to unload.
     this.resolvedKeys.clear()
+    this.rejectedKeys.clear()
   }
 }

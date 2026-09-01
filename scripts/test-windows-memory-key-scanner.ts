@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import {
   extractWindowsMemoryKeyCandidates,
   extractWindowsRawV4KeyCandidates,
+  findWindowsImageAesKey,
   parseWeChatTasklist,
   readEncryptedDbSalt,
   verifyWindowsDirectDbKey,
+  verifyWindowsImageAesKey,
 } from '../electron/services/windowsMemoryKeyScanner.ts'
 import { createCipheriv, randomBytes } from 'node:crypto'
 import { extractMemoryDbKeyCandidates } from '../electron/services/memoryDbKeyPattern.ts'
@@ -51,6 +53,27 @@ assert.deepEqual(parseWeChatTasklist(tasklist), [
   { pid: 8556, workingSetKb: 441468 },
   { pid: 1036, workingSetKb: 22028 },
 ])
+
+const imageKey = Buffer.from('a1B2c3D4e5F6g7H8', 'ascii')
+const imagePlain = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(13, 0x42)])
+const imageCipher = createCipheriv('aes-128-ecb', imageKey, null)
+imageCipher.setAutoPadding(false)
+const imageCiphertext = Buffer.concat([imageCipher.update(imagePlain), imageCipher.final()])
+assert.equal(verifyWindowsImageAesKey(imageKey, imageCiphertext), true)
+assert.equal(verifyWindowsImageAesKey(Buffer.from('wrong-key-0000000'), imageCiphertext), false)
+
+const asciiImageRecord = Buffer.from(`prefix:${imageKey.toString('ascii')}1234567890ABCDEF:suffix`, 'ascii')
+assert.equal(findWindowsImageAesKey(asciiImageRecord, imageCiphertext).key, imageKey.toString('ascii'))
+
+const utf16ImageRecord = Buffer.from(`${imageKey.toString('ascii')}1234567890ABCDEF`, 'utf16le')
+assert.equal(findWindowsImageAesKey(utf16ImageRecord, imageCiphertext).key, imageKey.toString('ascii'))
+
+const isolatedImageRecord = Buffer.concat([
+  Buffer.from([0]),
+  imageKey,
+  Buffer.from([0]),
+])
+assert.equal(findWindowsImageAesKey(isolatedImageRecord, imageCiphertext).key, imageKey.toString('ascii'))
 
 const directKey = randomBytes(32)
 const directIv = randomBytes(16)

@@ -5,6 +5,7 @@ import { dbPathService } from '../../services/dbPathService'
 import { wcdbService } from '../../services/wcdbService'
 import { wxKeyService } from '../../services/wxKeyService'
 import { wxKeyServiceMac } from '../../services/wxKeyServiceMac'
+import { findSessionDbPathFor } from '../../services/dbStoragePaths'
 import type { MainProcessContext } from '../context'
 
 /**
@@ -205,7 +206,7 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
         // structure used by scanAccount(), but its per-database key remains in
         // the read-only Config.Cipher object. Try the active account database
         // before asking the user to restart WeChat; this path also validates
-        // the candidate against that exact encrypted contact.db.
+        // the candidate against the session.db that the application actually opens.
         if (dbPath) {
           const runningWxids: string[] = []
           const pushRunningWxid = (value?: string | null) => {
@@ -216,14 +217,13 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
           pushRunningWxid(active?.wxid)
           for (const wxid of safeScanWxids(dbPath)) pushRunningWxid(wxid)
           for (const wxid of runningWxids) {
-            const contactDb = [
-              join(dbPath, wxid, 'db_storage', 'contact', 'contact.db'),
-              join(dbPath, 'db_storage', 'contact', 'contact.db'),
-            ].find(existsSync)
-            if (!contactDb) continue
-            event.sender.send('wxkey:status', { status: `正在读取并验证账号密钥: ${wxid}`, level: 1 })
-            const diag = wxKeyService.scanDbKeyDiag(contactDb)
+            const sessionDb = findSessionDbPathFor(dbPath, wxid)
+            if (!sessionDb) continue
+            event.sender.send('wxkey:status', { status: `正在读取并验证会话数据库密钥: ${wxid}`, level: 1 })
+            const diag = wxKeyService.scanDbKeyDiag(sessionDb)
             if (diag?.key) {
+              const testResult = await wcdbService.testConnection(dbPath, diag.key, wxid)
+              if (!testResult.success) continue
               ctx.getLogService()?.info('WxKey', '已登录微信 Config.Cipher 密钥获取成功', {
                 wxid,
                 keyLength: diag.key.length,
@@ -278,9 +278,9 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
         return { success: false, error: '微信进程启动超时' }
       }
 
-      // 解析候选账号目录，定位 contact.db（决定校验用的 salt）
+      // 解析候选账号目录，定位 session.db（必须与应用最终打开的数据库一致）
       if (!dbPath) {
-        return { success: false, error: '缺少数据库路径，无法定位 contact.db' }
+        return { success: false, error: '缺少数据库路径，无法定位 session.db' }
       }
       const wxids: string[] = []
       const pushWxid = (value?: string | null) => {
@@ -298,13 +298,6 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
         return { success: false, error: '未在数据库目录下找到微信账号' }
       }
 
-      const contactDbFor = (wxid: string): string | undefined => {
-        return [
-          join(dbPath, wxid, 'db_storage', 'contact', 'contact.db'),
-          join(dbPath, 'db_storage', 'contact', 'contact.db'),
-        ].find(existsSync)
-      }
-
       // 轮询内存扫描（自适应：默认不提权直接扫；若检测到一字节都读不到，
       // 判定为权限不足，返回 needAdmin 让前端提示用管理员重开）。命中后数据库验证。
       event.sender.send('wxkey:status', { status: '微信启动中，正在扫描内存获取密钥...', level: 1 })
@@ -320,7 +313,7 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
       while (Date.now() < deadline) {
         rounds++
         // 快速路径：一次性从 global_config 结构提取 db_key + 账号字段（wxid/昵称/微信号/手机号），
-        // 不依赖 contact.db。命中后把干净 wxid 前缀匹配成真实目录名，再优先做数据库验证。
+        // 不依赖单个数据库文件。命中后把干净 wxid 前缀匹配成真实目录名，再优先做数据库验证。
         const account = wxKeyService.scanAccount()
         if (account?.dbKey) {
           sawBytes = true
@@ -350,17 +343,22 @@ export function registerWxKeyHandlers(ctx: MainProcessContext): void {
         // path focused on that database; users can select/rescan another
         // account after it becomes the active one.
         for (const wxid of wxids.slice(0, 1)) {
-          const contactDb = contactDbFor(wxid)
-          if (!contactDb) continue
-          const diag = wxKeyService.scanDbKeyDiag(contactDb)
+          const sessionDb = findSessionDbPathFor(dbPath, wxid)
+          if (!sessionDb) continue
+          const diag = wxKeyService.scanDbKeyDiag(sessionDb)
           if (!diag) continue
           if (diag.bytes > 0) sawBytes = true
           if (diag.key) {
             // scanWindowsMemoryForDbKey only returns a raw key after deriving
-            // the SQLCipher key and decrypting this exact contact.db first
-            // page. Requiring the optional WCDB bridge here would duplicate
-            // that verification and break the source-only development flow.
-            event.sender.send('wxkey:status', { status: `密钥与账号数据库验证成功: ${wxid}`, level: 1 })
+            // the SQLCipher key and decrypting this exact session.db first
+            // page. Still require the same WCDB backend check used by step 7,
+            // so the UI cannot claim validation before the final connection.
+            const testResult = await wcdbService.testConnection(dbPath, diag.key, wxid)
+            if (!testResult.success) {
+              lastError = testResult.error || ''
+              continue
+            }
+            event.sender.send('wxkey:status', { status: `会话数据库密钥验证成功: ${wxid}`, level: 1 })
             ctx.getLogService()?.info('WxKey', '内存扫描密钥获取成功', { wxid, keyLength: diag.key.length })
             return { success: true, key: diag.key, validatedWxid: wxid, account: account ?? null }
           }

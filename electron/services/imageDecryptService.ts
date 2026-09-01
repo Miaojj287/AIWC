@@ -2090,7 +2090,10 @@ export class ImageDecryptService {
   private isSuspiciousBlankCachedImage(filePath: string, fileSize: number): boolean {
     const ext = extname(filePath).toLowerCase()
     if (ext !== '.jpg' && ext !== '.jpeg') return false
-    if (fileSize > 8 * 1024) return false
+    // 旧版 wxgf 转换会把第一张占位帧写成“大尺寸纯白 JPEG”。实际样本约 20KB，
+    // 原先 8KB 上限漏掉了它，导致明明已有正确 PNG 源文件却永久复用白图缓存。
+    // 仍保留尺寸/压缩率的双重判定，避免把普通小 JPEG 当成坏缓存。
+    if (fileSize > 128 * 1024) return false
 
     try {
       const data = readFileSync(filePath)
@@ -3105,14 +3108,26 @@ export class ImageDecryptService {
   private mergeHevcNaluUnits(nalUnits: Buffer[]): Buffer {
     const chunks: Buffer[] = []
     for (const unit of nalUnits) {
-      chunks.push(Buffer.from([0x00, 0x00, 0x00, 0x01]), unit)
+      const startCodeLength = this.getHevcStartCodeLength(unit)
+      const payload = startCodeLength > 0 ? unit.subarray(startCodeLength) : unit
+      if (payload.length > 0) {
+        chunks.push(Buffer.from([0x00, 0x00, 0x00, 0x01]), payload)
+      }
     }
     return Buffer.concat(chunks)
   }
 
   private getHevcNalType(unit: Buffer): number | null {
     if (!unit.length) return null
-    return (unit[0] >> 1) & 0x3f
+    const offset = this.getHevcStartCodeLength(unit)
+    if (offset >= unit.length) return null
+    return (unit[offset] >> 1) & 0x3f
+  }
+
+  private getHevcStartCodeLength(unit: Buffer): number {
+    if (unit.length >= 4 && unit[0] === 0 && unit[1] === 0 && unit[2] === 0 && unit[3] === 1) return 4
+    if (unit.length >= 3 && unit[0] === 0 && unit[1] === 0 && unit[2] === 1) return 3
+    return 0
   }
 
   private isProbablyBlankConvertedJpeg(data: Buffer): boolean {

@@ -112,6 +112,15 @@ export default defineConfig(async () => {
           }
         },
         {
+          entry: 'electron/imageKeyWorker.ts',
+          vite: {
+            build: {
+              outDir: 'dist-electron',
+              rollupOptions: { external }
+            }
+          }
+        },
+        {
           entry: 'electron/wcdbUtilityProcess.ts',
           vite: {
             build: {

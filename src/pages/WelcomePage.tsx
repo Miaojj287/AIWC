@@ -393,9 +393,8 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         setError('')
         setShowWechatPathPrompt(false)
 
-        // Windows 源码扫描器返回 validatedWxid 前已经用对应 contact.db
-        // 的加密首个页面验证过密钥。优先采用这个权威结果，避免再调用
-        // 可选的 WCDB Bridge，也要同步更新真正控制步骤状态的布尔值。
+        // Windows 扫描器返回 validatedWxid 前已经用对应 session.db
+        // 及 WCDB 后端完成验证；它与最后一步打开的是同一个数据库。
         if (result.validatedWxid) {
           setWxid(result.validatedWxid)
           setIsAccountVerified(true)
@@ -805,7 +804,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             图片密钥用于解密微信图片，可自动获取，也可以稍后手动填写。
           </Typography.Paragraph>
           {renderInfoList([
-            isMac ? '优先通过 kvcomm 码和模板文件推导' : '通过 Rust native 扫描微信进程内存',
+            isMac ? '优先通过 kvcomm 码和模板文件推导' : '优先通过 kvcomm 码和模板文件推导',
             isMac ? 'kvcomm 失败时再回退到进程内存扫描' : '请先在电脑微信中打开几张图片',
             '此步骤可跳过'
           ])}
@@ -1057,8 +1056,8 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         {isFetchingImageKey ? '获取中' : '自动获取图片密钥'}
       </Button>
       {imageKeyStatus && renderStatusAlert(imageKeyStatus, 'default')}
-      {isFetchingImageKey && renderStatusAlert(isMac ? '正在尝试 kvcomm / 内存扫描，请稍候。' : '正在通过 Rust native 扫描微信内存，请稍候。', 'accent')}
-      <Description>{isMac ? '优先从 kvcomm 和模板文件推导，失败后回退到内存扫描。' : 'Windows 使用 Rust native 内存扫描；如获取失败，请先在电脑微信中打开查看几张图片后重试。'}</Description>
+      {isFetchingImageKey && renderStatusAlert('正在尝试 kvcomm / 内存扫描，请稍候。', 'accent')}
+      <Description>优先从 kvcomm 和模板文件推导，失败后回退到内存扫描。</Description>
     </div>
   )
 

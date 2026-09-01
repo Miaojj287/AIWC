@@ -239,7 +239,7 @@ export function registerMediaHandlers(ctx: MainProcessContext): void {
     }
   })
 
-  // 图片密钥获取：Windows 使用 Rust native 内存扫描，macOS 保留 kvcomm / 内存扫描链路。
+  // 图片密钥获取：Windows 使用后台只读内存扫描，macOS 保留 kvcomm / 内存扫描链路。
   ipcMain.handle('imageKey:getImageKeys', async (event, userDir: string) => {
     const resolvedUserDir = resolveImageKeyUserDir(userDir)
     ctx.getLogService()?.info('ImageKey', '开始获取图片密钥', { userDir, resolvedUserDir })
@@ -285,31 +285,31 @@ export function registerMediaHandlers(ctx: MainProcessContext): void {
     try {
       const wechatPid = wxKeyService.getWeChatPid()
       if (!wechatPid) {
-        ctx.getLogService()?.info('ImageKey', '未检测到微信进程，无法执行 Rust 内存扫描')
+        ctx.getLogService()?.info('ImageKey', '未检测到微信进程，无法执行图片密钥内存扫描')
         return {
           success: false,
           error: '获取图片密钥失败：未检测到微信进程。请登录微信并打开几张图片后重试。'
         }
       }
 
-      event.sender.send('imageKey:progress', '正在通过 Rust 内存扫描获取图片密钥...')
+      event.sender.send('imageKey:progress', '正在扫描微信进程内存获取图片密钥...')
       const memResult = await imageKeyService.getImageKeys(
         resolvedUserDir,
         (msg) => event.sender.send('imageKey:progress', msg)
       )
       if (memResult.success) {
-        ctx.getLogService()?.info('ImageKey', '图片密钥获取成功（Rust 内存扫描）', {
+        ctx.getLogService()?.info('ImageKey', '图片密钥获取成功（Windows 内存扫描）', {
           xorKey: memResult.xorKey,
           aesKey: memResult.aesKey
         })
         return memResult
       }
 
-      ctx.getLogService()?.warn('ImageKey', 'Rust 内存扫描图片密钥失败', { error: memResult.error })
+      ctx.getLogService()?.warn('ImageKey', 'Windows 内存扫描图片密钥失败', { error: memResult.error })
 
       return {
         success: false,
-        error: memResult.error || '获取图片密钥失败：Rust 内存扫描未命中。请确保微信已登录并查看过图片后重试。'
+        error: memResult.error || '获取图片密钥失败：Windows 内存扫描未命中。请确保微信已登录并查看过图片后重试。'
       }
     } catch (e) {
       ctx.getLogService()?.error('ImageKey', '图片密钥获取异常', { error: String(e) })

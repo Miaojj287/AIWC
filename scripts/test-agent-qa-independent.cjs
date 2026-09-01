@@ -36,6 +36,7 @@ function walkFiles(dir, files = []) {
 
 function assertNoForbiddenPattern(pattern, label) {
   const root = fromRoot('electron', 'services', 'ai-agent')
+  if (!fs.existsSync(root)) return
   const matches = []
   for (const file of walkFiles(root)) {
     const relative = path.relative(rootDir, file)
@@ -75,6 +76,12 @@ function makeMessage(overrides = {}) {
 }
 
 async function main() {
+  const agentRoot = fromRoot('electron', 'services', 'ai-agent')
+  if (!fs.existsSync(agentRoot)) {
+    console.log('Agent QA independent tests skipped: AI agent feature is not present in this build.')
+    return
+  }
+
   assertNoForbiddenPattern(/executeMcpTool|from .*mcp|Mcp/, 'MCP dependency')
   assertNoForbiddenPattern(/chatService|httpApi|retrievalEngine|memoryDatabase|chatSearchIndexService/, 'business service dependency')
 
