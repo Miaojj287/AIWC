@@ -15,6 +15,7 @@ $Source = Join-Path $ScriptDir 'target\release\aiwc_image_native.dll'
 $DesktopOutput = Join-Path $ProjectRoot 'resources\wedecrypt\aiwc-image-native-win32-x64.node'
 $CliOutput = Join-Path $ProjectRoot 'AIWC-CLI\native\win32-x64\aiwc-image-native-win32-x64.node'
 node (Join-Path $ProjectRoot 'scripts\sync-image-native.cjs') --platform win32 --arch x64 --lib $Source
+New-Item -ItemType Directory -Force (Split-Path -Parent $CliOutput) | Out-Null
 Copy-Item -Force $Source $CliOutput
 Write-Host "Synced $DesktopOutput"
 Write-Host "Synced $CliOutput"
