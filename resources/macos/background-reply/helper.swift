@@ -1,4 +1,5 @@
-// Experimental AX-only backend. No application activation, clipboard or keyboard events.
+// Sending uses AX only. Explicit diagnostic actions can post fixed keys to WeChat's PID.
+// No application activation, mouse events, global keys or clipboard writes.
 import Cocoa
 import ApplicationServices
 
@@ -95,6 +96,51 @@ func run(_ req: Request) throws -> [String: Any] {
             sharing = state == 0 ? "excluded" : "allowed"
         } else { sharing = "unknown" }
         return ["ok": true, "windowSharing": sharing, "screenCapturePermission": CGPreflightScreenCaptureAccess(), "hasWritableWindowInput": !writableInputs.isEmpty, "windowNodeCount": windowNodes.count, "active": app.isActive, "version": app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String } ?? "unknown", "nodes": rows]
+    }
+    if req.action == "probe-search" || req.action == "probe-settings" {
+        // Explicit diagnostics only: fixed Cmd+F or Cmd+comma. No arbitrary text, Return or clipboard writes.
+        guard !app.isActive else { try fail("busy", "微信正在前台，未执行诊断按键") }
+        let probingSettings = req.action == "probe-settings"
+        let settingsTitles = ["设置", "Settings", "Preferences"]
+        let windowsBefore = value(root, "AXWindows") as? [AXUIElement] ?? []
+        if probingSettings && windowsBefore.contains(where: { settingsTitles.contains(string($0, "AXTitle")) }) {
+            try fail("busy", "设置窗口已经打开，未执行诊断以免影响你的操作")
+        }
+        let keyCode: CGKeyCode = probingSettings ? 43 : 3
+        let frontBefore = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        let cursorBefore = NSEvent.mouseLocation
+        let clipboardBefore = NSPasteboard.general.changeCount
+        guard let source = CGEventSource(stateID: .privateState),
+              let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            try fail("unsupported", "无法创建定向输入事件")
+        }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.postToPid(app.processIdentifier)
+        up.postToPid(app.processIdentifier)
+        Thread.sleep(forTimeInterval: 0.3)
+        let windowsAfter = value(root, "AXWindows") as? [AXUIElement] ?? []
+        let createdSettings = windowsAfter.filter { node in
+            settingsTitles.contains(string(node, "AXTitle")) && !windowsBefore.contains(where: { CFEqual($0, node) })
+        }
+        let effectVerified = probingSettings && createdSettings.count == 1
+        var settingsClosed = false
+        if effectVerified, let close = value(createdSettings[0], "AXCloseButton"), CFGetTypeID(close) == AXUIElementGetTypeID() {
+            let button = close as! AXUIElement
+            if AXUIElementPerformAction(button, "AXPress" as CFString) == .success {
+                Thread.sleep(forTimeInterval: 0.15)
+                settingsClosed = !(value(root, "AXWindows") as? [AXUIElement] ?? []).contains(where: { CFEqual($0, createdSettings[0]) })
+            }
+        }
+        let cursorAfter = NSEvent.mouseLocation
+        let frontAfter = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        return ["ok": true, "diagnostic": probingSettings ? "pid-directed-settings" : "pid-directed-command-f", "sentMessage": false,
+                "frontmostUnchanged": frontBefore == frontAfter,
+                "wechatBecameFrontmost": frontAfter == app.processIdentifier,
+                "cursorUnchanged": cursorBefore == cursorAfter,
+                "clipboardUnchanged": clipboardBefore == NSPasteboard.general.changeCount,
+                "targetEffectVerified": effectVerified, "createdSettingsClosed": settingsClosed]
     }
     guard let profile = req.profile, let name = req.name, !name.isEmpty else { try fail("unsupported", "缺少已验证的控件配置或会话名") }
     guard let bundleURL = app.bundleURL, Bundle(url: bundleURL)?.infoDictionary?["CFBundleShortVersionString"] as? String == profile.wechatVersion else { try fail("unsupported", "微信版本与控件配置不一致") }

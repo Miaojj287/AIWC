@@ -26,7 +26,9 @@
     "background-reply:build": "node scripts/background-reply.cjs",
     "background-reply:inspect": "node scripts/background-reply.cjs inspect",
     "predev": "node scripts/background-reply.cjs",
-    "prebuild": "node scripts/background-reply.cjs"
+    "prebuild": "node scripts/background-reply.cjs",
+    "background-reply:probe-input": "node scripts/background-reply.cjs probe-search",
+    "background-reply:probe-settings": "node scripts/background-reply.cjs probe-settings"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.36",
