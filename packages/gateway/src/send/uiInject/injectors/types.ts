@@ -28,5 +28,8 @@ export const INJECT_FAILURE_TEXT: Record<InjectFailure, string> = {
   'no-window': '找不到微信窗口',
   'focus-failed': '微信窗口没能激活',
   busy: '输入通道一直被占用',
-  'no-permission': '未授予辅助功能权限，请在「系统设置 → 隐私与安全性 → 辅助功能」中勾选 AIWC',
+  // A grant that already exists can still be stale: macOS ties it to the exact binary, so after an
+  // app update / rebuild the switch reads as on while the check fails. Removing the entry and
+  // adding it again is the only reliable fix, so the copy says that rather than just "go tick it".
+  'no-permission': '未授予辅助功能权限。若列表里已有 AIWC 却仍报此错，请先用「−」移除再重新添加并勾选',
 }

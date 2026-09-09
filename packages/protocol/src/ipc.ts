@@ -232,7 +232,7 @@ export const INVOKE_CHANNELS = [
   'substrate:listSessions', 'substrate:getSession', 'substrate:listMessages', 'substrate:getContext', 'substrate:search', 'substrate:listContacts', 'substrate:listGroupMembers', 'substrate:stats', 'substrate:resolveMedia', 'substrate:transcribeVoice', 'substrate:setSessionFlags', 'substrate:removeIndex', 'substrate:rebuildIndex', 'substrate:export',
   'agent:submit', 'agent:listThreads', 'agent:getThread', 'agent:renameThread', 'agent:pinThread', 'agent:deleteThread', 'agent:exportThread', 'agent:listSkills', 'agent:listModels', 'agent:suggestPrompts',
   'memory:read', 'memory:write', 'memory:entries', 'memory:budget', 'memory:clear',
-  'clone:list', 'clone:get', 'clone:status', 'clone:sampleMessages', 'clone:start', 'clone:cancel', 'clone:delete', 'clone:updateProfile', 'clone:chat', 'clone:feedback',
+  'clone:list', 'clone:get', 'clone:status', 'clone:sampleMessages', 'clone:start', 'clone:cancel', 'clone:delete', 'clone:updateProfile', 'clone:chat', 'clone:feedback', 'clone:notes', 'clone:deleteNote', 'clone:reflect',
   'autoreply:listRules', 'autoreply:getRule', 'autoreply:saveRule', 'autoreply:setEnabled', 'autoreply:deleteRule', 'autoreply:listRecords', 'autoreply:recall', 'autoreply:listDrafts', 'autoreply:resolveDraft', 'autoreply:holdDraft', 'autoreply:retryDraft', 'autoreply:status', 'autoreply:resume', 'autoreply:triggerNow',
   'gateway:status', 'gateway:connect', 'gateway:disconnect',
   'diary:list', 'diary:get', 'diary:generate',

@@ -54,7 +54,9 @@ describe('mock bridge', () => {
     const status = await bridge.invoke('substrate:status', undefined)
     expect(status.connection).toBe('ready')
     expect(status.account?.wxid).toBe(demoFixture.account.wxid)
-    await expect(bridge.invoke('bogus:channel' as never, undefined as never)).rejects.toThrow(/unknown channel/)
+    // Same wording and same allow-list as the preload, so the web preview cannot accept a channel
+    // the packaged app would reject.
+    await expect(bridge.invoke('bogus:channel' as never, undefined as never)).rejects.toThrow(/unknown ipc channel/)
   })
 
   it('pages sessions with filters', async () => {

@@ -1,6 +1,9 @@
 import { Button, Card, InlineHint, toast } from '@/kit'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
 
+/** macOS keeps the accessibility grant behind this pane; deep-linking saves a five-click hunt. */
+const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+
 /**
  * Whatever currently stands between an enabled rule and a sent message.
  *
@@ -35,9 +38,16 @@ export function AutoReplyControl() {
         {status.data?.halted ? (
           <>
             <InlineHint kind="error">自动发送已暂停：{status.data.halted}</InlineHint>
-            <Button variant="outline" onClick={() => void resume()}>
-              我已确认，恢复自动发送
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {status.data.halted.includes('辅助功能') ? (
+                <Button variant="outline" onClick={() => void invoke('app:openUrl', { url: ACCESSIBILITY_PANE }).catch(() => toast.error('打不开系统设置，请手动前往「隐私与安全性 → 辅助功能」'))}>
+                  打开「辅助功能」设置
+                </Button>
+              ) : null}
+              <Button variant="outline" onClick={() => void resume()}>
+                我已确认，恢复自动发送
+              </Button>
+            </div>
           </>
         ) : null}
       </div>
