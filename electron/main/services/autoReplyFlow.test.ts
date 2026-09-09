@@ -29,7 +29,7 @@ describe('local auto-reply integration', () => {
     const commits = vi.fn(async () => add(filled, true))
     const sender = createUiInjectSender({ substrate, platform: 'darwin', injector: { focusSession: async () => {}, fill: async (text) => { filled = text }, commit: commits }, verifyPollMs: 1, segmentGapMs: [0, 0], itemGapMs: [0, 0] })
     gateway.registerAdapter(sender.asAdapter())
-    const model = { ref: { supportsVision: false }, async *sample() { yield { type: 'text.delta' as const, delta: '明天聊' } } } as ModelClient
+    const model = { ref: { supportsVision: false }, async *sample() { yield { type: 'text.delta' as const, delta: '明天聊' }; yield { type: 'finish' as const, reason: 'stop' as const, usage: { inputTokens: 10, outputTokens: 10 } } } } as ModelClient
     const generate = createAutoReplyGenerator({ substrate, model: async () => model })
     const service = createAutoReplyService({ gateway, records, generate: (event, rule, ctx) => generate(event, rule, ctx.signal), countdownMs: () => 2000, onDraft: () => {} })
     const monitor = createAutoReplyMonitor({ substrate, rules: () => records.listRules(), enabled: () => true, ingest: gateway.ingest, invalidate: service.invalidate, accountChanged: () => service.halt('账户变化'), pollMs: 100000, quietMs: 5000 })

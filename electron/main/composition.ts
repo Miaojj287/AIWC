@@ -342,7 +342,7 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   }
   // The peer's text is third-party data, never the instruction: prompts/inbound wraps it in a bounded
   // fragment and the turn's request is "reply appropriately". Group origins carry peerId (thread per member).
-  const generate = createAutoReplyGenerator({ substrate, model: () => models.resolve(cfg().ai.defaultModel) })
+  const generate = createAutoReplyGenerator({ substrate, model: () => models.resolve(cfg().ai.defaultModel), logger: pkgLogger('autoreply-generate') })
   const autoReply = createAutoReplyService({
     gateway,
     records,
