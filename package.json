@@ -22,7 +22,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "npm run build && electron . --smoke"
+    "smoke": "npm run build && electron . --smoke",
+    "background-reply:build": "node scripts/background-reply.cjs",
+    "background-reply:inspect": "node scripts/background-reply.cjs inspect"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.36",

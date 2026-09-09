@@ -42,6 +42,7 @@ import {
   createIlinkAdapter,
   buildSessionKey,
   createUiInjectSender,
+  createBackgroundAxInjector,
   gatewayTools,
   sourceFromOrigin,
   type DraftHandoff,
@@ -207,6 +208,13 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   // local DB; a failed verification halts the whole outbound path until the user resumes it.
   const uiSender = createUiInjectSender({
     substrate, platform: process.platform, logger: pkgLogger('ui-inject'),
+    // Experimental and explicitly opt-in. The default sender remains unchanged.
+    injector: process.env.AIWC_WECHAT_SEND_MODE === 'background-ax'
+      ? createBackgroundAxInjector({
+          helperPath: process.platform === 'darwin' ? process.env.AIWC_WECHAT_AX_HELPER : undefined,
+          profilePath: process.env.AIWC_WECHAT_AX_PROFILE,
+        })
+      : undefined,
     canSend: async (req) => {
       if (substrate.mode() === 'demo') return '演示模式不能向真实微信发送消息'
       const state = substrate.status()

@@ -1,0 +1,73 @@
+# 后台微信回复实验（computer-use-reply）
+
+## 当前状态
+
+`main` 保留导入的本地基线；本分支新增默认关闭的 macOS AX 实验通道。未设置环境变量时仍使用原来的前台发送器。实验模式没有前台回退路径，也不依赖视觉模型。
+
+**尚未完成真机适配，不能当作已可用功能。** 2026-09-09 只读探测能找到微信进程，但当前运行环境的辅助功能权限未开启，无法读取真实控件树。因此没有预置或猜测控件标识，也没有向真实联系人发送消息。微信可能不暴露可写输入框或可后台触发的发送按钮；此时该路径不可用。
+
+## 已实现
+
+- 独立 Swift 辅助程序只调用辅助功能接口，不调用应用激活、全局按键、鼠标或剪贴板接口。
+- 只读诊断返回微信版本、角色、标识、可用动作、输入框可写性，不返回聊天正文、联系人名或草稿。
+- 配置必须包含匹配的微信版本及五类控件的精确标识；不支持时停止。
+- 仅从现有会话列表选择唯一、名称完全匹配的会话，再核对会话标题；不搜索、不选第一个搜索结果。
+- 输入框非空时保留原草稿并停止。写入后核对文本；发送前重新核对会话和草稿。
+- 微信在前台时返回 busy；原发送队列会短暂重试选择（最多两次，间隔 1.2 秒），随后暂停，需要手动恢复。并非无限等待队列。
+- 保留原来的数据库回读和失败熔断。AX 通道不重复执行结果不确定的发送动作。
+- 辅助程序通过标准输入接收 JSON，回复文本不放进命令行参数。
+
+## 只读验证
+
+需要 macOS、Swift 编译工具和该运行环境的辅助功能权限：
+
+```sh
+npm run background-reply:inspect
+```
+
+辅助程序位于 `.cache/background-reply/aiwc-background-helper`。如果给宿主应用授权后仍报无权限，需在系统辅助功能设置中确认实际运行的辅助程序权限。诊断命令不会请求发送。
+
+读取成功后仍需人工核对控件层级，确认列表、行、会话标题、输入框和发送按钮。诊断只返回结构元数据，必要时增加本地只读诊断，不把真实会话内容提交到 Git。
+
+## 实验启动（仅完成真实控件适配之后）
+
+将实际核对过的配置存放在 `.cache/background-reply/profile.json`（Git 忽略）。结构为：
+
+```ts
+{
+  wechatVersion: string,
+  conversationList: { role: string, identifier: string },
+  conversationRow: { role: string, identifier: string },
+  header: { role: string, identifier: string },
+  composer: { role: string, identifier: string },
+  sendButton: { role: string, identifier: string }
+}
+```
+
+所有标识都须来自真实控件树。行选择器可匹配多行，再用完整名称筛选；其余选择器须各匹配一个控件。无法满足条件时不可启用。
+
+```sh
+npm run background-reply:build
+AIWC_WECHAT_SEND_MODE=background-ax \
+AIWC_WECHAT_AX_HELPER="$PWD/.cache/background-reply/aiwc-background-helper" \
+AIWC_WECHAT_AX_PROFILE="$PWD/.cache/background-reply/profile.json" \
+npm run dev
+```
+
+这会替换本次进程内整个 `wechat-ui` 发送后端，包括自动回复和手动发送；不会改变 iLink 通道。普通 `npm run dev` 恢复原有行为。实验 helper 不随常规构建编译或分发。
+
+## 待完成的真机验收
+
+1. 权限开启后获取控件结构，确认微信实际支持的 AX 操作；没有稳定标识或动作则明确停止该方案。
+2. 在专用测试会话中验证选择不会激活微信，输入不会改变系统剪贴板或其他应用内容。
+3. 获得明确测试收件人与发送授权后，验证中文、多行、分段消息的数据库回读。
+4. 覆盖同名会话、未在列表中的会话、现有草稿、用户切回微信、隐藏/最小化窗口和版本变化。
+
+辅助功能调用与用户操作不是原子事务。当前实现检查前台状态，但不能保证捕获两次检查之间的瞬时切换；AXPress 本身是否会激活微信也必须实测。当前用名称/标题匹配，不能证明 wxid 身份；同名会话不可用于正式自动发送。严格要求独立输入环境时，需要独立桌面/设备方案。
+
+## 本轮检查
+
+- Swift helper 编译通过；只读运行正确返回 `no-permission`，未执行控件修改。
+- 发送层 25 项测试通过，包括原前台发送回归、实验通道状态校验、缺配置停止、不重复 AX 发送及错误原因保留。
+- 类型检查、生产构建、本次修改文件的 ESLint、Git 空白检查通过。
+- 全仓 ESLint 仍有基线问题：`dev/fixtures/chat-presentation.tsx` 两处依赖边界错误、`vite.config.ts` 两处类型导入错误；另有 10 项既有警告。本分支未修改这些文件。
