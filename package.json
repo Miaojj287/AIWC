@@ -24,7 +24,9 @@
     "test:watch": "vitest",
     "smoke": "npm run build && electron . --smoke",
     "background-reply:build": "node scripts/background-reply.cjs",
-    "background-reply:inspect": "node scripts/background-reply.cjs inspect"
+    "background-reply:inspect": "node scripts/background-reply.cjs inspect",
+    "predev": "node scripts/background-reply.cjs",
+    "prebuild": "node scripts/background-reply.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.36",

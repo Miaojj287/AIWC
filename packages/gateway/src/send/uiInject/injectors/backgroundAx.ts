@@ -17,12 +17,13 @@ export interface AxRequest {
   text?: string
   profile: AxProfile
 }
-export interface AxResponse { ok: boolean; reason?: string; detail?: string }
+export interface AxResponse { ok: boolean; reason?: string; detail?: string; hasWritableWindowInput?: boolean; version?: string }
 export interface BackgroundAxOptions {
   helperPath?: string
   profilePath?: string
   /** Test seam; production profiles come from a local, explicitly configured file. */
   profile?: AxProfile
+  inspect?: () => Promise<AxResponse>
   run?: (request: AxRequest) => Promise<AxResponse>
 }
 
@@ -47,7 +48,7 @@ function readProfile(options: BackgroundAxOptions): AxProfile {
 }
 
 /** Helper input travels on stdin, never command-line arguments or the system clipboard. */
-function runHelper(path: string | undefined, request: AxRequest): Promise<AxResponse> {
+function runHelper(path: string | undefined, request: AxRequest | { action: 'inspect' }): Promise<AxResponse> {
   if (!path) return Promise.reject(new InjectorError('unsupported', '未配置后台回复辅助程序'))
   return new Promise((resolve, reject) => {
     const child = spawn(path, [], { stdio: ['pipe', 'pipe', 'pipe'] })
@@ -73,11 +74,12 @@ function runHelper(path: string | undefined, request: AxRequest): Promise<AxResp
   })
 }
 
-/** Opt-in backend: no import of the foreground injector and no fallback to global input. */
+/** Background-only backend: no import of the foreground injector and no fallback to global input. */
 export function createBackgroundAxInjector(options: BackgroundAxOptions = {}): WeChatInjector {
   let name: string | undefined
   let text: string | undefined
   let profile: AxProfile | undefined
+  const inspect = options.inspect ?? (() => runHelper(options.helperPath, { action: 'inspect' }))
   const run = options.run ?? ((request: AxRequest) => runHelper(options.helperPath, request))
   async function call(action: AxRequest['action'], target: string, content?: string): Promise<void> {
     profile ??= readProfile(options)
@@ -96,6 +98,11 @@ export function createBackgroundAxInjector(options: BackgroundAxOptions = {}): W
       name = undefined
       text = undefined
       if (!target.trim()) throw new InjectorError('unsupported', '缺少目标会话')
+      const capability = await inspect()
+      if (!capability.ok) throw new InjectorError(capability.reason === 'no-permission' ? 'no-permission' : 'unsupported', capability.detail ?? '无法检查后台回复能力')
+      if (capability.hasWritableWindowInput !== true) {
+        throw new InjectorError('unsupported', `微信 ${capability.version ?? ''} 未暴露可后台写入的聊天控件，静默发送不可用；已停止，未唤起微信`)
+      }
       await call('select', target)
       name = target
     },

@@ -80,7 +80,10 @@ func run(_ req: Request) throws -> [String: Any] {
             ["role": string(node, "AXRole"), "identifier": string(node, "AXIdentifier"),
              "actions": actions(node), "valueSettable": writable(node)]
         }
-        return ["ok": true, "active": app.isActive, "version": app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String } ?? "unknown", "nodes": rows]
+        var windowNodes: [AXUIElement] = []
+        for window in value(root, "AXWindows") as? [AXUIElement] ?? [] { windowNodes += try nodes(window) }
+        let writableInputs = windowNodes.filter { ["AXTextArea", "AXTextField"].contains(string($0, "AXRole")) && writable($0) }
+        return ["ok": true, "hasWritableWindowInput": !writableInputs.isEmpty, "windowNodeCount": windowNodes.count, "active": app.isActive, "version": app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String } ?? "unknown", "nodes": rows]
     }
     guard let profile = req.profile, let name = req.name, !name.isEmpty else { try fail("unsupported", "缺少已验证的控件配置或会话名") }
     guard let bundleURL = app.bundleURL, Bundle(url: bundleURL)?.infoDictionary?["CFBundleShortVersionString"] as? String == profile.wechatVersion else { try fail("unsupported", "微信版本与控件配置不一致") }

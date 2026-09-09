@@ -1,10 +1,10 @@
-// Explicit developer opt-in. Never launched by the regular build or startup path.
+// Build the background helper before normal desktop development and production builds.
 const { spawnSync } = require('node:child_process')
 const { mkdirSync } = require('node:fs')
 const { resolve } = require('node:path')
-if (process.platform !== 'darwin') { console.error('Background AX requires macOS'); process.exit(1) }
+if (process.platform !== 'darwin') { console.log('Background AX is unavailable on this platform; foreground fallback is disabled.'); process.exit(process.argv[2] === 'inspect' ? 1 : 0) }
 const root = resolve(__dirname, '..')
-const dir = resolve(root, '.cache/background-reply')
+const dir = resolve(root, 'resources/native/darwin-' + process.arch)
 const binary = resolve(dir, 'aiwc-background-helper')
 mkdirSync(dir, { recursive: true })
 const build = spawnSync('swiftc', [resolve(root, 'resources/macos/background-reply/helper.swift'), '-o', binary], { stdio: 'inherit' })
