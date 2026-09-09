@@ -51,3 +51,5 @@ export type { GatewayToolServices, GatewayToolsOptions, DraftHandoff } from './t
 
 export { createFakeAdapter, fakeEvent } from './testing/fakeAdapter'
 export type { FakeAdapter } from './testing/fakeAdapter'
+
+export { createBackgroundAxInjector } from './send/uiInject/injectors/backgroundAx'

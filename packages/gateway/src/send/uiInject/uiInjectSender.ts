@@ -188,7 +188,7 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
         }
       } catch (err) {
         const reason = err instanceof InjectorError ? err.reason : 'not-sent'
-        return halt(reason, err instanceof InjectorError ? undefined : errorMessage(err))
+        return halt(reason, err instanceof InjectorError && !injector.detailedErrors ? undefined : errorMessage(err))
       }
       const beforeCommit = await deps.canSend?.(req)
       if (beforeCommit) return halt('not-sent', `发送前状态变化，已停止：${beforeCommit}`)
@@ -197,12 +197,12 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
         await injector.commit()
       } catch (err) {
         const reason = err instanceof InjectorError ? err.reason : 'not-sent'
-        return halt(reason, err instanceof InjectorError ? undefined : errorMessage(err))
+        return halt(reason, err instanceof InjectorError && !injector.detailedErrors ? undefined : errorMessage(err))
       }
 
       let result = await verify(sessionId, bubble, sentAt, before)
       let retried = false
-      if (result.verdict === 'not-sent') {
+      if (result.verdict === 'not-sent' && injector.retryCommit !== false) {
         // The text is most likely still sitting in the composer: one more Enter, never a re-paste.
         // Safe even if the user switched chats meanwhile — WeChat keeps a draft per conversation,
         // so an Enter in a chat we never pasted into lands on an empty composer and does nothing.

@@ -15,11 +15,15 @@ export class InjectorError extends Error {
 }
 
 export interface WeChatInjector {
-  /** Bring WeChat to the front and open the chat named `name` (search box → first result). */
+  /** Legacy keyboard backend retries Enter; AX actions must not be repeated after an uncertain send. */
+  readonly retryCommit?: boolean
+  /** Experimental backends provide actionable capability errors rather than focus errors. */
+  readonly detailedErrors?: boolean
+  /** Select the target chat. Legacy backends activate/search; AX must keep the app in the background. */
   focusSession(name: string): Promise<void>
   /** Put `text` into the composer of the currently open chat WITHOUT sending. */
   fill(text: string): Promise<void>
-  /** Press Enter once. Must be a no-op when the composer is empty. */
+  /** Send the prepared text once. Must be a no-op when the composer is empty. */
   commit(): Promise<void>
 }
 

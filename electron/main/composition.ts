@@ -41,7 +41,6 @@ import {
   createGateway,
   createIlinkAdapter,
   buildSessionKey,
-  createUiInjectSender,
   gatewayTools,
   sourceFromOrigin,
   type DraftHandoff,
@@ -60,6 +59,7 @@ import { PERSONA_STABLE_PROMPT } from './prompts/persona'
 import { observedFragmentProvider, userInstructionsFragmentProvider, wireMemoryInvalidation } from './prompts/fragments'
 import { type InboundNames } from './prompts/inbound'
 import { createAutoReplyMonitor } from './services/autoReplyMonitor'
+import { createDesktopReplySender } from './services/desktopReplySender'
 import { createAutoReplyGenerator } from './services/autoReplyGenerate'
 import { dateHook, memoryToastHook } from './hooks'
 import type { AppContext, Broadcast, CloneBuilderLike, CloneStartOptions, SubstrateHostInit, SubstrateMode } from './contracts'
@@ -203,10 +203,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     }),
   )
   gateway.registerAdapter(createDesktopAdapter())
-  // 'wechat-ui' = keyboard injection into the WeChat client, verified by reading the message back from the
-  // local DB; a failed verification halts the whole outbound path until the user resumes it.
-  const uiSender = createUiInjectSender({
+  // Background-only on this branch; unavailable capabilities stop instead of stealing focus.
+  const uiSender = createDesktopReplySender({
     substrate, platform: process.platform, logger: pkgLogger('ui-inject'),
+    nativeDir: paths.nativeDir, dataRoot: paths.dataRoot,
+    profilePath: process.env.AIWC_WECHAT_AX_PROFILE,
     canSend: async (req) => {
       if (substrate.mode() === 'demo') return '演示模式不能向真实微信发送消息'
       const state = substrate.status()
@@ -334,7 +335,7 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   }
   // The peer's text is third-party data, never the instruction: prompts/inbound wraps it in a bounded
   // fragment and the turn's request is "reply appropriately". Group origins carry peerId (thread per member).
-  const generate = createAutoReplyGenerator({ substrate, model: () => models.resolve(cfg().ai.defaultModel) })
+  const generate = createAutoReplyGenerator({ substrate, model: () => models.resolve(cfg().ai.defaultModel), logger: pkgLogger('autoreply-generate') })
   const autoReply = createAutoReplyService({
     gateway,
     records,
