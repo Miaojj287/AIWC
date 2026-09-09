@@ -7,7 +7,7 @@
  */
 import { homedir } from 'node:os'
 import { nanoid } from 'nanoid'
-import { defaultConfig, type CloneStatus, type MessageEvent, type ModelSelection, type ReplyDraft, type SessionSource, type ToastPayload, type ToolServices } from '@aiwc/protocol'
+import { type CloneStatus, type MessageEvent, type ModelSelection, type ReplyDraft, type SessionSource, type ToastPayload, type ToolServices } from '@aiwc/protocol'
 import {
   createApprovalGate,
   createDelegateTool,
@@ -89,25 +89,14 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const unsubscribers: Array<() => void> = []
 
   // ---- config & secrets ------------------------------------------------------------------------
-  const resetWechatSetup = (value: ReturnType<typeof defaultConfig>) => ({
-    ...value,
-    account: defaultConfig().account,
-    onboarding: { completed: false },
-  })
   const config = createConfigService({
     file: paths.configFile,
     logger,
-    // Account selection and onboarding completion are deliberately process-local for development:
-    // every launch starts at the setup wizard while unrelated preferences remain persistent.
-    transformLoaded: resetWechatSetup,
-    transformPersisted: resetWechatSetup,
   })
   const secrets = createSecretStore({
     file: paths.secretsFile,
     safeStorage: deps.safeStorage,
     logger,
-    // WeChat database/image keys are usable after entry or discovery, but never survive a restart.
-    sessionOnlyRefs: [SECRET_REFS.dbKey, SECRET_REFS.imageXorKey, SECRET_REFS.imageAesKey],
   })
   const cfg = () => config.get()
 

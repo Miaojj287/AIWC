@@ -49,6 +49,33 @@ describe('configService', () => {
     expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([])
   })
 
+  it('reloads the selected WeChat account and its encrypted-key references', () => {
+    const file = join(dir, 'config.json')
+    const first = createConfigService({ file })
+    first.set({
+      account: {
+        wxid: 'wxid_cached',
+        dbRoot: '/wechat',
+        dbKeyRef: 'account.dbKey',
+        imageXorKeyRef: 'account.imageXorKey',
+        imageAesKeyRef: 'account.imageAesKey',
+        verifiedAt: 123,
+      },
+      onboarding: { completed: true },
+    })
+
+    const restarted = createConfigService({ file })
+    expect(restarted.get().account).toMatchObject({
+      wxid: 'wxid_cached',
+      dbRoot: '/wechat',
+      dbKeyRef: 'account.dbKey',
+      imageXorKeyRef: 'account.imageXorKey',
+      imageAesKeyRef: 'account.imageAesKey',
+      verifiedAt: 123,
+    })
+    expect(restarted.get().onboarding.completed).toBe(true)
+  })
+
   it('set() throws on invalid patch and keeps the previous config', () => {
     const file = join(dir, 'config.json')
     const svc = createConfigService({ file })
