@@ -175,25 +175,6 @@ describe('createUiInjectSender', () => {
     expect(sender.halted).toBe(false)
   })
 
-  it('does not repeat an uncertain AX send and still halts on missing DB confirmation', async () => {
-    const db = createFakeSubstrate()
-    db.addSession('wxid_alice', 'Alice')
-    const inj = createFakeInjector()
-    const { sender } = harness({ injector: { ...inj.injector, retryCommit: false }, substrate: db.substrate })
-    const result = await sender.send(req('hello'))
-    expect(result).toMatchObject({ ok: false, verified: false })
-    expect(inj.commits()).toBe(1)
-    expect(sender.halted).toBe(true)
-  })
-
-  it('preserves actionable AX capability errors', async () => {
-    const db = createFakeSubstrate()
-    const inj = createFakeInjector({ failFocus: new InjectorError('unsupported', '微信版本与控件配置不一致') })
-    const { sender } = harness({ injector: { ...inj.injector, detailedErrors: true }, substrate: db.substrate })
-    expect(await sender.send(req('hello'))).toMatchObject({ ok: false, error: '微信版本与控件配置不一致' })
-    expect(inj.commits()).toBe(0)
-  })
-
   it('halts with not-sent when nothing ever lands, clears the queue and needs resume()', async () => {
     const db = createFakeSubstrate()
     db.addSession('wxid_alice', 'Alice')

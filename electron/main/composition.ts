@@ -41,6 +41,7 @@ import {
   createGateway,
   createIlinkAdapter,
   buildSessionKey,
+  createUiInjectSender,
   gatewayTools,
   sourceFromOrigin,
   type DraftHandoff,
@@ -59,7 +60,6 @@ import { PERSONA_STABLE_PROMPT } from './prompts/persona'
 import { observedFragmentProvider, userInstructionsFragmentProvider, wireMemoryInvalidation } from './prompts/fragments'
 import { type InboundNames } from './prompts/inbound'
 import { createAutoReplyMonitor } from './services/autoReplyMonitor'
-import { createDesktopReplySender } from './services/desktopReplySender'
 import { createAutoReplyGenerator } from './services/autoReplyGenerate'
 import { dateHook, memoryToastHook } from './hooks'
 import type { AppContext, Broadcast, CloneBuilderLike, CloneStartOptions, SubstrateHostInit, SubstrateMode } from './contracts'
@@ -203,11 +203,10 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     }),
   )
   gateway.registerAdapter(createDesktopAdapter())
-  // Background-only on this branch; unavailable capabilities stop instead of stealing focus.
-  const uiSender = createDesktopReplySender({
+  // 'wechat-ui' = keyboard injection into the WeChat client, verified by reading the message back from the
+  // local DB; a failed verification halts the whole outbound path until the user resumes it.
+  const uiSender = createUiInjectSender({
     substrate, platform: process.platform, logger: pkgLogger('ui-inject'),
-    nativeDir: paths.nativeDir, dataRoot: paths.dataRoot,
-    profilePath: process.env.AIWC_WECHAT_AX_PROFILE,
     canSend: async (req) => {
       if (substrate.mode() === 'demo') return '演示模式不能向真实微信发送消息'
       const state = substrate.status()

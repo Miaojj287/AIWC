@@ -13,5 +13,3 @@ docs/design/figma/*.png
 .tmp/
 .cache/
 dist-web/
-
-resources/native/*/aiwc-background-helper
