@@ -83,7 +83,18 @@ func run(_ req: Request) throws -> [String: Any] {
         var windowNodes: [AXUIElement] = []
         for window in value(root, "AXWindows") as? [AXUIElement] ?? [] { windowNodes += try nodes(window) }
         let writableInputs = windowNodes.filter { ["AXTextArea", "AXTextField"].contains(string($0, "AXRole")) && writable($0) }
-        return ["ok": true, "hasWritableWindowInput": !writableInputs.isEmpty, "windowNodeCount": windowNodes.count, "active": app.isActive, "version": app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String } ?? "unknown", "nodes": rows]
+        let windowInfo = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let mainWindows = windowInfo.filter { info in
+            guard info[kCGWindowOwnerPID as String] as? Int == Int(app.processIdentifier),
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double else { return false }
+            return width >= 600 && height >= 400 && ["微信", "WeChat", "Weixin"].contains(info[kCGWindowName as String] as? String ?? "")
+        }
+        let sharing: String
+        if mainWindows.count == 1, let state = mainWindows[0][kCGWindowSharingState as String] as? Int {
+            sharing = state == 0 ? "excluded" : "allowed"
+        } else { sharing = "unknown" }
+        return ["ok": true, "windowSharing": sharing, "screenCapturePermission": CGPreflightScreenCaptureAccess(), "hasWritableWindowInput": !writableInputs.isEmpty, "windowNodeCount": windowNodes.count, "active": app.isActive, "version": app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary?["CFBundleShortVersionString"] as? String } ?? "unknown", "nodes": rows]
     }
     guard let profile = req.profile, let name = req.name, !name.isEmpty else { try fail("unsupported", "缺少已验证的控件配置或会话名") }
     guard let bundleURL = app.bundleURL, Bundle(url: bundleURL)?.infoDictionary?["CFBundleShortVersionString"] as? String == profile.wechatVersion else { try fail("unsupported", "微信版本与控件配置不一致") }

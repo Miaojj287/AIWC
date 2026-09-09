@@ -85,3 +85,19 @@ describe('read-only capability gate', () => {
     expect(run).not.toHaveBeenCalled()
   })
 })
+
+
+describe('window capture diagnostics', () => {
+  it('identifies capture exclusion separately and never attempts blind input', async () => {
+    const run = vi.fn()
+    const injector = createBackgroundAxInjector({ profile, run, inspect: async () => ({ ok: true, hasWritableWindowInput: false, windowSharing: 'excluded', screenCapturePermission: true }) })
+    await expect(injector.focusSession('Alice')).rejects.toThrow('系统报告微信主窗口不可捕获')
+    expect(run).not.toHaveBeenCalled()
+  })
+  it('does not claim screenshot exclusion from an unknown sharing state', async () => {
+    const run = vi.fn()
+    const injector = createBackgroundAxInjector({ profile, run, inspect: async () => ({ ok: true, hasWritableWindowInput: false, windowSharing: 'unknown' }) })
+    await expect(injector.focusSession('Alice')).rejects.toThrow('未暴露可后台写入')
+    expect(run).not.toHaveBeenCalled()
+  })
+})

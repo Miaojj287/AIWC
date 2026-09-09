@@ -51,3 +51,14 @@ npm run background-reply:inspect
 使用用户已配置的 deepseek-v4-pro 和虚构的“明天见”输入进行了真实 API 检查：旧额度的一次请求正常结束，消耗 757 输出 token，其中 754 为思考，因此未复现截图中的同一次失败。修改后的完整生成函数也正常结束（stop，68 输出 token，其中 65 为思考），没有调用微信发送器。测试脚本和凭证均未提交。
 
 生成、监测、发送、模拟桥接共 73 项回归通过；定向 ESLint、类型检查、生产构建通过。另补齐基线 INVOKE_CHANNELS 中漏登记的 clone:notes / clone:deleteNote / clone:reflect，避免分支独立构建失败。
+
+
+## cua 分支：窗口捕获检查
+
+从 main 的 be3de0c 创建 cua；后续实验在 cua 上进行。只读探测新增 windowSharing 和 screenCapturePermission，不再把窗口截图失败归结为辅助功能权限。
+
+真机微信 4.1.13：录屏权限为 true，但唯一主窗口的 kCGWindowSharingState 为 0。系统 screencapture 按窗口 ID 捕获失败，ScreenCaptureKit 得到纯黑图，Codex Computer Use 得到空白图；设置窗口可以正常截图。
+
+已实际检查微信设置 → 通用和显示菜单。通用 → 功能下的“点击截图按钮时保留当前窗口”已开启，此项针对微信自带截图行为，不能当作第三方窗口捕获授权。没有找到可以永久解除主窗口捕获限制的公开开关，也没有修改任何微信配置、权限或进程。窗口共享状态是诊断事实，不证明存在某个用户可以关闭的“防截屏”选项。
+
+新增测试保证窗口不可捕获时不盲目输入，且未知状态不误报截图排除。**本轮仍未实现后台发送，不可将诊断改进当作功能完成。**

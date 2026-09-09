@@ -17,7 +17,7 @@ export interface AxRequest {
   text?: string
   profile: AxProfile
 }
-export interface AxResponse { ok: boolean; reason?: string; detail?: string; hasWritableWindowInput?: boolean; version?: string }
+export interface AxResponse { ok: boolean; reason?: string; detail?: string; hasWritableWindowInput?: boolean; version?: string; windowSharing?: 'excluded' | 'allowed' | 'unknown'; screenCapturePermission?: boolean }
 export interface BackgroundAxOptions {
   helperPath?: string
   profilePath?: string
@@ -101,6 +101,9 @@ export function createBackgroundAxInjector(options: BackgroundAxOptions = {}): W
       const capability = await inspect()
       if (!capability.ok) throw new InjectorError(capability.reason === 'no-permission' ? 'no-permission' : 'unsupported', capability.detail ?? '无法检查后台回复能力')
       if (capability.hasWritableWindowInput !== true) {
+        if (capability.windowSharing === 'excluded') {
+          throw new InjectorError('unsupported', '系统报告微信主窗口不可捕获，且未提供后台输入控件；无法核对会话和草稿，未执行输入或发送')
+        }
         throw new InjectorError('unsupported', `微信 ${capability.version ?? ''} 未暴露可后台写入的聊天控件，静默发送不可用；已停止，未唤起微信`)
       }
       await call('select', target)
