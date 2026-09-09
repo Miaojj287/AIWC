@@ -1,0 +1,18 @@
+{
+  "name": "aiwc-image-native",
+  "version": "source-present-selfbuilt",
+  "vendor": "AIWC",
+  "source": "native/image-decrypt",
+  "safeNativePlatforms": [
+    "macos-arm64",
+    "win32-x64"
+  ],
+  "activeBinaries": {
+    "win32-x64": "self-built-from-repo-source",
+    "macos-arm64": "self-built-from-repo-source"
+  },
+  "platforms": [
+    "win32-x64",
+    "macos-arm64"
+  ]
+}

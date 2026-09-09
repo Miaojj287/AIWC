@@ -1,0 +1,153 @@
+{
+  "name": "aiwc",
+  "productName": "AIWC",
+  "version": "0.1.0",
+  "description": "AIWC — 以微信消息为基座的本地 Agent 工作台",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "author": "AIWC",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:web": "AIWC_WEB_ONLY=1 vite --mode web",
+    "build": "npm run typecheck && node scripts/cleanBuild.cjs && vite build",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:win": "npm run build && electron-builder --win",
+    "build:dir": "npm run build && electron-builder --dir",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "npm run build && electron . --smoke"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.36",
+    "@ai-sdk/google": "^4.0.39",
+    "@ai-sdk/openai": "^4.0.36",
+    "@ai-sdk/openai-compatible": "^3.0.27",
+    "ai": "^7.0.58",
+    "croner": "^10.0.1",
+    "fzstd": "^0.1.1",
+    "koffi": "^2.15.1",
+    "nanoid": "^5.1.11",
+    "qrcode": "^1.5.4",
+    "yaml": "^2.9.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.15.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "electron": "^39.6.0",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.39.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "^5.0.0",
+    "jsdom": "^26.1.0",
+    "lucide-react": "^1.41.0",
+    "radix-ui": "^1.4.3",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.45.0",
+    "virtua": "^0.49.1",
+    "vite": "^6.0.5",
+    "vite-plugin-electron": "^1.0.4",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.2.0",
+    "zustand": "^5.0.2"
+  },
+  "build": {
+    "appId": "com.aiwc.desktop",
+    "productName": "AIWC",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!**/*.map",
+      "!node_modules/**/{test,tests,docs,examples,demo}/**"
+    ],
+    "extraResources": [
+      {
+        "from": "skills/",
+        "to": "skills/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/",
+        "to": "resources/",
+        "filter": [
+          "**/*",
+          "!macos/**"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "mac": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/macos/entitlements.mac.plist",
+      "entitlementsInherit": "resources/macos/entitlements.mac.plist"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "AIWC",
+      "unicode": true,
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052"
+    },
+    "afterPack": "scripts/afterPack.cjs"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-electron/
+release/
+coverage/
+.vite/
+*.log
+.DS_Store
+.env
+.env.*
+Example/
+docs/design/figma/*.png
+.tmp/
+.cache/
+dist-web/

@@ -1,0 +1,103 @@
+/*
+ * Kit-only CSS: keyframes for motion, the shared floating-layer scrim, the eight muted avatar gradient
+ * tiles, and the six extra white-overlay steps the controls need beyond tokens.css (line-4/6/8/10, hover-5/7).
+ * Radii / type sizes / accents still come from src/styles/tokens.css. Gradients are allowed only on
+ * avatars and the rail (CLAUDE.md §2.2).
+ */
+:root {
+  /* Grey overlay scale, continued. tokens.css stops at 10%; controls need a few stronger steps:
+   *   --fill-13  ghost / outline hover, icon-button pressed, scrollbar thumb
+   *   --line-16  input hover border, outline border, ghost / outline pressed
+   *   --fill-20  toggle track (off), scrollbar thumb hover
+   *   --line-25  checkbox / radio border, outline hover border
+   *   --fill-28  toggle track hover
+   *   --line-40  checkbox / radio hover border
+   * Components use them as bg-(--fill-13) / border-(--line-16). Do not add a seventh (CLAUDE.md §2.1).
+   * TODO(styles owner): move these into src/styles/tokens.css and map them in tailwind.css
+   * (@theme inline --color-fill-13 …); the var() references here keep working unchanged. */
+  --fill-13: rgb(255 255 255 / 0.13);
+  --line-16: rgb(255 255 255 / 0.16);
+  --fill-20: rgb(255 255 255 / 0.20);
+  --line-25: rgb(255 255 255 / 0.25);
+  --fill-28: rgb(255 255 255 / 0.28);
+  --line-40: rgb(255 255 255 / 0.40);
+
+  /* The one scrim behind every modal layer (Dialog + Drawer share it via .kit-overlay). Declared once;
+   * do not add a second opacity per component. Stays black in both themes. */
+  --scrim: rgb(0 0 0 / 0.55);
+
+  /* avatar tiles: low-saturation hues spaced around the wheel, all readable with white text */
+  --avatar-tile-0: linear-gradient(135deg, hsl(18 48% 46%), hsl(24 42% 32%));
+  --avatar-tile-1: linear-gradient(135deg, hsl(152 30% 40%), hsl(160 30% 28%));
+  --avatar-tile-2: linear-gradient(135deg, hsl(212 40% 48%), hsl(222 38% 34%));
+  --avatar-tile-3: linear-gradient(135deg, hsl(268 30% 50%), hsl(276 30% 36%));
+  --avatar-tile-4: linear-gradient(135deg, hsl(340 34% 50%), hsl(348 34% 36%));
+  --avatar-tile-5: linear-gradient(135deg, hsl(186 34% 40%), hsl(196 34% 28%));
+  --avatar-tile-6: linear-gradient(135deg, hsl(44 40% 44%), hsl(38 38% 30%));
+  --avatar-tile-7: linear-gradient(135deg, hsl(228 16% 46%), hsl(232 16% 32%));
+}
+
+/* Light theme = <html data-theme="light"> (same hook as tokens.css): the overlay steps flip to black. */
+:root[data-theme='light'] {
+  --fill-13: rgb(0 0 0 / 0.10);
+  --line-16: rgb(0 0 0 / 0.14);
+  --fill-20: rgb(0 0 0 / 0.16);
+  --line-25: rgb(0 0 0 / 0.22);
+  --fill-28: rgb(0 0 0 / 0.22);
+  --line-40: rgb(0 0 0 / 0.36);
+}
+
+@keyframes kit-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes kit-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes kit-pop-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes kit-pop-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+}
+@keyframes kit-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes kit-slide-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+@keyframes kit-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes kit-menu-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes kit-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Scrim: the single shared overlay behind dialogs and drawers. */
+.kit-overlay { background: var(--scrim); }
+
+/* Radix data-state hooks: opening / closing motion for floating layers */
+.kit-overlay[data-state='open'] { animation: kit-fade-in var(--dur-base) ease-out; }
+.kit-overlay[data-state='closed'] { animation: kit-fade-out var(--dur-fast) ease-in; }
+.kit-dialog[data-state='open'] { animation: kit-pop-in var(--dur-base) ease-out; }
+.kit-dialog[data-state='closed'] { animation: kit-pop-out var(--dur-fast) ease-in; }
+.kit-drawer[data-state='open'] { animation: kit-slide-in-right var(--dur-base) ease-out; }
+.kit-drawer[data-state='closed'] { animation: kit-slide-out-right var(--dur-fast) ease-in; }
+.kit-menu[data-state='open'] { animation: kit-menu-in var(--dur-fast) ease-out; }
+.kit-toast { animation: kit-toast-in var(--dur-base) ease-out; }
+.kit-indeterminate { animation: kit-indeterminate 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kit-overlay, .kit-dialog, .kit-drawer, .kit-menu, .kit-toast { animation: none !important; }
+}

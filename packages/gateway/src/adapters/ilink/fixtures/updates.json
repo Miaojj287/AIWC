@@ -1,0 +1,50 @@
+{
+  "ret": 0,
+  "get_updates_buf": "CURSOR_2",
+  "msgs": [
+    {
+      "from_user_id": "ilink_user_a",
+      "to_user_id": "bot_1",
+      "message_type": 1,
+      "message_id": "1001",
+      "context_token": "ctx-a-1",
+      "create_time": 1757100000,
+      "item_list": [{ "type": 1, "text_item": { "text": "你好，报价单能发一下吗" } }]
+    },
+    {
+      "from_user_id": "ilink_user_a",
+      "to_user_id": "bot_1",
+      "message_type": 1,
+      "message_id": "1002",
+      "context_token": "ctx-a-2",
+      "create_time_ms": 1757100001500,
+      "item_list": [
+        { "type": 3, "voice_item": { "text": "下午三点开会", "playtime": 2, "media": { "full_url": "https://cdn.example/voice1?x=1&amp;y=2" }, "aeskey": "00112233445566778899aabbccddeeff" } }
+      ]
+    },
+    {
+      "from_user_id": "ilink_user_b",
+      "to_user_id": "bot_1",
+      "message_type": 1,
+      "context_token": "ctx-b-1",
+      "item_list": [
+        { "type": 2, "image_item": { "media": { "full_url": "https://cdn.example/img1" }, "aeskey": "00112233445566778899aabbccddeeff", "mid_size": 2048 } },
+        { "type": 1, "text_item": { "text": "看看这张图" } }
+      ]
+    },
+    {
+      "from_user_id": "ilink_user_b",
+      "to_user_id": "bot_1",
+      "message_type": 1,
+      "message_id": "1003",
+      "item_list": [{ "type": 4, "file_item": { "file_name": "合同.pdf", "len": "12345", "media": { "full_url": "https://cdn.example/file1" } } }]
+    },
+    {
+      "from_user_id": "bot_1",
+      "to_user_id": "ilink_user_a",
+      "message_type": 2,
+      "message_id": "9001",
+      "item_list": [{ "type": 1, "text_item": { "text": "bot echo, must be skipped" } }]
+    }
+  ]
+}

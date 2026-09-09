@@ -1,0 +1,53 @@
+/*
+ * Shell-only CSS. Colours / radii / type still come from src/styles/tokens.css; this file holds the
+ * three rail gradients (with avatars, the only gradients the design allows — CLAUDE.md §2.2, Figma
+ * 117:416 / 117:419 / 117:425 / 117:436), the Electron drag regions of the window chrome, the
+ * hidden-scrollbar tab strip and the theme-aware scrollbar thumb. No box-shadow lives here: shadows
+ * belong to floating layers only (CLAUDE.md §2.1), so the selected rail tile is a ring, not a glow.
+ */
+:root {
+  --rail-tile-chat: linear-gradient(135deg, rgb(255 178 87) 0%, rgb(255 106 31) 100%);
+  --rail-tile-autoreply: linear-gradient(135deg, rgb(124 181 255) 0%, rgb(61 110 224) 100%);
+  --rail-tile-clone: linear-gradient(135deg, rgb(255 154 134) 0%, rgb(227 69 63) 100%);
+  --rail-tile-user: linear-gradient(135deg, rgb(74 75 87) 0%, rgb(42 43 51) 100%);
+
+  /* Scrollbar thumb overlays — the same white 12% / 20% the base sheet already used, lifted into
+   * tokens so they can flip with the theme. TODO(styles owner): move these two into
+   * src/styles/tokens.css, reference them from src/styles/tailwind.css, then delete the override
+   * block at the bottom of this file. */
+  --scrollbar-thumb: rgb(255 255 255 / 0.12);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 0.2);
+}
+
+/* Light theme = <html data-theme="light">, set by platform/configStore applyTheme (same hook as tokens.css). */
+:root[data-theme='light'] {
+  --scrollbar-thumb: rgb(0 0 0 / 0.12);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 0.2);
+}
+
+/* Window chrome: the whole bar drags the window, controls inside opt out. */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Tab strip overflow scrolls horizontally without showing a bar (the ··· menu lists every tab). */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Theme-aware scrollbar thumb. src/styles/tailwind.css paints it with raw white overlays inside
+ * @layer base, which disappear on a light background. These rules are deliberately unlayered
+ * (unlayered author styles beat every @layer) and only replace the colour — width and radius still
+ * come from the base sheet. */
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}

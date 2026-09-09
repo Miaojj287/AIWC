@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* Map tokens into Tailwind v4 theme so utilities like bg-panel / text-fg-2 / rounded-card exist. */
+@theme inline {
+  --color-shell: var(--bg-shell);
+  --color-panel: var(--bg-panel);
+  --color-content: var(--bg-content);
+  --color-raised: var(--bg-raised);
+  --color-overlay: var(--bg-overlay);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-12: var(--accent-12);
+  --color-accent-15: var(--accent-15);
+  --color-accent-30: var(--accent-30);
+  --color-bubble-self: var(--bubble-self);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-clone: var(--clone);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-line-4: var(--line-4);
+  --color-line-6: var(--line-6);
+  --color-line-8: var(--line-8);
+  --color-line-10: var(--line-10);
+  --color-hover-5: var(--hover-5);
+  --color-hover-7: var(--hover-7);
+
+  --font-sans: var(--font-sans);
+  --font-latin: var(--font-latin);
+  --font-mono: var(--font-mono);
+
+  --text-micro: var(--fs-micro);
+  --text-note: var(--fs-note);
+  --text-caption: var(--fs-caption);
+  --text-tab: var(--fs-tab);
+  --text-body: var(--fs-body);
+  --text-bubble: var(--fs-bubble);
+  --text-title: var(--fs-title);
+  --text-wizard: var(--fs-wizard);
+
+  --radius-window: var(--r-window);
+  --radius-card: var(--r-card);
+  --radius-item: var(--r-item);
+  --radius-control: var(--r-control);
+  --radius-chip: var(--r-chip);
+
+  --shadow-overlay: var(--shadow-overlay);
+  --shadow-toast: var(--shadow-toast);
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg-shell);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--fs-body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+  }
+  ::selection { background: var(--accent-30); }
+  * { box-sizing: border-box; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  code, kbd, .mono { font-family: var(--font-mono); }
+  /* thin scrollbars, panel-coloured track */
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.12); border-radius: 8px; }
+  *::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.2); }
+  *::-webkit-scrollbar-track { background: transparent; }
+}

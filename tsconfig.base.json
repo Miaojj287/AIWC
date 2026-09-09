@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "useDefineForClassFields": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aiwc/protocol": ["packages/protocol/src/index.ts"],
+      "@aiwc/protocol/*": ["packages/protocol/src/*"],
+      "@aiwc/kernel": ["packages/kernel/src/index.ts"],
+      "@aiwc/kernel/*": ["packages/kernel/src/*"],
+      "@aiwc/substrate": ["packages/substrate/src/index.ts"],
+      "@aiwc/substrate/*": ["packages/substrate/src/*"],
+      "@aiwc/gateway": ["packages/gateway/src/index.ts"],
+      "@aiwc/gateway/*": ["packages/gateway/src/*"],
+      "@aiwc/memory": ["packages/memory/src/index.ts"],
+      "@aiwc/memory/*": ["packages/memory/src/*"],
+      "@/*": ["src/*"]
+    }
+  }
+}

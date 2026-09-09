@@ -1,0 +1,103 @@
+/*
+ * AIWC design tokens — the ONLY place raw colors / radii / type sizes may appear.
+ * Source of truth: CLAUDE.md §2 and DESIGN-SPEC.md; visual reference docs/design/figma/*.png.
+ * Do not invent new greys, radii or accent colors. Extend here, never inline.
+ */
+:root {
+  color-scheme: dark;
+
+  /* §2.1 three background layers + one line */
+  --bg-shell: #1a1b22;      /* window base / tab bar / icon rail */
+  --bg-panel: #1e1f26;      /* sidebars / cards / other-party bubble / overlay inner card */
+  --bg-content: #15161c;    /* workspace body / inputs / embedded areas */
+  --bg-raised: #2a2b33;     /* segmented selected / pill / toast base */
+  --bg-overlay: #22232b;    /* menus, popovers, dialogs */
+
+  --line-4: rgb(255 255 255 / 0.04);
+  --line-6: rgb(255 255 255 / 0.06);
+  --line-8: rgb(255 255 255 / 0.08);
+  --line-10: rgb(255 255 255 / 0.10);
+  --hover-5: rgb(255 255 255 / 0.05);
+  --hover-7: rgb(255 255 255 / 0.07);
+
+  /* §2.2 the single accent */
+  --accent: #ff7a1f;
+  --accent-hover: #ff8d3d;
+  --accent-active: #f06a0f;
+  --accent-12: rgb(255 122 31 / 0.12);
+  --accent-15: rgb(255 122 31 / 0.15);
+  --accent-30: rgb(255 122 31 / 0.30);
+  --bubble-self: #132f63;   /* my outgoing bubble, white text */
+
+  /* semantic */
+  --ok: #52c98b;
+  --warn: #facc15;
+  --danger: #f0564a;
+  --info: #5b8def;
+  --clone: #60a5fa;
+
+  /* text */
+  --fg: #e8e9ee;
+  --fg-2: #b9bbc2;
+  --fg-3: #9c9ea5;
+  --fg-on-accent: #ffffff;
+
+  /* type scale (px) */
+  --fs-micro: 11px;
+  --fs-note: 11.5px;
+  --fs-caption: 12px;
+  --fs-tab: 12.5px;
+  --fs-body: 13px;
+  --fs-bubble: 14px;
+  --lh-bubble: 22px;
+  --fs-title: 20px;
+  --fs-wizard: 22px;
+
+  --font-sans: "PingFang SC", "Noto Sans SC", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-latin: "Inter", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* radii */
+  --r-window: 10px;
+  --r-card: 12px;
+  --r-item: 8px;
+  --r-control: 6px;
+  --r-chip: 100px;
+
+  /* layout */
+  --w-rail: 64px;
+  --w-list: 280px;
+  --w-agent: 360px;
+  --w-settings-nav: 200px;
+  --h-chrome: 48px;
+  --h-tab: 40px;
+  --h-control: 30px;
+  --avatar-list: 36px;
+
+  /* overlay shadow — only for floating layers, never cards */
+  --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-toast: 0 8px 24px rgb(0 0 0 / 0.4);
+
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+}
+
+:root[data-theme='light'] {
+  /* Light theme is a settings option (DESIGN-SPEC §2 常规 → 主题). Tokens flip here only. */
+  color-scheme: light;
+  --bg-shell: #f2f3f6;
+  --bg-panel: #ffffff;
+  --bg-content: #f7f8fa;
+  --bg-raised: #e8e9ee;
+  --bg-overlay: #ffffff;
+  --line-4: rgb(0 0 0 / 0.04);
+  --line-6: rgb(0 0 0 / 0.06);
+  --line-8: rgb(0 0 0 / 0.08);
+  --line-10: rgb(0 0 0 / 0.10);
+  --hover-5: rgb(0 0 0 / 0.04);
+  --hover-7: rgb(0 0 0 / 0.06);
+  --fg: #1a1b22;
+  --fg-2: #4b4d56;
+  --fg-3: #7a7c85;
+  --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.06);
+}

@@ -1,0 +1,13 @@
+{
+  "qrcode": { "qrcode": "qr-token-1", "qrcode_img_content": "https://ilinkai.weixin.qq.com/ilink/bot/qr?token=abc" },
+  "status_wait": { "status": "wait" },
+  "status_scaned": { "status": "scaned" },
+  "status_expired": { "status": "expired" },
+  "status_confirmed": {
+    "status": "confirmed",
+    "bot_token": "bot-token-xyz",
+    "baseurl": "https://ilinkai.weixin.qq.com",
+    "ilink_bot_id": "bot_1",
+    "ilink_user_id": "owner_user_1"
+  }
+}
