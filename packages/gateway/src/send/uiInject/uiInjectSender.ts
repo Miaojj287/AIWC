@@ -15,7 +15,7 @@
 import type { AdapterState, GatewayEvent, PlatformAdapter, SendRequest, SendResult, SubstrateService, WxMessage } from '@aiwc/protocol'
 import { createEmitter, errorMessage, sleep as defaultSleep } from '../../core/emitter'
 import { shapeOutboundText } from '../../adapters/ilink/textSplit'
-import { INJECT_FAILURE_TEXT, InjectorError, createInjector, type WeChatInjector } from './injectors'
+import { INJECT_FAILURE_TEXT, InjectorError, createDarwinInjector, createInjector, type WeChatInjector } from './injectors'
 
 export type VerifyVerdict = { verdict: 'ok'; message: WxMessage } | { verdict: 'wrong-session'; where: string } | { verdict: 'not-sent' }
 
@@ -72,7 +72,7 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   const log = deps.logger ?? (() => {})
   const now = deps.now ?? (() => Date.now())
   const sleep = deps.sleep ?? defaultSleep
-  const injector = deps.injector ?? createInjector(deps.platform)
+  const injector = deps.injector ?? (deps.platform === 'darwin' ? createDarwinInjector({ logger: log }) : createInjector(deps.platform))
   const verifyTimeout = deps.verifyTimeoutMs ?? VERIFY_TIMEOUT_MS
   const verifyPoll = deps.verifyPollMs ?? VERIFY_POLL_MS
   const slack = deps.verifyClockSlackMs ?? VERIFY_SLACK_MS
@@ -175,10 +175,13 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
       const changed = await deps.canSend?.(req)
       if (changed) return i > 0 ? halt('not-sent', `后续消息已取消：${changed}`) : { ok: false, error: changed }
       const before = new Set((await tail(sessionId)).map((message) => message.id))
+      let stage = 'focus'
       try {
         for (let attempt = 0; ; attempt++) {
           try {
+            stage = 'focus'
             if (i === 0) await injector.focusSession(searchName)
+            stage = 'fill'
             await injector.fill(bubble)
             break
           } catch (error) {
@@ -187,19 +190,23 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
           }
         }
       } catch (err) {
+        log('warn', 'ui-inject operation failed', { stage, error: errorMessage(err) })
         const reason = err instanceof InjectorError ? err.reason : 'not-sent'
         return halt(reason, err instanceof InjectorError ? undefined : errorMessage(err))
       }
       const beforeCommit = await deps.canSend?.(req)
       if (beforeCommit) return halt('not-sent', `发送前状态变化，已停止：${beforeCommit}`)
       const sentAt = now()
+      stage = 'commit'
       try {
         await injector.commit()
       } catch (err) {
+        log('warn', 'ui-inject operation failed', { stage, error: errorMessage(err) })
         const reason = err instanceof InjectorError ? err.reason : 'not-sent'
         return halt(reason, err instanceof InjectorError ? undefined : errorMessage(err))
       }
 
+      log('debug', 'ui-inject commit dispatched', { sessionId, index: i, chars: bubble.length })
       let result = await verify(sessionId, bubble, sentAt, before)
       let retried = false
       if (result.verdict === 'not-sent') {

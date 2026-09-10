@@ -12,6 +12,18 @@ const EXTERNAL_URL = /^(?:https?|mailto|x-apple\.systempreferences|ms-settings):
 export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle): void {
   const log = ctx.logger.child('ipc:app')
 
+  handle('app:windowControl', ({ action }) => {
+    const win = host.getMainWindow()
+    if (!win || win.isDestroyed()) return
+    switch (action) {
+      // Go through the existing close event so the user's close preference still applies.
+      case 'close': win.close(); break
+      case 'minimize': win.minimize(); break
+      case 'fullscreen': win.setFullScreen(!win.isFullScreen()); break
+      default: throw new Error('未知窗口操作')
+    }
+  })
+
   handle('app:getInfo', () => {
     host.onGetInfo?.()
     return {

@@ -7,8 +7,8 @@
  *
  * Activation cannot trust osascript's exit code: WeChat 4.x ignores the Apple Event `activate` on
  * some builds and osascript still exits 0 while the window never comes forward. Every attempt is
- * therefore verified by re-probing the window list, and we fall through the alternative scripts
- * until one actually works.
+ * therefore verified using the system foreground process and the WeChat window list. Launch
+ * Services reopens hidden/minimized windows first; Apple Events are bounded fallback attempts.
  *
  * When CoreGraphics is unavailable (non-mac test runs, a stripped build) everything falls back to
  * System Events keystrokes, which needs Automation permission on top of Accessibility.
@@ -16,7 +16,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { InjectorError, type WeChatInjector } from './types'
 import { sleep } from '../../../core/emitter'
-import { VK_F, VK_RETURN, VK_V, isTrusted, loadMacNative, probeWeChatWindow, tap } from './macNative'
+import { VK_F, VK_RETURN, VK_V, isTrusted, loadMacNative, probeWeChatWindow, tap, type WeChatWindowState } from './macNative'
 
 const WECHAT_BUNDLE_ID = 'com.tencent.xinWeChat'
 const ACTIVATE_SCRIPTS = [
@@ -40,7 +40,8 @@ const pasteSettleMs = (text: string): number =>
 const SEARCH_OPEN_MS = 220
 const SEARCH_RESULT_MS = 650
 const AFTER_JUMP_MS = 450
-const ACTIVATE_SETTLE_MS = 250
+const ACTIVATE_SETTLE_MS = 150
+const ACTIVATE_POLLS = 10
 
 export interface DarwinInjectorDeps {
   run?: (script: string) => Promise<string>
@@ -48,6 +49,10 @@ export interface DarwinInjectorDeps {
   sleep?: (ms: number) => Promise<void>
   /** Test seam: force the osascript keystroke path. */
   native?: boolean
+  probeWindow?: () => WeChatWindowState
+  trusted?: () => boolean
+  launch?: () => Promise<void>
+  logger?: (level: 'debug' | 'warn', message: string, meta?: unknown) => void
 }
 
 function runOsascript(script: string): Promise<string> {
@@ -55,6 +60,7 @@ function runOsascript(script: string): Promise<string> {
     execFile('osascript', ['-e', script], { timeout: 8000 }, (error, stdout, stderr) => {
       if (error) {
         const detail = `${stderr || error.message}`
+        if (/not authorized to send Apple events|-1743/.test(detail)) return reject(new InjectorError('automation-denied', detail))
         if (/not allowed assistive access|1002|-25211/.test(detail)) return reject(new InjectorError('no-permission', detail))
         return reject(new Error(detail))
       }
@@ -72,16 +78,24 @@ function pbcopy(text: string): Promise<void> {
   })
 }
 
-export function createDarwinInjector(deps: DarwinInjectorDeps = {}): WeChatInjector {
+function openWeChat(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile('/usr/bin/open', ['-b', WECHAT_BUNDLE_ID], { timeout: 8000 }, (error) => error ? reject(error) : resolve())
+  })
+}
+
+function createFocusController(deps: DarwinInjectorDeps) {
   const run = deps.run ?? runOsascript
-  const setClipboard = deps.setClipboard ?? pbcopy
   const wait = deps.sleep ?? sleep
   const useNative = deps.native ?? loadMacNative() !== null
 
+  const probe = deps.probeWindow ?? probeWeChatWindow
+  const trusted = deps.trusted ?? isTrusted
+  const log = deps.logger ?? (() => {})
   const isFrontmost = async (): Promise<boolean> => {
-    if (useNative) return probeWeChatWindow().frontmost
+    if (useNative) return probe().frontmost
     try {
-      return /wechat|微信/i.test(await run(FRONTMOST_SCRIPT))
+      return /^(WeChat|微信|Weixin)$/i.test(await run(FRONTMOST_SCRIPT))
     } catch (err) {
       // A denied permission must not be reported as "the window would not come forward" — the user
       // would go hunting for WeChat instead of ticking the box that actually fixes it.
@@ -95,26 +109,61 @@ export function createDarwinInjector(deps: DarwinInjectorDeps = {}): WeChatInjec
    * every synthesized event while reporting success, so the only visible symptom would be a message
    * that never arrives. Better to say what to switch on.
    */
-  const requireReady = (): void => {
+  const requireReady = (requireWindow = true): void => {
     if (!useNative) return
-    if (!isTrusted()) throw new InjectorError('no-permission')
-    if (!probeWeChatWindow().found) throw new InjectorError('no-window')
+    if (!trusted()) throw new InjectorError('no-permission')
+    if (requireWindow && !probe().found) throw new InjectorError('no-window')
   }
 
-  const activate = async (): Promise<void> => {
+  const requireFrontmost = async (stage: string): Promise<void> => {
     if (await isFrontmost()) return
-    for (const script of ACTIVATE_SCRIPTS) {
-      try {
-        await run(script)
-      } catch (err) {
-        if (err instanceof InjectorError) throw err
-        continue
-      }
-      await wait(ACTIVATE_SETTLE_MS)
-      if (await isFrontmost()) return
-    }
+    log('warn', 'wechat focus check failed', { stage, ...(useNative ? probe() : {}) })
     throw new InjectorError('focus-failed')
   }
+  const activate = async (): Promise<void> => {
+    // A hidden/minimized window is absent from the on-screen list; try reopening before no-window.
+    requireReady(false)
+    if (await isFrontmost()) return
+    const attempts: Array<[string, () => Promise<unknown>]> = [
+      ['open-bundle', deps.launch ?? openWeChat],
+      ...ACTIVATE_SCRIPTS.map((script, i): [string, () => Promise<unknown>] => [`applescript-${i + 1}`, () => run(script)]),
+    ]
+    let permissionError: InjectorError | undefined
+    for (const [method, perform] of attempts) {
+      try {
+        await perform()
+      } catch (err) {
+        if (err instanceof InjectorError) permissionError = err
+        log('warn', 'wechat activation attempt failed', { method, error: err instanceof Error ? err.message : String(err) })
+        continue
+      }
+      for (let poll = 0; poll < ACTIVATE_POLLS; poll++) {
+        await wait(ACTIVATE_SETTLE_MS)
+        if (await isFrontmost()) {
+          log('debug', 'wechat activation verified', { method, poll, ...(useNative ? probe() : {}) })
+          return
+        }
+      }
+      log('warn', 'wechat activation not verified', { method, ...(useNative ? probe() : {}) })
+    }
+    if (permissionError) throw permissionError
+    requireReady()
+    throw new InjectorError('focus-failed')
+  }
+  return { activate, requireReady, requireFrontmost }
+}
+
+/** Activation-only diagnostic: never searches, writes the clipboard or sends a message. */
+export async function activateWeChatWindow(deps: DarwinInjectorDeps = {}): Promise<void> {
+  await createFocusController(deps).activate()
+}
+
+export function createDarwinInjector(deps: DarwinInjectorDeps = {}): WeChatInjector {
+  const run = deps.run ?? runOsascript
+  const setClipboard = deps.setClipboard ?? pbcopy
+  const wait = deps.sleep ?? sleep
+  const useNative = deps.native ?? loadMacNative() !== null
+  const { activate, requireReady, requireFrontmost } = createFocusController(deps)
 
   const keystroke = (key: string, modifiers: string[] = []) => {
     const using = modifiers.length ? ` using {${modifiers.map((m) => `${m} down`).join(', ')}}` : ''
@@ -127,28 +176,32 @@ export function createDarwinInjector(deps: DarwinInjectorDeps = {}): WeChatInjec
 
   return {
     async focusSession(name) {
-      requireReady()
       await activate()
+      requireReady()
       await setClipboard(name)
+      await requireFrontmost('search-open')
       await pressCommandF()
       await wait(SEARCH_OPEN_MS)
+      await requireFrontmost('search-paste')
       await pressCommandV()
       await wait(SEARCH_RESULT_MS)
+      await requireFrontmost('search-result')
       await pressReturn() // open the first search result
       await wait(AFTER_JUMP_MS)
-      if (!(await isFrontmost())) throw new InjectorError('focus-failed')
+      await requireFrontmost('search-complete')
     },
     async fill(text) {
       requireReady()
-      if (!(await isFrontmost())) throw new InjectorError('focus-failed')
+      await requireFrontmost('fill-start')
       await setClipboard(text)
       await wait(80)
+      await requireFrontmost('fill-paste')
       await pressCommandV()
       await wait(pasteSettleMs(text))
     },
     async commit() {
       requireReady()
-      if (!(await isFrontmost())) throw new InjectorError('focus-failed')
+      await requireFrontmost('commit')
       await pressReturn()
     },
   }

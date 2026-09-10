@@ -95,7 +95,7 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
   })
 
   return (
-    <div className="flex h-10 shrink-0 items-stretch bg-shell pr-2" data-testid="tab-strip">
+    <div className="workspace-tab-strip flex h-10 shrink-0 items-stretch bg-shell pr-2" data-testid="tab-strip">
       <div ref={scrollRef} role="tablist" aria-label="工作区标签" onWheel={onWheel} className="scrollbar-none flex min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden">
         {tabs.map((tab, index) => {
           const reg = getTabRegistration(tab.kind)

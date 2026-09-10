@@ -54,6 +54,7 @@ export function miscHandlers(ctx: MockContext): HandlersFor<'app'> & HandlersFor
   }
 
   return {
+    'app:windowControl': () => undefined,
     'app:getInfo': () => ({ version: MOCK_VERSION, platform: ctx.platform, dataDir: '（浏览器演示模式，不写入磁盘）', isPackaged: false }),
     'app:checkUpdate': async () => {
       await ctx.delay(800)

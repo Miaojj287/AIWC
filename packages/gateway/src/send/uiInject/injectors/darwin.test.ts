@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDarwinInjector } from './darwin'
+import { activateWeChatWindow, createDarwinInjector } from './darwin'
 import { InjectorError } from './types'
 
 /**
@@ -16,7 +16,7 @@ function setup(frontmost: string[] = ['WeChat']) {
     if (script.includes('frontmost is true')) return frontmost[Math.min(front++, frontmost.length - 1)] ?? ''
     return ''
   })
-  const injector = createDarwinInjector({ run, setClipboard: async (t) => void clipboard.push(t), sleep: async () => {}, native: false })
+  const injector = createDarwinInjector({ run, setClipboard: async (t) => void clipboard.push(t), sleep: async () => {}, launch: async () => {}, native: false })
   return { injector, scripts, clipboard, run }
 }
 
@@ -36,11 +36,32 @@ describe('darwin injector', () => {
     ])
   })
 
-  it('activates and re-probes until WeChat is really in front', async () => {
-    // not frontmost, still not after the first activate, then yes
-    const h = setup(['Finder', 'Finder', 'WeChat', 'WeChat', 'WeChat'])
+  it('waits for delayed activation without launching again', async () => {
+    const launch = vi.fn(async () => {})
+    let probes = 0
+    await activateWeChatWindow({ native: true, trusted: () => true, launch, sleep: async () => {},
+      probeWindow: () => ({ found: probes >= 3, frontmost: ++probes >= 4 }),
+    })
+    expect(launch).toHaveBeenCalledTimes(1)
+  })
+
+  it('tries Apple Events when open returns successfully without bringing WeChat forward', async () => {
+    const h = setup(['Finder', ...Array(10).fill('Finder'), 'WeChat'])
     await h.injector.focusSession('小明')
-    expect(h.scripts.filter((s) => s.includes('activate')).length).toBe(2)
+    expect(h.scripts.filter((s) => s.includes('activate'))).toHaveLength(1)
+  })
+
+  it('stops before search paste when focus is lost during the wait', async () => {
+    const h = setup(['WeChat', 'WeChat', 'Safari'])
+    await expect(h.injector.focusSession('小明')).rejects.toMatchObject({ reason: 'focus-failed' })
+    expect(keystrokes(h.scripts)).toHaveLength(1)
+    expect(keystrokes(h.scripts)[0]).toContain('keystroke "f"')
+  })
+
+  it('does not paste after the clipboard operation changes focus', async () => {
+    const h = setup(['WeChat', 'Safari'])
+    await expect(h.injector.fill('测试')).rejects.toMatchObject({ reason: 'focus-failed' })
+    expect(keystrokes(h.scripts)).toHaveLength(0)
   })
 
   it('fails with focus-failed when no activation script brings WeChat forward', async () => {
@@ -70,7 +91,7 @@ describe('darwin injector', () => {
     const run = vi.fn(async () => {
       throw new InjectorError('no-permission', 'osascript is not allowed assistive access')
     })
-    const injector = createDarwinInjector({ run, setClipboard: async () => {}, sleep: async () => {}, native: false })
+    const injector = createDarwinInjector({ run, setClipboard: async () => {}, sleep: async () => {}, launch: async () => {}, native: false })
     await expect(injector.commit()).rejects.toMatchObject({ reason: 'no-permission' })
   })
 })

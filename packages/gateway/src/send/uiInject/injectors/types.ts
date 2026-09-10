@@ -2,7 +2,7 @@
  * Keyboard-injection port for the WeChat desktop client. Implementations only move focus, paste and
  * press Enter — they never decide *whether* to send; that is the sender's job (verify + halt).
  */
-export type InjectFailure = 'unsupported' | 'no-window' | 'focus-failed' | 'busy' | 'no-permission'
+export type InjectFailure = 'unsupported' | 'no-window' | 'focus-failed' | 'busy' | 'no-permission' | 'automation-denied'
 
 export class InjectorError extends Error {
   constructor(
@@ -28,6 +28,7 @@ export const INJECT_FAILURE_TEXT: Record<InjectFailure, string> = {
   'no-window': '找不到微信窗口',
   'focus-failed': '微信窗口没能激活',
   busy: '输入通道一直被占用',
+  'automation-denied': '未授予自动化权限，请在系统设置 → 隐私与安全性 → 自动化中允许 AIWC 控制微信和 System Events',
   // A grant that already exists can still be stale: macOS ties it to the exact binary, so after an
   // app update / rebuild the switch reads as on while the check fails. Removing the entry and
   // adding it again is the only reliable fix, so the copy says that rather than just "go tick it".

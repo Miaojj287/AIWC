@@ -40,6 +40,8 @@ interface Native {
   CGEventPost: Any
   CGEventSetFlags: Any
   AXIsProcessTrusted: Any
+  GetFrontProcess: Any
+  GetProcessPID: Any
   CGWindowListCopyWindowInfo: Any
   CFArrayGetCount: Any
   CFArrayGetValueAtIndex: Any
@@ -70,6 +72,8 @@ export function loadMacNative(): Native | null {
       CGEventPost: cg.func('void CGEventPost(uint32 tap, void* event)'),
       CGEventSetFlags: cg.func('void CGEventSetFlags(void* event, uint64 flags)'),
       AXIsProcessTrusted: app.func('bool AXIsProcessTrusted()'),
+      GetFrontProcess: app.func('int32 GetFrontProcess(void* psn)'),
+      GetProcessPID: app.func('int32 GetProcessPID(void* psn, void* pid)'),
       CGWindowListCopyWindowInfo: cg.func('void* CGWindowListCopyWindowInfo(uint32 option, uint32 relativeToWindow)'),
       CFArrayGetCount: cf.func('long CFArrayGetCount(void* theArray)'),
       CFArrayGetValueAtIndex: cf.func('void* CFArrayGetValueAtIndex(void* theArray, long idx)'),
@@ -134,9 +138,11 @@ export function tap(keyCode: number, withCommand = false): void {
 export interface WeChatWindowState {
   found: boolean
   frontmost: boolean
+  foregroundPid?: number
+  wechatPid?: number
 }
 
-interface WindowInfo {
+export interface WindowInfo {
   ownerPid: number
   ownerName: string
   title: string
@@ -201,11 +207,26 @@ const isWeChat = (w: WindowInfo): boolean => w.ownerName === 'WeChat' || w.owner
 const near = (a: WindowInfo['bounds'], b: WindowInfo['bounds']): boolean =>
   Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
 
-/**
- * CGWindowList returns on-screen windows front-to-back, so the first normal window that is not ours
- * is whatever the user is looking at. WeChat's image viewer is also a top-level WeChat window, so
- * the main window is picked by area with a bonus for the real title rather than by size alone.
- */
+/** Window z-order is not keyboard focus (overlays and other displays can lead the list). */
+export function classifyWeChatWindows(windows: WindowInfo[], foregroundPid: number): WeChatWindowState {
+  const wechat = windows.filter(isWeChat)
+  const score = (w: WindowInfo) => w.area + (['微信', 'WeChat', 'Weixin'].includes(w.title) ? 1_000_000_000 : 0)
+  const main = wechat.reduce<WindowInfo | undefined>((best, w) => !best || score(w) > score(best) ? w : best, undefined)
+  if (!main) return { found: false, frontmost: false, foregroundPid }
+  // Keep rejecting a viewer/settings window above the main WeChat window. Never ignore our own app
+  // when deciding keyboard focus: doing so can paste into AIWC while it is still active.
+  const front = wechat[0]
+  return { found: true, frontmost: foregroundPid === main.ownerPid && !!front && near(main.bounds, front.bounds), foregroundPid, wechatPid: main.ownerPid }
+}
+
+/** Carbon's front process is the keyboard recipient; querying it requires no Apple Events. */
+function foregroundProcess(n: Native): number {
+  const psn = Buffer.alloc(8)
+  const pid = Buffer.alloc(4)
+  if (n.GetFrontProcess(psn) !== 0 || n.GetProcessPID(psn, pid) !== 0) return 0
+  return pid.readInt32LE()
+}
+
 export function probeWeChatWindow(): WeChatWindowState {
   const n = loadMacNative()
   if (!n) return { found: false, frontmost: false }
@@ -214,18 +235,12 @@ export function probeWeChatWindow(): WeChatWindowState {
     list = n.CGWindowListCopyWindowInfo(WINDOW_LIST_OPTIONS, 0)
     if (!list) return { found: false, frontmost: false }
     const count = Number(n.CFArrayGetCount(list))
-    let main: (WindowInfo & { score: number }) | null = null
-    let front: WindowInfo | null = null
+    const windows: WindowInfo[] = []
     for (let i = 0; i < count; i++) {
       const info = readWindow(n, n.CFArrayGetValueAtIndex(list, i))
-      if (!info) continue
-      if (!front && info.ownerPid !== process.pid) front = info
-      if (!isWeChat(info)) continue
-      const score = info.area + (info.title === '微信' || info.title === 'WeChat' ? 1_000_000_000 : 0)
-      if (!main || score > main.score) main = { ...info, score }
+      if (info) windows.push(info)
     }
-    if (!main) return { found: false, frontmost: false }
-    return { found: true, frontmost: Boolean(front && front.ownerPid === main.ownerPid && near(main.bounds, front.bounds)) }
+    return classifyWeChatWindows(windows, foregroundProcess(n))
   } catch {
     return { found: false, frontmost: false }
   } finally {

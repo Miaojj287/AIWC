@@ -17,7 +17,7 @@ const ERR_ABORTED = -3
 
 export const SHELL_BACKGROUND = '#1a1b22'
 export const SHELL_FOREGROUND = '#e8e9ee'
-export const TITLE_BAR_HEIGHT = 48
+export const TITLE_BAR_HEIGHT = 32
 
 export interface MainWindowDeps {
   paths: AppPaths
@@ -72,7 +72,7 @@ export function windowOptionsFor(platform: NodeJS.Platform, state: WindowState, 
     },
   }
   if (platform === 'darwin') {
-    return { ...base, titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
+    return { ...base, titleBarStyle: 'hidden', trafficLightPosition: { x: 8, y: 12 } }
   }
   if (platform === 'win32') {
     return {
@@ -102,6 +102,12 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
     const state = fitToDisplays(loadWindowState(deps.paths.windowStateFile), displays)
     const w = new BrowserWindow(windowOptionsFor(platform, state, deps.preload, deps.isPackaged, deps.appIcon))
     win = w
+    // Render fixed-size traffic lights; newer macOS versions enlarge native buttons.
+    if (platform === 'darwin') {
+      w.setWindowButtonVisibility(false)
+      // AppKit may restore standard buttons after leaving native fullscreen.
+      w.on('leave-full-screen', () => w.setWindowButtonVisibility(false))
+    }
     // Captured now: `w.webContents` throws "Object has been destroyed" inside the 'closed' handler.
     const webContentsId = w.webContents.id
     trusted.add(webContentsId)

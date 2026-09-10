@@ -51,3 +51,61 @@
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
+
+/* Native controls occupy existing columns, never a full-width title row. */
+[data-runtime='electron'][data-platform='darwin'] nav[aria-label='功能'] {
+  padding-top: 44px;
+}
+[data-runtime='electron'] nav[aria-label='功能'] {
+  -webkit-app-region: drag;
+}
+[data-runtime='electron'] .workspace-tab-strip,
+[data-runtime='electron'] .workspace-tab-strip [role='tablist'] {
+  -webkit-app-region: drag;
+}
+[data-runtime='electron'] .workspace-tab-strip > :not([role='tablist']),
+[data-runtime='electron'] .workspace-tab-strip [role='tablist'] > * {
+  -webkit-app-region: no-drag;
+}
+/* Windows caption buttons sit above the Agent tools in their own column. */
+[data-runtime='electron'][data-platform='win32'] [data-testid='agent-panel']:not([hidden]) {
+  padding-top: 32px;
+}
+[data-runtime='electron'][data-platform='win32'] [data-testid='agent-strip'] {
+  padding-top: 40px;
+}
+[data-runtime='electron'][data-platform='win32'][data-agent-collapsed='true'] .workspace-tab-strip {
+  padding-right: 100px;
+}
+
+/* 12px dots, 18px centre spacing: fits the 64px navigation column. */
+.mac-window-controls {
+  position: absolute;
+  top: 12px;
+  left: 8px;
+  z-index: 50;
+  display: flex;
+  gap: 6px;
+}
+.mac-window-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: rgb(0 0 0 / 65%);
+  font: 12px/1 Arial, sans-serif;
+  -webkit-app-region: no-drag;
+}
+.mac-window-control[data-action='close'] { background: #ff5f57; }
+.mac-window-control[data-action='minimize'] { background: #febc2e; }
+.mac-window-control[data-action='fullscreen'] { background: #28c840; }
+.mac-window-controls[data-focused='false']:not(:hover) .mac-window-control { background: #55565b; }
+.mac-window-control span { opacity: 0; }
+.mac-window-controls:hover .mac-window-control span,
+.mac-window-control:focus-visible span { opacity: 1; }
+.mac-window-control:focus-visible { outline: 2px solid var(--color-fg, #e8e9ee); outline-offset: 2px; }
+.mac-window-control:active { filter: brightness(.8); }

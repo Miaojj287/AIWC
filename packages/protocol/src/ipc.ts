@@ -73,6 +73,7 @@ export interface UpdateStatus {
 
 /** request → response pairs for ipcRenderer.invoke */
 export interface InvokeMap {
+  'app:windowControl': { req: { action: 'close' | 'minimize' | 'fullscreen' }; res: void }
   'app:getInfo': { req: void; res: { version: string; platform: 'darwin' | 'win32' | 'linux'; dataDir: string; isPackaged: boolean } }
   'app:checkUpdate': { req: void; res: UpdateStatus }
   'app:exportLogs': { req: void; res: { path: string } }
@@ -225,7 +226,7 @@ export interface AiwcBridge {
 }
 
 export const INVOKE_CHANNELS = [
-  'app:getInfo', 'app:checkUpdate', 'app:exportLogs', 'app:openPath', 'app:openUrl', 'app:pickDirectory', 'app:setCloseBehaviorOnce',
+  'app:windowControl', 'app:getInfo', 'app:checkUpdate', 'app:exportLogs', 'app:openPath', 'app:openUrl', 'app:pickDirectory', 'app:setCloseBehaviorOnce',
   'config:get', 'config:set', 'secret:set', 'secret:has', 'secret:reveal', 'secret:delete',
   'ai:testModel', 'ai:listRemoteModels', 'ai:discoverModels', 'ai:listLocalSttModels', 'ai:downloadSttModel', 'ai:cancelSttDownload', 'ai:deleteSttModel', 'ai:setDefaultSttModel',
   'substrate:status', 'substrate:detectWeChat', 'substrate:listAccounts', 'substrate:verifyAccount', 'substrate:acquireKeys', 'substrate:setManualKey', 'substrate:testConnection', 'substrate:connect', 'substrate:sync',
