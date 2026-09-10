@@ -5,6 +5,13 @@
 import { z } from 'zod'
 
 export const ThemeSchema = z.enum(['dark', 'light', 'system'])
+const AppearancePaletteSchema = z.object({
+  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  background: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  foreground: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  contrast: z.number().int().min(0).max(100),
+})
+
 export const CloseBehaviorSchema = z.enum(['quit', 'minimize', 'ask'])
 export const PermissionModeSchema = z.enum(['ask', 'bypass'])
 
@@ -80,6 +87,10 @@ export const AppConfigSchema = z.object({
   general: z
     .object({
       theme: ThemeSchema.default('dark'),
+      appearance: z.object({
+        light: AppearancePaletteSchema.default({ accent: '#c45100', background: '#f7f8fa', foreground: '#1a1b22', contrast: 35 }),
+        dark: AppearancePaletteSchema.default({ accent: '#ff7a1f', background: '#15161c', foreground: '#e8e9ee', contrast: 35 }),
+      }).prefault({}),
       launchAtLogin: z.boolean().default(false),
       closeBehavior: CloseBehaviorSchema.default('ask'),
       language: z.enum(['zh-CN']).default('zh-CN'),

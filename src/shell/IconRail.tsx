@@ -57,7 +57,7 @@ export function IconRail({ mac }: IconRailProps) {
                 style={{ backgroundImage: `var(--rail-tile-${fn})` }}
                 onClick={() => runCommand('rail.select', { fn })}
               >
-                <Icon size={20} strokeWidth={ICON_STROKE} aria-hidden className="text-(--fg-on-accent)" />
+                <Icon size={20} strokeWidth={ICON_STROKE} aria-hidden className="text-white" />
               </RailTile>
             </Tooltip>
           </div>

@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand'
 import type { AppConfig, ConfigPatch } from '@aiwc/protocol'
+import { applyPalette } from './appearance'
 import { getBridge } from './bridge'
 
 export type ResolvedTheme = 'dark' | 'light'
@@ -44,17 +45,20 @@ export function resolveTheme(theme: AppConfig['general']['theme']): ResolvedThem
 let systemListener: (() => void) | undefined
 
 /** Stamp the resolved theme on <html>; follows the OS when theme === 'system'. */
-export function applyTheme(theme: AppConfig['general']['theme']): ResolvedTheme {
+export function applyTheme(theme: AppConfig['general']['theme'], appearance?: AppConfig['general']['appearance']): ResolvedTheme {
   if (typeof document === 'undefined') return resolveTheme(theme)
   const resolved = resolveTheme(theme)
   document.documentElement.dataset.theme = resolved
+  applyPalette(resolved, appearance)
   systemListener?.()
   systemListener = undefined
   if (theme === 'system' && typeof matchMedia === 'function') {
     try {
       const mq = matchMedia('(prefers-color-scheme: light)')
       const onChange = () => {
-        document.documentElement.dataset.theme = mq.matches ? 'light' : 'dark'
+        const mode = mq.matches ? 'light' : 'dark'
+        document.documentElement.dataset.theme = mode
+        applyPalette(mode, appearance)
       }
       mq.addEventListener('change', onChange)
       systemListener = () => mq.removeEventListener('change', onChange)
@@ -78,7 +82,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     hydrating = getBridge()
       .then((b) => b.invoke('config:get', undefined))
       .then((config) => {
-        applyTheme(config.general.theme)
+        applyTheme(config.general.theme, config.general.appearance)
         set({ config, hydrated: true, error: undefined })
         return config
       })
@@ -96,18 +100,18 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const previous = get().config
     if (previous) {
       const optimistic = mergePatch(previous, patch)
-      if (patch.general?.theme && patch.general.theme !== previous.general.theme) applyTheme(optimistic.general.theme)
+      if (patch.general) applyTheme(optimistic.general.theme, optimistic.general.appearance)
       set({ config: optimistic })
     }
     try {
       const bridge = await getBridge()
       const confirmed = await bridge.invoke('config:set', patch)
-      applyTheme(confirmed.general.theme)
+      applyTheme(confirmed.general.theme, confirmed.general.appearance)
       set({ config: confirmed, hydrated: true, error: undefined })
       return confirmed
     } catch (e) {
       if (previous) {
-        applyTheme(previous.general.theme)
+        applyTheme(previous.general.theme, previous.general.appearance)
         set({ config: previous })
       }
       throw e

@@ -150,7 +150,7 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
   }
 
   return (
-    <div role="list" aria-label="自动回复规则" className="flex flex-col gap-px px-2 py-1.5">
+    <div role="list" aria-label="自动回复规则" className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-1.5">
       {rows.map((row) => {
         const status = ruleStatusLine(row.rule)
         const spec = menuFor(row)

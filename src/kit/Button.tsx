@@ -23,7 +23,7 @@ export const buttonVariants = cva(
         primary: 'bg-accent text-(--fg-on-accent) hover:bg-accent-hover active:bg-accent-active',
         ghost: 'border border-line-6 bg-line-8 text-fg hover:bg-(--fill-13) active:bg-(--line-16)',
         outline: 'border border-(--line-16) text-fg hover:border-(--line-25) hover:bg-(--fill-13) active:bg-(--line-16)',
-        danger: 'bg-danger text-(--fg-on-accent) hover:brightness-[1.08] active:brightness-[0.9]',
+        danger: 'bg-danger text-white hover:brightness-[1.08] active:brightness-[0.9]',
         link: 'text-accent hover:bg-accent/8 active:bg-accent/14',
       },
       size: {

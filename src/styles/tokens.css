@@ -101,3 +101,14 @@
   --fg-3: #7a7c85;
   --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.06);
 }
+
+/* Miniature theme illustrations share the live palette tokens. */
+.appearance-preview { display: flex; height: 112px; background: var(--bg-content); }
+.appearance-preview-sidebar { width: 28%; padding: 18px 8px; background: var(--bg-shell); border-right: 1px solid var(--line-10); }
+.appearance-preview i { display: block; height: 5px; margin-bottom: 8px; border-radius: var(--r-chip); background: var(--fg-3); opacity: .45; }
+.appearance-preview-sidebar i:first-child { background: var(--accent); opacity: 1; }
+.appearance-preview-body { flex: 1; min-width: 0; padding: 20px 12px; }
+.appearance-preview-body > i { width: 55%; }
+.appearance-preview-card { padding: 10px; border: 1px solid var(--line-10); border-radius: var(--r-item); background: var(--bg-panel); }
+.appearance-preview-card i { width: 70%; height: 4px; }
+.appearance-preview-card span { display: block; width: 30%; height: 10px; margin-left: auto; border-radius: var(--r-control); background: var(--accent); }

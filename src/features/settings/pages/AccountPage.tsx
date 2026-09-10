@@ -208,7 +208,7 @@ export function AccountPage() {
           >
             <div className="flex items-center gap-2">
               <SecretField kind="db_key" secretRef={secretRefFor(account, 'db_key')} version={keyVersion} label="解密密钥" className="flex-1" />
-              <Button variant="primary" icon={KeyRound} onClick={() => setAcquire('all')}>
+              <Button variant="outline" icon={KeyRound} onClick={() => setAcquire('all')}>
                 自动获取密钥
               </Button>
               <Button variant="link" onClick={() => setManual(manual === 'db_key' ? null : 'db_key')}>
@@ -234,7 +234,7 @@ export function AccountPage() {
             <div className="flex flex-wrap items-end gap-3">
               <LabeledSecret label="XOR 密钥" kind="image_xor" secretRef={secretRefFor(account, 'image_xor')} version={keyVersion} className="w-[120px]" />
               <LabeledSecret label="AES 密钥" kind="image_aes" secretRef={secretRefFor(account, 'image_aes')} version={keyVersion} className="min-w-[200px] flex-1" />
-              <Button variant="ghost" icon={Image} onClick={() => setAcquire('image')}>
+              <Button variant="outline" icon={Image} onClick={() => setAcquire('image')}>
                 自动获取图片密钥
               </Button>
               <Button variant="link" onClick={() => setManual(manual === 'image_xor' ? null : 'image_xor')}>手动输入 XOR</Button>

@@ -90,7 +90,7 @@ export const Avatar = forwardRef<HTMLDivElement, AvatarProps>(function Avatar(
       role="img"
       aria-label={name}
       className={cn(
-        'flex shrink-0 select-none items-center justify-center overflow-hidden font-medium text-(--fg-on-accent)/90',
+        'flex shrink-0 select-none items-center justify-center overflow-hidden font-medium text-white/90',
         radius,
         FONT[size],
         className,

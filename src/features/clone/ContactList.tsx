@@ -163,7 +163,7 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
   }
 
   return (
-    <div role="list" aria-label="联系人" className="flex flex-col gap-px px-2 py-1.5">
+    <div role="list" aria-label="联系人" className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-1.5">
       <div className="flex items-center px-2.5 pb-1 text-micro text-fg-3">
         <span>{segment === 'ready' ? `已克隆 ${ready} 位` : `共 ${total} 位联系人 · 已克隆 ${ready} 位`}</span>
       </div>

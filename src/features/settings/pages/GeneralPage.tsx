@@ -2,21 +2,14 @@
  * 常规 — theme, launch at login, close-window behaviour. Every control applies instantly (DESIGN-SPEC §2).
  * Figma 125:415.
  */
-import { Monitor, Moon, Sun } from 'lucide-react'
 import type { AppConfig } from '@aiwc/protocol'
-import { Card, SegmentedControl, Select, Toggle, type SegmentedOption, type SelectOption } from '@/kit'
+import { Card, Select, Toggle, type SelectOption } from '@/kit'
 import { useConfig } from '@/platform/configStore'
+import { AppearanceSettings } from './AppearanceSettings'
 import { saveConfig } from '../hooks'
 import { PagePlaceholder, SRow, Section } from '../pageKit'
 
-type Theme = AppConfig['general']['theme']
 type CloseBehavior = AppConfig['general']['closeBehavior']
-
-const THEME_OPTIONS: ReadonlyArray<SegmentedOption<Theme>> = [
-  { value: 'light', label: '浅色', icon: Sun },
-  { value: 'dark', label: '深色', icon: Moon },
-  { value: 'system', label: '跟随系统', icon: Monitor },
-]
 
 const CLOSE_OPTIONS: ReadonlyArray<SelectOption<CloseBehavior>> = [
   { value: 'quit', label: '退出', description: '关闭窗口即退出，自动回复与推送停止' },
@@ -30,11 +23,7 @@ export function GeneralPage() {
   return (
     <>
       <Section title="外观">
-        <Card variant="rows">
-          <SRow id="general.theme" title="主题模式" description="选择界面配色，切换后立即生效">
-            <SegmentedControl aria-label="主题模式" options={THEME_OPTIONS} value={general.theme} onValueChange={(theme) => void saveConfig({ general: { theme } })} />
-          </SRow>
-        </Card>
+        <AppearanceSettings general={general} />
       </Section>
       <Section title="启动">
         <Card variant="rows">

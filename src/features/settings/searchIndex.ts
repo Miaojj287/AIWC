@@ -18,6 +18,7 @@ export interface SettingsRow {
 
 export const SETTINGS_ROWS: readonly SettingsRow[] = [
   // 常规
+  { id: 'general.appearance', page: 'general', group: '外观', title: '自定义配色', description: '浅色与深色独立配置强调色、背景、前景和对比度', keywords: ['强调色', '背景', '前景', '对比度', '配色'] },
   { id: 'general.theme', page: 'general', group: '外观', title: '主题模式', description: '选择界面配色，切换后立即生效', keywords: ['theme', '深色', '浅色', '跟随系统', '外观'] },
   { id: 'general.launchAtLogin', page: 'general', group: '启动', title: '开机自启', description: '登录系统后在后台自动启动 AIWC', keywords: ['launch', 'login', '自启动', '启动'] },
   { id: 'general.closeBehavior', page: 'general', group: '启动', title: '关闭窗口时', description: '点击窗口关闭按钮后的行为', keywords: ['close', '退出', '最小化', '菜单栏', '每次询问'] },

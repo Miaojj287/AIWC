@@ -101,3 +101,12 @@
 @media (prefers-reduced-motion: reduce) {
   .kit-overlay, .kit-dialog, .kit-drawer, .kit-menu, .kit-toast { animation: none !important; }
 }
+
+/* Color controls are literal color samples, independent of the active theme. */
+.color-field { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line-10); border-radius: var(--r-item); }
+.color-field:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.color-field-swatch { width: 16px; height: 16px; border: 1px solid currentColor; opacity: .65; border-radius: 50%; cursor: pointer; }
+.color-field-plane { position: relative; height: 190px; border-radius: var(--r-control); touch-action: none; cursor: crosshair; background-image: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent); }
+.color-field-plane span { position: absolute; width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 1px 3px #0008; }
+.color-field-hue { appearance: none; width: 100%; height: 14px; margin-top: 10px; border-radius: var(--r-chip); background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.color-field-hue::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; background: transparent; cursor: pointer; }

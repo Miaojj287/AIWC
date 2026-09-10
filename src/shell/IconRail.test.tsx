@@ -50,7 +50,7 @@ describe('IconRail', () => {
     // tokens only: no arbitrary ring width, no raw white / black colours, and the icon is on-accent white
     for (const el of [chat, autoreply]) {
       expect(el.className).not.toMatch(/ring-\[|white|black|shadow/)
-      expect(el.querySelector('svg')?.getAttribute('class')).toContain('text-(--fg-on-accent)')
+      expect(el.querySelector('svg')?.getAttribute('class')).toContain('text-white')
     }
     // exactly one indicator bar, sitting next to the selected tile
     const bars = screen.getAllByTestId('rail-indicator')
