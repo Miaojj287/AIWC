@@ -62,7 +62,11 @@ export function parseMacPsOutput(output: string): WeChatProcessInfo[] {
 function macProcessesSync(): WeChatProcessInfo[] {
   for (const name of MAC_PROCESS_NAMES) {
     try {
-      const out = execFileSync('/usr/bin/pgrep', ['-x', name], { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] })
+      const out = execFileSync('/usr/bin/pgrep', ['-x', name], {
+        encoding: 'utf8',
+        timeout: EXEC_TIMEOUT_MS,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
       const pids = parsePidList(out)
       if (pids.length > 0) return pids.sort((a, b) => b - a).map((pid) => ({ pid, name }))
     } catch {
@@ -70,7 +74,11 @@ function macProcessesSync(): WeChatProcessInfo[] {
     }
   }
   try {
-    const out = execFileSync('/bin/ps', ['-A', '-o', 'pid,comm,command'], { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] })
+    const out = execFileSync('/bin/ps', ['-A', '-o', 'pid,comm,command'], {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
     return parseMacPsOutput(out)
   } catch {
     return []
@@ -79,7 +87,12 @@ function macProcessesSync(): WeChatProcessInfo[] {
 
 function windowsProcessesSync(): WeChatProcessInfo[] {
   try {
-    const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq Weixin.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq Weixin.exe', '/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
     return parseWindowsTasklist(out)
   } catch {
     return []
@@ -112,7 +125,11 @@ async function macVersion(): Promise<string | undefined> {
     const plist = `${app}/Contents/Info.plist`
     if (!existsSync(plist)) continue
     try {
-      const { stdout } = await execFileAsync('/usr/bin/defaults', ['read', plist.replace(/\.plist$/, ''), 'CFBundleShortVersionString'], { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS })
+      const { stdout } = await execFileAsync(
+        '/usr/bin/defaults',
+        ['read', plist.replace(/\.plist$/, ''), 'CFBundleShortVersionString'],
+        { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS },
+      )
       const version = parseVersionString(stdout)
       if (version) return version
     } catch {
@@ -124,8 +141,13 @@ async function macVersion(): Promise<string | undefined> {
 
 async function windowsVersion(): Promise<string | undefined> {
   try {
-    const script = '(Get-Process Weixin -ErrorAction SilentlyContinue | Select-Object -First 1).MainModule.FileVersionInfo.ProductVersion'
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: EXEC_TIMEOUT_MS, windowsHide: true })
+    const script =
+      '(Get-Process Weixin -ErrorAction SilentlyContinue | Select-Object -First 1).MainModule.FileVersionInfo.ProductVersion'
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: EXEC_TIMEOUT_MS,
+      windowsHide: true,
+    })
     return parseVersionString(stdout)
   } catch {
     return undefined

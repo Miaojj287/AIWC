@@ -138,7 +138,9 @@ function kvcommDirs(accountDir: string): string[] {
 
 function safeDirs(dir: string): string[] {
   try {
-    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
   } catch {
     return []
   }
@@ -189,7 +191,8 @@ export async function resolveImageKeys(
       template.ciphertext = template.ciphertext ?? wider.ciphertext
     }
   }
-  if (template.xorKey === null) return { error: '未找到图片模板文件，无法计算 XOR 密钥（请在微信中打开几张图片后重试）' }
+  if (template.xorKey === null)
+    return { error: '未找到图片模板文件，无法计算 XOR 密钥（请在微信中打开几张图片后重试）' }
   const xorHex = template.xorKey.toString(16).padStart(2, '0')
   if (!template.ciphertext) return { xorHex } // no V2 template → XOR only
 

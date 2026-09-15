@@ -10,6 +10,4 @@ export function register(): void {
   registerTab({ kind: 'file', icon: 'file-text', component: FileTab })
 }
 
-export { FileTab } from './FileTab'
-export { Markdown, parseMarkdown, type MarkdownProps } from './markdown'
-export { fileName, previewKind, isMarkdownFile, type PreviewKind } from './fileModel'
+export { Markdown } from './markdown'

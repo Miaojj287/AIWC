@@ -16,7 +16,10 @@ export interface DetectWeChatResult {
 }
 
 export async function detectWeChat(): Promise<DetectWeChatResult> {
-  const [processes, version] = await Promise.all([listWeChatProcesses().catch(() => []), readWeChatVersion().catch(() => undefined)])
+  const [processes, version] = await Promise.all([
+    listWeChatProcesses().catch(() => []),
+    readWeChatVersion().catch(() => undefined),
+  ])
   const main = processes[0]
   const root = detectDbRoot()
   return {

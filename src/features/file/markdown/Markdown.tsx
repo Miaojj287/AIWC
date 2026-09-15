@@ -6,6 +6,7 @@
  */
 import { Fragment, type ReactNode } from 'react'
 import { MARKDOWN_CLASS, MARKDOWN_HEADING_CLASS } from '@/features/agent/markdownStyles'
+import { useT } from '@/i18n'
 import { cn } from '@/kit'
 import { openTarget } from '@/platform/openExternal'
 import { parseMarkdown, type Block, type Inline } from './parse'
@@ -18,8 +19,9 @@ export interface MarkdownProps {
 }
 
 export function Markdown({ source, className, onLink }: MarkdownProps) {
+  const t = useT()
   const blocks = parseMarkdown(source)
-  const open = onLink ?? ((href: string) => void openTarget(href, '链接'))
+  const open = onLink ?? ((href: string) => void openTarget(href, t('file.markdown.link')))
   return (
     <div className={cn(MARKDOWN_CLASS.root, className)}>
       {blocks.map((b, i) => (
@@ -48,7 +50,10 @@ function BlockView({ block, open }: { block: Block; open(href: string): void }):
     case 'list': {
       const Tag = block.ordered ? 'ol' : 'ul'
       return (
-        <Tag start={block.ordered ? block.start : undefined} className={cn(MARKDOWN_CLASS.list, block.ordered ? 'list-decimal' : 'list-disc')}>
+        <Tag
+          start={block.ordered ? block.start : undefined}
+          className={cn(MARKDOWN_CLASS.list, block.ordered ? 'list-decimal' : 'list-disc')}
+        >
           {block.items.map((item, i) => (
             <li key={i} className={MARKDOWN_CLASS.listItem}>
               <div className="flex flex-col gap-1.5">
@@ -84,7 +89,13 @@ function BlockView({ block, open }: { block: Block; open(href: string): void }):
             <thead>
               <tr>
                 {block.header.map((cell, i) => (
-                  <th key={i} className={cn('border-b border-line-8 px-2 py-1.5 font-medium text-fg-2', alignClass(block.align[i]))}>
+                  <th
+                    key={i}
+                    className={cn(
+                      'border-b border-line-8 px-2 py-1.5 font-medium text-fg-2',
+                      alignClass(block.align[i]),
+                    )}
+                  >
                     <Inlines items={cell} open={open} />
                   </th>
                 ))}
@@ -109,7 +120,8 @@ function BlockView({ block, open }: { block: Block; open(href: string): void }):
   }
 }
 
-const alignClass = (a: 'left' | 'center' | 'right' | undefined) => (a === 'center' ? 'text-center' : a === 'right' ? 'text-right' : 'text-left')
+const alignClass = (a: 'left' | 'center' | 'right' | undefined) =>
+  a === 'center' ? 'text-center' : a === 'right' ? 'text-right' : 'text-left'
 
 function Inlines({ items, open }: { items: Inline[]; open(href: string): void }): ReactNode {
   return (

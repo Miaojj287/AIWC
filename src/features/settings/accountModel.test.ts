@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { KeyAcquireStep } from '@aiwc/protocol'
-import { DEFAULT_KEY_STEPS, keyStepsToProgress, maskSecret, mergeKeyStep, missingKeyKinds, secretRefFor, summarizeKeySteps, validateKeyHex } from './accountModel'
+import {
+  DEFAULT_KEY_STEPS,
+  keyStepsToProgress,
+  maskSecret,
+  mergeKeyStep,
+  missingKeyKinds,
+  secretRefFor,
+  summarizeKeySteps,
+  validateKeyHex,
+} from './accountModel'
 
 describe('validateKeyHex', () => {
   const key64 = 'a'.repeat(64)
@@ -44,7 +53,10 @@ describe('key steps', () => {
     expect(s.percent).toBe(25)
   })
   it('reports failures and the kinds that still need manual input', () => {
-    const steps: KeyAcquireStep[] = DEFAULT_KEY_STEPS.map((s) => ({ ...s, status: s.id === 'image_aes' ? 'failed' : 'done' }))
+    const steps: KeyAcquireStep[] = DEFAULT_KEY_STEPS.map((s) => ({
+      ...s,
+      status: s.id === 'image_aes' ? 'failed' : 'done',
+    }))
     const s = summarizeKeySteps(steps)
     expect(s.finished).toBe(true)
     expect(s.failed.map((f) => f.id)).toEqual(['image_aes'])

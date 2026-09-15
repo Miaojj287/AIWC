@@ -46,19 +46,35 @@ describe('agent:submit renderer guard', () => {
     expect(rejected(await guard({ type: 'thread.clear', threadId: cronThread }))).toBe('forbidden_thread')
     expect(rejected(await guard({ type: 'thread.shutdown', threadId: botThread }))).toBe('forbidden_thread')
     expect(rejected(await guard({ type: 'turn.interrupt', threadId: botThread }))).toBe('ok')
-    expect(rejected(await guard({ type: 'approval.resolve', threadId: botThread, approvalId: 'apr_1', decision: 'deny' }))).toBe('ok')
+    expect(
+      rejected(await guard({ type: 'approval.resolve', threadId: botThread, approvalId: 'apr_1', decision: 'deny' })),
+    ).toBe('ok')
     // unknown thread: passes through so the kernel reports the missing id itself
     expect(rejected(await guard({ type: 'thread.compact', threadId: 'thr_missing' }))).toBe('ok')
   })
 
   it('thread.settings may not change permissionMode on non-desktop threads nor pick a non-renderer profile', async () => {
-    expect(rejected(await guard({ type: 'thread.settings', threadId: desktopThread, patch: { permissionMode: 'bypass' } }))).toBe('ok')
+    expect(
+      rejected(await guard({ type: 'thread.settings', threadId: desktopThread, patch: { permissionMode: 'bypass' } })),
+    ).toBe('ok')
     const r = await guard({ type: 'thread.settings', threadId: botThread, patch: { permissionMode: 'ask' } })
     expect(rejected(r)).toBe('forbidden_thread')
     if (!r.ok) expect(r.message).toContain('权限模式')
-    expect(rejected(await guard({ type: 'thread.settings', threadId: botThread, patch: { title: 'x' } }))).toBe('forbidden_thread')
-    expect(rejected(await guard({ type: 'thread.settings', threadId: desktopThread, patch: { profile: 'wechat-bot' } }))).toBe('forbidden_profile')
-    expect(rejected(await guard({ type: 'thread.settings', threadId: desktopThread, patch: { profile: 'persona', model: { providerId: 'p', modelId: 'm' } } }))).toBe('ok')
+    expect(rejected(await guard({ type: 'thread.settings', threadId: botThread, patch: { title: 'x' } }))).toBe(
+      'forbidden_thread',
+    )
+    expect(
+      rejected(await guard({ type: 'thread.settings', threadId: desktopThread, patch: { profile: 'wechat-bot' } })),
+    ).toBe('forbidden_profile')
+    expect(
+      rejected(
+        await guard({
+          type: 'thread.settings',
+          threadId: desktopThread,
+          patch: { profile: 'persona', model: { providerId: 'p', modelId: 'm' } },
+        }),
+      ),
+    ).toBe('ok')
   })
 
   it('returns the parsed op unchanged on success', async () => {

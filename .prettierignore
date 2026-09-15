@@ -1,0 +1,25 @@
+# Never scanned: reference repos, dependencies, build output, caches.
+Example/
+node_modules/
+dist/
+dist-electron/
+dist-web/
+release/
+coverage/
+.cache/
+.tmp/
+.tmp-*
+
+# Binary or generated assets.
+build/
+public/
+resources/
+docs/design/
+dev/fixtures/demo-dataset.json
+package-lock.json
+
+# Prose is hand-formatted (Chinese tables, spec numbering); Prettier would reflow it.
+*.md
+
+# CSS is read as text by kit.css.test.ts / shell.css.test.ts (selectors and rgb() spelling); keep it hand-formatted.
+*.css

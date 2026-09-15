@@ -8,6 +8,7 @@ const rule = (sessionId: string, extra: Partial<AutoReplyRule> = {}): AutoReplyR
   enabled: true,
   source: 'ai',
   historyCount: DEFAULT_HISTORY_COUNT,
+  sendMode: 'auto',
   updatedAt: 0,
   ...extra,
 })

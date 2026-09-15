@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAnchor, SearchHit, SyncStatus, WxMessage } from '@aiwc/protocol'
 import { Button, DangerDialog, toast } from '@/kit'
+import { useT } from '@/i18n'
 import { runCommand } from '@/app/commands'
 import { detectMac } from '@/app/shortcuts'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
@@ -18,7 +19,15 @@ import { MessageStream } from './MessageStream'
 import { SyncBar } from './SyncBar'
 import type { SenderOption } from './SenderFilter'
 import { selectChatUi, useChatUiStore } from './chatStore'
-import { DEFAULT_FILTERS, isFiltered, parseFilters, resolveRange, type ChatFilters, type ExportRangeMode } from './filters'
+import {
+  DEFAULT_FILTERS,
+  isFiltered,
+  parseFilters,
+  resolveRange,
+  type ChatFilters,
+  type ExportRangeMode,
+} from './filters'
+import { planFocus } from './focusPlan'
 import { toMediaUrl } from './mediaUrl'
 import { buildRows, plainTextOf, selectAllState, selectableIds, transcriptOf } from './streamModel'
 import { readOverview, sessionMeta, syncView } from './syncModel'
@@ -36,11 +45,15 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 export function ChatTab({ tab, update }: TabRendererProps) {
+  const t = useT()
   const sessionId = tab.objectId
   const mac = detectMac()
   const filters = useMemo(() => parseFilters(tab.state?.filters), [tab.state?.filters])
   const filtersKey = JSON.stringify(filters)
-  const setFilters = useCallback((next: ChatFilters) => update({ state: { ...tab.state, filters: next } }), [update, tab.state])
+  const setFilters = useCallback(
+    (next: ChatFilters) => update({ state: { ...tab.state, filters: next } }),
+    [update, tab.state],
+  )
 
   /* ------------------------------------------------------------ session / status / stats */
   const sessionQ = useInvoke('substrate:getSession', { id: sessionId }, [sessionId])
@@ -54,9 +67,16 @@ export function ChatTab({ tab, update }: TabRendererProps) {
   const statsQ = useInvoke('substrate:stats', { sessionId, metric: 'overview' }, [sessionId])
   const counts = useMemo(() => readOverview(statsQ.data), [statsQ.data])
   const bounds = useMemo(() => resolveRange(filters.range), [filters])
-  const filteredStatsQ = useInvoke('substrate:stats', { sessionId, metric: 'overview', from: bounds.from, to: bounds.to }, [sessionId, filtersKey], { enabled: isFiltered(filters) })
+  const filteredStatsQ = useInvoke(
+    'substrate:stats',
+    { sessionId, metric: 'overview', from: bounds.from, to: bounds.to },
+    [sessionId, filtersKey],
+    { enabled: isFiltered(filters) },
+  )
   const filteredCounts = useMemo(() => readOverview(filteredStatsQ.data), [filteredStatsQ.data])
-  const membersQ = useInvoke('substrate:listGroupMembers', { groupId: sessionId, limit: 500 }, [sessionId], { enabled: session?.kind === 'group' })
+  const membersQ = useInvoke('substrate:listGroupMembers', { groupId: sessionId, limit: 500 }, [sessionId], {
+    enabled: session?.kind === 'group',
+  })
 
   useEffect(() => {
     if (session && session.title !== tab.title) update({ title: session.title })
@@ -75,16 +95,30 @@ export function ChatTab({ tab, update }: TabRendererProps) {
   })
 
   const members = useMemo(
-    () => (membersQ.data?.items ?? []).map((c) => ({ id: c.username, name: c.remark ?? c.nickname, src: toMediaUrl(c.avatarPath), detail: c.remark ? c.nickname : undefined })),
+    () =>
+      (membersQ.data?.items ?? []).map((c) => ({
+        id: c.username,
+        name: c.remark ?? c.nickname,
+        src: toMediaUrl(c.avatarPath),
+        detail: c.remark ? c.nickname : undefined,
+      })),
     [membersQ.data],
   )
   const senders = useMemo<SenderOption[]>(() => {
-    if (session?.kind === 'group') return members.map((m) => ({ id: m.id, name: m.name, detail: m.detail, avatar: m.src }))
+    if (session?.kind === 'group')
+      return members.map((m) => ({ id: m.id, name: m.name, detail: m.detail, avatar: m.src }))
     const out: SenderOption[] = []
-    if (account) out.push({ id: account.wxid, name: account.nickname ?? '我', detail: '我', avatar: toMediaUrl(account.avatarPath) })
-    if (session && session.kind === 'dm') out.push({ id: session.id, name: session.title, avatar: toMediaUrl(session.avatarPath) })
+    if (account)
+      out.push({
+        id: account.wxid,
+        name: account.nickname ?? t('common.me'),
+        detail: t('common.me'),
+        avatar: toMediaUrl(account.avatarPath),
+      })
+    if (session && session.kind === 'dm')
+      out.push({ id: session.id, name: session.title, avatar: toMediaUrl(session.avatarPath) })
     return out
-  }, [session, members, account])
+  }, [session, members, account, t])
 
   /* --------------------------------------------------------------------------- messages */
   const pendingJump = useRef<MessageAnchor | undefined>(undefined)
@@ -130,14 +164,48 @@ export function ChatTab({ tab, update }: TabRendererProps) {
     const { focusMessageId: _drop, ...rest } = tab.state ?? {}
     update({ state: rest })
   }, [stateFocus, requestFocus, tab.id, tab.state, update])
+  // Only the id is known here, so resolve the real anchor before loading a window (see focusPlan.ts).
+  // Refs keep a late lookup from acting on a stale window, filters or tab state.
+  const loadedRef = useRef(loadedById)
+  loadedRef.current = loadedById
+  const filtersRef = useRef(filters)
+  filtersRef.current = filters
+  const setFiltersRef = useRef(setFilters)
+  setFiltersRef.current = setFilters
+  const focusRequest = useRef(0)
+  const jumpTo = stream.jumpTo
+  const focusById = useCallback(
+    async (id: string) => {
+      const mine = ++focusRequest.current
+      const plan = await planFocus(id, {
+        loaded: (x) => loadedRef.current.get(x),
+        fetch: (x) => invoke('substrate:getMessage', { sessionId, messageId: x }),
+        filtered: () => isFiltered(filtersRef.current),
+      })
+      if (mine !== focusRequest.current) return
+      if (plan.kind === 'focus') focusMessage(plan.id)
+      else if (plan.kind === 'jump') void jumpTo(plan.anchor)
+      else if (plan.kind === 'jump-unfiltered') {
+        pendingJump.current = plan.anchor
+        setFiltersRef.current(DEFAULT_FILTERS)
+        toast.info(t('chat.toast.filtersCleared'))
+      } else toast.warning(t('chat.toast.messageNotFound'), { detail: t('chat.toast.messageNotFoundDetail') })
+    },
+    [sessionId, focusMessage, jumpTo, t],
+  )
   useEffect(() => {
     if (!ui.focusMessageId) return
     const id = ui.focusMessageId
-    const loaded = loadedById.get(id)
-    goTo(loaded?.anchor ?? { sessionId, messageId: id, seq: 0, createdAt: 0 })
     clearFocus(tab.id)
-  }, [ui.focusNonce, ui.focusMessageId, stream.loading, loadedById, goTo, clearFocus, tab.id, sessionId])
-  useEffect(() => () => forget(tab.id), [forget, tab.id])
+    void focusById(id)
+  }, [ui.focusNonce, ui.focusMessageId, focusById, clearFocus, tab.id])
+  useEffect(
+    () => () => {
+      focusRequest.current += 1
+      forget(tab.id)
+    },
+    [forget, tab.id],
+  )
 
   /* -------------------------------------------------------------------------- selection */
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -170,21 +238,28 @@ export function ChatTab({ tab, update }: TabRendererProps) {
       }
       setSearching(true)
       try {
-        const res = await invoke('substrate:search', { query: text, sessionIds: [sessionId], from: bounds.from, to: bounds.to, limit: 200, mode: 'keyword' })
+        const res = await invoke('substrate:search', {
+          query: text,
+          sessionIds: [sessionId],
+          from: bounds.from,
+          to: bounds.to,
+          limit: 200,
+          mode: 'keyword',
+        })
         const sorted = [...res].sort((a, b) => b.message.seq - a.message.seq)
         setHits(sorted)
         setHitIdx(0)
         setLastQuery(text)
         const first = sorted[0]
         if (first) goTo(first.message.anchor)
-        else toast.info('没有找到匹配的消息')
+        else toast.info(t('chat.toast.noSearchMatches'))
       } catch (e) {
-        toast.error(`搜索失败：${errText(e)}`)
+        toast.error(t('chat.toast.searchFailed', { error: errText(e) }))
       } finally {
         setSearching(false)
       }
     },
-    [sessionId, bounds, goTo],
+    [sessionId, bounds, goTo, t],
   )
   const stepHit = (dir: 1 | -1) => {
     if (!hits || hits.length === 0) return
@@ -207,19 +282,30 @@ export function ChatTab({ tab, update }: TabRendererProps) {
   const title = session?.title ?? tab.title
   const quote = useCallback(
     (ids: string[]) => {
-      runCommand('agent.quote', { kind: 'session', id: sessionId, label: title, messageIds: ids.length ? ids : undefined })
-      toast.success(ids.length ? `已把 ${ids.length} 条消息加入当前 Agent 会话上下文` : `已把「${title}」加入当前 Agent 会话上下文`)
+      runCommand('agent.quote', {
+        kind: 'session',
+        id: sessionId,
+        label: title,
+        messageIds: ids.length ? ids : undefined,
+      })
+      toast.success(
+        ids.length ? t('chat.toast.quotedMessages', { n: ids.length }) : t('chat.toast.quotedSession', { title }),
+      )
     },
-    [sessionId, title],
+    [sessionId, title, t],
   )
-  const onCopy = useCallback(async (m: WxMessage) => {
-    if (await copyText(plainTextOf(m))) toast.success('已复制')
-    else toast.error('复制失败，请检查剪贴板权限')
-  }, [])
+  const onCopy = useCallback(
+    async (m: WxMessage) => {
+      if (await copyText(plainTextOf(m))) toast.success(t('chat.toast.copied'))
+      else toast.error(t('chat.toast.copyFailed'))
+    },
+    [t],
+  )
   const copySelection = async () => {
     const list = stream.messages.filter((m) => selected.has(m.id))
-    if (await copyText(transcriptOf(list, account?.nickname ?? '我'))) toast.success(`已复制 ${list.length} 条消息`)
-    else toast.error('复制失败，请检查剪贴板权限')
+    if (await copyText(transcriptOf(list, account?.nickname ?? t('common.me'))))
+      toast.success(t('chat.toast.copiedMessages', { n: list.length }))
+    else toast.error(t('chat.toast.copyFailed'))
   }
   const onJumpToTime = useCallback(
     (m: WxMessage) => {
@@ -232,31 +318,38 @@ export function ChatTab({ tab, update }: TabRendererProps) {
     },
     [filters, setFilters, stream],
   )
-  const onSync = () => void invoke('substrate:sync', {}).catch((e: unknown) => toast.error(`同步失败：${errText(e)}`))
+  const onSync = () =>
+    void invoke('substrate:sync', {}).catch((e: unknown) =>
+      toast.error(t('chat.toast.syncFailed', { error: errText(e) })),
+    )
   const onRebuildIndex = () => {
-    const id = toast.progress(`正在重新索引「${title}」…`)
+    const id = toast.progress(t('chat.toast.reindexing', { title }))
     invoke('substrate:rebuildIndex', { sessionId })
       .then(() => {
-        toast.update(id, { kind: 'success', text: `「${title}」已重新索引`, sticky: false })
+        toast.update(id, { kind: 'success', text: t('chat.toast.reindexed', { title }), sticky: false })
         stream.reload()
       })
-      .catch((e: unknown) => toast.update(id, { kind: 'error', text: `重建索引失败：${errText(e)}`, sticky: false }))
+      .catch((e: unknown) =>
+        toast.update(id, { kind: 'error', text: t('chat.toast.reindexFailed', { error: errText(e) }), sticky: false }),
+      )
   }
   const removeIndex = async () => {
     setRemovingIndex(true)
     try {
       await invoke('substrate:removeIndex', { sessionId })
       setRemoveIndexOpen(false)
-      toast.success(`已从索引中移除「${title}」`)
+      toast.success(t('chat.toast.removedFromIndex', { title }))
       stream.reload()
     } catch (e) {
-      toast.error(`移除失败：${errText(e)}`)
+      toast.error(t('chat.toast.removeFailed', { error: errText(e) }))
     } finally {
       setRemovingIndex(false)
     }
   }
 
-  const view = useMemo(() => syncView(sync, counts), [sync, counts])
+  // syncView words its text through the module-level t(), so the language (t) is a real input here.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- t: re-derive the sync text after a language switch
+  const view = useMemo(() => syncView(sync, counts), [sync, counts, t])
   const meta = session ? sessionMeta(session) : ''
   const allState = selectAllState(stream.messages, selected)
   const streamEmpty = stream.loading || stream.messages.length === 0
@@ -307,7 +400,14 @@ export function ChatTab({ tab, update }: TabRendererProps) {
           onNext={() => stepHit(1)}
         />
       ) : null}
-      <SyncBar view={view} filters={filters} onFiltersChange={setFilters} senders={senders} sendersLoading={membersQ.loading} onSync={onSync} />
+      <SyncBar
+        view={view}
+        filters={filters}
+        onFiltersChange={setFilters}
+        senders={senders}
+        sendersLoading={membersQ.loading}
+        onSync={onSync}
+      />
       {selectMode ? (
         <SelectionBar
           count={selected.size}
@@ -374,19 +474,19 @@ export function ChatTab({ tab, update }: TabRendererProps) {
       <DangerDialog
         open={deleteIds !== null}
         onOpenChange={(o) => !o && setDeleteIds(null)}
-        title={`删除 ${deleteIds?.length ?? 0} 条本地记录？`}
-        description="只删除 AIWC 的本地缓存与索引，不会影响微信里的原始消息。此操作不可撤销。"
-        confirmLabel="删除"
+        title={t('chat.deleteDialog.title', { n: deleteIds?.length ?? 0 })}
+        description={t('chat.deleteDialog.description')}
+        confirmLabel={t('common.delete')}
         onConfirm={() => {
           // TODO(substrate owner): per-message local deletion has no IPC yet (substrate:removeIndex is per session).
           setDeleteIds(null)
-          toast.info('暂不支持删除单条本地记录', { detail: '可在会话菜单中「从索引中移除」整个会话' })
+          toast.info(t('chat.deleteDialog.unsupported'), { detail: t('chat.deleteDialog.unsupportedDetail') })
         }}
       >
         {deleteIds && deleteIds.length > 0 ? (
           <div className="flex justify-end">
             <Button variant="link" size="sm" onClick={() => void copySelection()}>
-              先复制这些消息
+              {t('chat.deleteDialog.copyFirst')}
             </Button>
           </div>
         ) : null}
@@ -394,9 +494,9 @@ export function ChatTab({ tab, update }: TabRendererProps) {
       <DangerDialog
         open={removeIndexOpen}
         onOpenChange={setRemoveIndexOpen}
-        title={`从索引中移除「${title}」？`}
-        description="会删除这个会话在本机的全部索引与缓存（消息、媒体、向量），微信里的数据不受影响。之后可以在会话菜单里重新索引。"
-        confirmLabel="移除"
+        title={t('chat.removeIndexDialog.title', { title })}
+        description={t('chat.removeIndexDialog.description')}
+        confirmLabel={t('common.remove')}
         loading={removingIndex}
         onConfirm={removeIndex}
       />

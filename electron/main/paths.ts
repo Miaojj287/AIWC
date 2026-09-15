@@ -4,7 +4,7 @@
  *
  * Layout (docs/ARCHITECTURE.md §8):
  *   <userData>/aiwc/{config.json, secrets.bin, rollouts/, index.db, mirror.db, records.db,
- *                    memory/, relationships/, diaries/, skills/{user,agent}, cache/media, logs/}
+ *                    memory/, relationships/, diaries/, skills/{user,agent}, pets/, cache/media, logs/}
  */
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -37,12 +37,20 @@ export interface AppPaths {
   skillsUserDir: string
   skillsAgentDir: string
   skillsBuiltinDir: string
+  /** AI 宠物: installed / imported pets, one folder per id (pet.json + spritesheet). */
+  petsDir: string
+  /** resources/pets — pets bundled with the app, seeded into petsDir. */
+  petsBuiltinDir: string
   cacheDir: string
   mediaCacheDir: string
   logsDir: string
   mainLogFile: string
   gatewayStateDir: string
   exportsDir: string
+  /** Where the agent's `shell` tool runs and may write; the only always-writable place in its sandbox. */
+  workspaceDir: string
+  /** 定时任务 definitions and run history. */
+  tasksDir: string
   /** resources/native/<platform>-<arch> */
   nativeDir: string
   platformArch: string
@@ -73,12 +81,16 @@ export function createPaths(input: PathInputs): AppPaths {
     skillsUserDir: join(skillsDir, 'user'),
     skillsAgentDir: join(skillsDir, 'agent'),
     skillsBuiltinDir: join(resourceBase, 'skills'),
+    petsDir: join(dataRoot, 'pets'),
+    petsBuiltinDir: join(resourceBase, 'resources', 'pets'),
     cacheDir,
     mediaCacheDir: join(cacheDir, 'media'),
     logsDir,
     mainLogFile: join(logsDir, 'main.log'),
     gatewayStateDir: join(dataRoot, 'gateway'),
     exportsDir: join(dataRoot, 'exports'),
+    workspaceDir: join(dataRoot, 'workspace'),
+    tasksDir: join(dataRoot, 'tasks'),
     nativeDir: join(resourceBase, 'resources', 'native', platformArch),
     platformArch,
   }
@@ -94,11 +106,14 @@ export function ensureDirs(paths: AppPaths): void {
     paths.diariesDir,
     paths.skillsUserDir,
     paths.skillsAgentDir,
+    paths.petsDir,
     paths.cacheDir,
     paths.mediaCacheDir,
     paths.logsDir,
     paths.gatewayStateDir,
     paths.exportsDir,
+    paths.workspaceDir,
+    paths.tasksDir,
   ]
   for (const d of dirs) mkdirSync(d, { recursive: true })
 }

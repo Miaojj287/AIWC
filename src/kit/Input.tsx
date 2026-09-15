@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from 'lucide-react'
 import { forwardRef, useRef, useState, type InputHTMLAttributes, type MouseEvent, type ReactNode } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE, type IconComponent } from './icon'
 import { IconButton } from './IconButton'
@@ -29,9 +30,24 @@ export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
  * Content ground, 1px line-8 border, r6, text 12. Validation goes under the control (CLAUDE.md §4.6).
  */
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { icon: Icon, trailing, mono = false, error, hint, size = 'default', revealable, wrapperClassName, className, type = 'text', disabled, onMouseDown, ...rest },
+  {
+    icon: Icon,
+    trailing,
+    mono = false,
+    error,
+    hint,
+    size = 'default',
+    revealable,
+    wrapperClassName,
+    className,
+    type = 'text',
+    disabled,
+    onMouseDown,
+    ...rest
+  },
   ref,
 ) {
+  const t = useT()
   const inner = useRef<HTMLInputElement>(null)
   const [revealed, setRevealed] = useState(false)
   const isPassword = type === 'password'
@@ -62,7 +78,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           className,
         )}
       >
-        {Icon ? <Icon size={ICON_SIZE.input} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" /> : null}
+        {Icon ? (
+          <Icon size={ICON_SIZE.input} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" />
+        ) : null}
         <input
           ref={mergeRefs(ref, inner)}
           type={resolvedType}
@@ -70,7 +88,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-invalid={invalid || undefined}
           onMouseDown={onMouseDown}
           className={cn(
-            'h-full min-w-0 flex-1 bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
+            'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
             'disabled:cursor-not-allowed',
             mono && 'font-mono',
           )}
@@ -81,7 +99,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             size="xs"
             icon={revealed ? EyeOff : Eye}
             iconSize={ICON_SIZE.inputTrailing}
-            label={revealed ? '隐藏' : '显示'}
+            label={revealed ? t('kit.input.hide') : t('kit.input.reveal')}
             tabIndex={-1}
             onClick={() => setRevealed((v) => !v)}
             className="text-fg-3"

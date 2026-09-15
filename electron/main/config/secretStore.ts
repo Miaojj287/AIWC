@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { dirname } from 'node:path'
 import type { Logger } from '../log'
 import { nullLogger } from '../log'
+import { t } from '../i18n'
 
 export interface SafeStorageLike {
   isEncryptionAvailable(): boolean
@@ -74,9 +75,9 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
       if (parsed && parsed.version === 1 && parsed.entries && typeof parsed.entries === 'object') {
         return { version: 1, entries: { ...parsed.entries } }
       }
-      log.warn('secrets.bin 结构无效，重新开始')
+      log.warn('secrets.bin has an invalid structure; starting fresh')
     } catch (e) {
-      log.error('secrets.bin 无法解析，已备份', e)
+      log.error('secrets.bin could not be parsed; backed up', e)
       try {
         renameSync(opts.file, `${opts.file}.bak-${Date.now()}`)
       } catch {
@@ -100,7 +101,7 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
   }
 
   function assertRef(ref: string): void {
-    if (!isValidSecretRef(ref)) throw new Error(`非法的密钥引用: ${ref}`)
+    if (!isValidSecretRef(ref)) throw new Error(t('main.config.invalidSecretRef', { ref }))
   }
 
   return {
@@ -111,7 +112,7 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
     set(ref, value) {
       assertRef(ref)
       if (!opts.safeStorage.isEncryptionAvailable()) {
-        throw new Error('当前系统无法安全加密密钥（safeStorage 不可用）')
+        throw new Error(t('main.config.encryptionUnavailable'))
       }
       const cipher = opts.safeStorage.encryptString(value)
       data.entries[ref] = cipher.toString('base64')
@@ -123,7 +124,7 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
       try {
         return opts.safeStorage.decryptString(Buffer.from(b64, 'base64'))
       } catch (e) {
-        log.error(`解密失败: ${ref}`, e)
+        log.error(`decrypt failed: ${ref}`, e)
         return null
       }
     },

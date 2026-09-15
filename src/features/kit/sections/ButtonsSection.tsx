@@ -4,17 +4,30 @@ import { FOCUS_RING, Item, Row, RowLabel, Section, State } from '../gallery'
 
 type Variant = NonNullable<ButtonProps['variant']>
 
-const VARIANTS: Array<{ variant: Variant; label: string; icon?: ButtonProps['icon']; forced: { hover: string; active: string } }> = [
+const VARIANTS: Array<{
+  variant: Variant
+  label: string
+  icon?: ButtonProps['icon']
+  forced: { hover: string; active: string }
+}> = [
   { variant: 'primary', label: '保存', icon: Check, forced: { hover: 'bg-accent-hover', active: 'bg-accent-active' } },
   { variant: 'ghost', label: '取消', forced: { hover: 'bg-(--fill-13)', active: 'bg-(--line-16)' } },
-  { variant: 'outline', label: '更多', forced: { hover: 'bg-(--fill-13) border-(--line-25)', active: 'bg-(--line-16)' } },
+  {
+    variant: 'outline',
+    label: '更多',
+    forced: { hover: 'bg-(--fill-13) border-(--line-25)', active: 'bg-(--line-16)' },
+  },
   { variant: 'danger', label: '删除', icon: Trash, forced: { hover: 'brightness-[1.08]', active: 'brightness-[0.9]' } },
   { variant: 'link', label: '查看全部', forced: { hover: 'bg-accent/8', active: 'bg-accent/14' } },
 ]
 
 export function ButtonsSection() {
   return (
-    <Section id="buttons" title="① 按钮" description="5 种类型 × 6 种状态。primary 用于每个界面唯一主操作；danger 只在破坏性确认里出现；link 用于行内动作">
+    <Section
+      id="buttons"
+      title="① 按钮"
+      description="5 种类型 × 6 种状态。primary 用于每个界面唯一主操作；danger 只在破坏性确认里出现；link 用于行内动作"
+    >
       {VARIANTS.map(({ variant, label, icon, forced }) => (
         <Item key={variant} label={`${variant} · ${label}`}>
           <Row>

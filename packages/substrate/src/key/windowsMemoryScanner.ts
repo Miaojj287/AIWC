@@ -15,7 +15,15 @@
 import { createRequire } from 'node:module'
 import { createDecipheriv } from 'node:crypto'
 import { extractMemoryDbKeyCandidates, extractRawV4KeyCandidates, RAW_KEY_SIZE } from './memoryDbKeyPattern'
-import { classifyKeyAgainstPage, deriveSqlcipherKey, readFirstPage, readEncryptedDbSalt, SQLCIPHER_PAGE_SIZE, decryptFirstPageBody, looksLikeSqliteHeaderBody } from './sqlcipherPage'
+import {
+  classifyKeyAgainstPage,
+  deriveSqlcipherKey,
+  readFirstPage,
+  readEncryptedDbSalt,
+  SQLCIPHER_PAGE_SIZE,
+  decryptFirstPageBody,
+  looksLikeSqliteHeaderBody,
+} from './sqlcipherPage'
 
 const requireNative = createRequire(import.meta.url)
 
@@ -56,7 +64,12 @@ export interface WindowsDbKeyScanResult {
 
 function isWritableReadable(protect: number): boolean {
   const base = protect & ~(PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE)
-  return base === PAGE_READWRITE || base === PAGE_WRITECOPY || base === PAGE_EXECUTE_READWRITE || base === PAGE_EXECUTE_WRITECOPY
+  return (
+    base === PAGE_READWRITE ||
+    base === PAGE_WRITECOPY ||
+    base === PAGE_EXECUTE_READWRITE ||
+    base === PAGE_EXECUTE_WRITECOPY
+  )
 }
 
 function isReadable(protect: number): boolean {
@@ -197,7 +210,12 @@ interface Kernel32 {
   readProcessMemory: KernelFn
 }
 
-function loadKernel32(): { openProcess: KernelFn; virtualQueryEx: KernelFn; readProcessMemory: KernelFn; closeHandle: KernelFn } | null {
+function loadKernel32(): {
+  openProcess: KernelFn
+  virtualQueryEx: KernelFn
+  readProcessMemory: KernelFn
+  closeHandle: KernelFn
+} | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let kernel32: any
   try {
@@ -207,8 +225,12 @@ function loadKernel32(): { openProcess: KernelFn; virtualQueryEx: KernelFn; read
   }
   return {
     openProcess: kernel32.func('uintptr_t OpenProcess(uint32_t desiredAccess, int inheritHandle, uint32_t processId)'),
-    virtualQueryEx: kernel32.func('size_t VirtualQueryEx(uintptr_t process, uintptr_t address, _Out_ uint8_t *info, size_t length)'),
-    readProcessMemory: kernel32.func('int ReadProcessMemory(uintptr_t process, uintptr_t address, _Out_ uint8_t *buffer, size_t size, _Out_ size_t *bytesRead)'),
+    virtualQueryEx: kernel32.func(
+      'size_t VirtualQueryEx(uintptr_t process, uintptr_t address, _Out_ uint8_t *info, size_t length)',
+    ),
+    readProcessMemory: kernel32.func(
+      'int ReadProcessMemory(uintptr_t process, uintptr_t address, _Out_ uint8_t *buffer, size_t size, _Out_ size_t *bytesRead)',
+    ),
     closeHandle: kernel32.func('int CloseHandle(uintptr_t handle)'),
   }
 }
@@ -270,7 +292,12 @@ function findProcessBytes(k: Kernel32, handle: bigint, needle: Buffer, deadline?
  * config object, XOR-decodes the stored blob and validates each embedded `x'<hex>'` run against the
  * encrypted first page. Returns a 'direct' (already-derived) 64-hex key.
  */
-function scanConfigCipherKey(k: Kernel32, handle: bigint, encryptedFirstPage: Buffer, deadline?: number): { key: string | null; candidates: number } {
+function scanConfigCipherKey(
+  k: Kernel32,
+  handle: bigint,
+  encryptedFirstPage: Buffer,
+  deadline?: number,
+): { key: string | null; candidates: number } {
   const nameAddresses = findProcessBytes(k, handle, CONFIG_CIPHER_NAME, deadline)
   if (!nameAddresses.length) return { key: null, candidates: 0 }
 
@@ -283,7 +310,12 @@ function scanConfigCipherKey(k: Kernel32, handle: bigint, encryptedFirstPage: Bu
     const references = findProcessBytes(k, handle, pair, deadline)
     for (const reference of references) {
       const node = readRemote(k, handle, reference - 0x10n, 0x50)
-      if (!node || node.readBigUInt64LE(0x10) !== nameAddress || node.readBigUInt64LE(0x18) !== BigInt(CONFIG_CIPHER_NAME.length)) continue
+      if (
+        !node ||
+        node.readBigUInt64LE(0x10) !== nameAddress ||
+        node.readBigUInt64LE(0x18) !== BigInt(CONFIG_CIPHER_NAME.length)
+      )
+        continue
       const configAddress = node.readBigUInt64LE(0x28)
       const object = readRemote(k, handle, configAddress + 0x88n, 0x28)
       if (!object) continue
@@ -366,7 +398,13 @@ export function scanWindowsDbKey(pid: number, dbPath: string, deadline?: number)
       const state = info.readUInt32LE(32)
       const protect = info.readUInt32LE(36)
       const type = info.readUInt32LE(40)
-      if (regionSizeBig > 0n && regionSizeBig <= BigInt(MAX_REGION_SIZE) && state === MEM_COMMIT && type === MEM_PRIVATE && isWritableReadable(protect)) {
+      if (
+        regionSizeBig > 0n &&
+        regionSizeBig <= BigInt(MAX_REGION_SIZE) &&
+        state === MEM_COMMIT &&
+        type === MEM_PRIVATE &&
+        isWritableReadable(protect)
+      ) {
         const regionSize = Number(regionSizeBig)
         let offset = 0
         let trailing: Buffer = Buffer.alloc(0)
@@ -442,7 +480,12 @@ export function scanWindowsImageAesKey(pid: number, ciphertext: Buffer, deadline
       const regionSizeBig = info.readBigUInt64LE(24)
       const state = info.readUInt32LE(32)
       const protect = info.readUInt32LE(36)
-      if (regionSizeBig > 0n && regionSizeBig <= BigInt(MAX_IMAGE_REGION_SIZE) && state === MEM_COMMIT && isWritableReadable(protect)) {
+      if (
+        regionSizeBig > 0n &&
+        regionSizeBig <= BigInt(MAX_IMAGE_REGION_SIZE) &&
+        state === MEM_COMMIT &&
+        isWritableReadable(protect)
+      ) {
         const regionSize = Number(regionSizeBig)
         let offset = 0
         let trailing = Buffer.alloc(0)

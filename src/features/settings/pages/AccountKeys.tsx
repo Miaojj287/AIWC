@@ -3,11 +3,22 @@
  * 自动获取密钥 progress dialog driven by substrate:acquireKeys + substrate:keyStep (board 151:415 ③).
  */
 import { Check, Circle, CircleAlert, Copy, Eye, EyeOff } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { KeyAcquireStep } from '@aiwc/protocol'
 import { Button, ICON_STROKE, IconButton, InlineHint, Input, Spinner, cn, toast } from '@/kit'
+import { useT } from '@/i18n'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
-import { DEFAULT_KEY_STEPS, KEY_LABEL, keyStepsToProgress, maskSecret, mergeKeyStep, missingKeyKinds, summarizeKeySteps, validateKeyHex, type KeyKind } from '../accountModel'
+import {
+  DEFAULT_KEY_STEPS,
+  KEY_LABEL,
+  keyStepsToProgress,
+  maskSecret,
+  mergeKeyStep,
+  missingKeyKinds,
+  summarizeKeySteps,
+  validateKeyHex,
+  type KeyKind,
+} from '../accountModel'
 import { copyText, errorMessage, useSecretPresence } from '../hooks'
 
 /* ------------------------------------------------------------- SecretField */
@@ -20,140 +31,151 @@ export interface SecretFieldProps {
   version?: number
   label: string
   className?: string
+  onSaved?: () => void
 }
 
-/** Read-only masked key: the eye button reveals via secret:reveal, copy → toast. Mono + tail truncation (CLAUDE.md §6). */
-export function SecretField({ kind, secretRef, version = 0, label, className }: SecretFieldProps) {
-  const { has } = useSecretPresence(secretRef, version)
+/** Editable secret; validate and persist on Enter / blur, Escape discards the draft. */
+export function SecretField({ kind, secretRef, version = 0, label, className, onSaved }: SecretFieldProps) {
+  const t = useT()
+  const { has, reload } = useSecretPresence(secretRef, version)
+  const [draft, setDraft] = useState<string | null>(null)
   const [revealed, setRevealed] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  useEffect(() => setRevealed(null), [secretRef, version])
+  const [visible, setVisible] = useState(false)
+  const [error, setError] = useState<string>()
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const epoch = useRef(0)
+  useEffect(() => {
+    epoch.current++
+    setDraft(null)
+    setRevealed(null)
+    setVisible(false)
+    setError(undefined)
+    return () => {
+      // `epoch` is a counter, not a DOM node: bumping it on cleanup makes in-flight saves for the old secret stale.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      epoch.current++
+    }
+  }, [secretRef, version])
 
-  const reveal = async () => {
-    if (revealed !== null) {
-      setRevealed(null)
+  const save = async () => {
+    if (draft === null || savingRef.current) return
+    const check = validateKeyHex(kind, draft)
+    if (!check.ok) {
+      setError(check.error)
       return
     }
-    setBusy(true)
+    savingRef.current = true
+    setSaving(true)
+    const request = epoch.current
+    try {
+      const result = await invoke('substrate:setManualKey', { kind, hex: check.hex })
+      if (request !== epoch.current) return
+      if (!result.ok) {
+        setError(result.error ?? t('settings.account.secret.invalid'))
+        return
+      }
+      setDraft(null)
+      setRevealed(null)
+      setVisible(false)
+      setError(undefined)
+      reload()
+      onSaved?.()
+      toast.success(t('settings.account.secret.saved', { label: t(KEY_LABEL[kind]) }))
+    } catch (e) {
+      if (request === epoch.current) setError(errorMessage(e))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+  const reveal = async () => {
+    if (visible) {
+      setVisible(false)
+      return
+    }
+    if (draft !== null) {
+      setVisible(true)
+      return
+    }
+    const request = epoch.current
     try {
       const value = await invoke('secret:reveal', { ref: secretRef })
-      if (value === null) toast.warning(`${label}尚未设置`)
-      else setRevealed(value)
+      if (request !== epoch.current) return
+      if (value !== null) {
+        setRevealed(value)
+        setVisible(true)
+      }
     } catch (e) {
-      toast.error(`读取${label}失败`, { detail: errorMessage(e) })
-    } finally {
-      setBusy(false)
+      toast.error(t('settings.account.secret.readFailed', { label }), { detail: errorMessage(e) })
     }
   }
-
   const copy = async () => {
     try {
-      const value = revealed ?? (await invoke('secret:reveal', { ref: secretRef }))
-      if (value === null) toast.warning(`${label}尚未设置`)
-      else await copyText(value, label)
+      const value = draft ?? revealed ?? (await invoke('secret:reveal', { ref: secretRef }))
+      if (value !== null) await copyText(value, label)
     } catch (e) {
-      toast.error('复制失败', { detail: errorMessage(e) })
+      toast.error(t('common.copyFailed'), { detail: errorMessage(e) })
     }
   }
-
-  const value = revealed ?? (has ? maskSecret(kind) : '')
   return (
     <Input
+      id={`account-key-${kind}`}
       mono
-      readOnly
       size="sm"
+      type={visible ? 'text' : 'password'}
+      revealable={false}
       aria-label={label}
-      value={value}
-      placeholder={has === undefined ? '读取中…' : '未设置'}
+      autoComplete="off"
+      spellCheck={false}
+      readOnly={saving}
+      value={draft ?? revealed ?? (has ? maskSecret(kind) : '')}
+      onFocus={(e) => {
+        if (draft === null) e.target.select()
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value.replace(/•/g, ''))
+        setError(undefined)
+      }}
+      onBlur={() => void save()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          void save()
+        }
+        if (e.key === 'Escape') {
+          setDraft(null)
+          setRevealed(null)
+          setVisible(false)
+          setError(undefined)
+        }
+      }}
+      placeholder={has === undefined ? t('settings.account.loading') : t('settings.account.secret.placeholder')}
+      error={error}
       wrapperClassName={className}
-      className="truncate"
       trailing={
         <>
-          <IconButton size="xs" icon={revealed !== null ? EyeOff : Eye} label={revealed !== null ? '隐藏' : '显示明文'} disabled={!has} loading={busy} onClick={() => void reveal()} className="text-fg-3" />
-          <IconButton size="xs" icon={Copy} label="复制" disabled={!has} onClick={() => void copy()} className="text-fg-3" />
+          <IconButton
+            size="xs"
+            icon={visible ? EyeOff : Eye}
+            label={visible ? t('settings.account.secret.hide') : t('settings.account.secret.reveal')}
+            disabled={saving || (!has && draft === null)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void reveal()}
+          />
+          <IconButton
+            size="xs"
+            icon={Copy}
+            label={t('common.copy')}
+            disabled={saving || (!has && draft === null)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void copy()}
+          />
         </>
       }
     />
   )
 }
-
-/* ------------------------------------------------------------ ManualKeyForm */
-
-export interface ManualKeyFormProps {
-  kind: KeyKind
-  onSaved: () => void
-  onCancel?: () => void
-}
-
-/** Paste a key by hand: 64-hex validation inline, then substrate:setManualKey. */
-export function ManualKeyForm({ kind, onSaved, onCancel }: ManualKeyFormProps) {
-  const [raw, setRaw] = useState('')
-  const [error, setError] = useState<string | undefined>()
-  const [saving, setSaving] = useState(false)
-  const check = validateKeyHex(kind, raw)
-
-  const save = async () => {
-    if (saving) return
-    if (!check.ok) {
-      setError(check.error)
-      return
-    }
-    setSaving(true)
-    try {
-      const res = await invoke('substrate:setManualKey', { kind, hex: check.hex })
-      if (!res.ok) {
-        setError(res.error ?? '密钥无效')
-        return
-      }
-      toast.success(`${KEY_LABEL[kind]}已保存`)
-      setRaw('')
-      setError(undefined)
-      onSaved()
-    } catch (e) {
-      setError(errorMessage(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-item border border-line-8 bg-content/60 p-3">
-      <div className="text-note text-fg-3">手动输入{KEY_LABEL[kind]}（{kind === 'image_aes' ? '16 字符或 32 位十六进制' : `${kindLength(kind)} 位十六进制`}）</div>
-      <div className="flex items-start gap-2">
-        <Input
-          mono
-          size="sm"
-          autoFocus
-          aria-label={`手动输入${KEY_LABEL[kind]}`}
-          value={raw}
-          type="password"
-          disabled={saving}
-          placeholder={kind === 'image_aes' ? '粘贴原项目的 AES 密钥' : '粘贴已有密钥，可带 0x 前缀'}
-          onChange={(e) => {
-            setRaw(e.target.value)
-            setError(undefined)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void save()
-            if (e.key === 'Escape') onCancel?.()
-          }}
-          error={error ?? (raw.trim() && !check.ok ? true : undefined)}
-          wrapperClassName="flex-1"
-        />
-        {onCancel ? (
-          <Button variant="ghost" size="sm" className="h-7" onClick={onCancel}>
-            取消
-          </Button>
-        ) : null}
-        <Button variant="outline" size="sm" className="h-7" onClick={() => void save()} loading={saving} disabled={!raw.trim()}>
-          保存
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-const kindLength = (kind: KeyKind) => (kind === 'db_key' ? 64 : kind === 'image_aes' ? 32 : 2)
 
 /* --------------------------------------------------------- InlineKeyAcquire */
 
@@ -177,7 +199,8 @@ const STEP_ICON: Record<KeyAcquireStep['status'], React.ReactNode> = {
   failed: <CircleAlert size={13} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" />,
 }
 
-type Phase = { kind: 'running'; strategy: 'auto' | 'memory_scan' } | { kind: 'failed'; error?: string } | { kind: 'done' }
+type Phase =
+  { kind: 'running'; strategy: 'auto' | 'memory_scan' } | { kind: 'failed'; error?: string } | { kind: 'done' }
 
 /**
  * Inline key-acquire progress (CLAUDE.md §4.5) — rendered below the key row instead of a modal, the
@@ -185,7 +208,10 @@ type Phase = { kind: 'running'; strategy: 'auto' | 'memory_scan' } | { kind: 'fa
  * 手动输入 / 内存扫描重试 actions inline. 取消 hides the panel while the main process finishes.
  */
 export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, onClose }: InlineKeyAcquireProps) {
-  const [steps, setSteps] = useState<KeyAcquireStep[]>(() => DEFAULT_KEY_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'todo', detail: undefined })))
+  const t = useT()
+  const [steps, setSteps] = useState<KeyAcquireStep[]>(() =>
+    DEFAULT_KEY_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'todo', detail: undefined })),
+  )
   const [phase, setPhase] = useState<Phase>({ kind: 'running', strategy: 'auto' })
   const runRef = useRef(0)
 
@@ -196,7 +222,7 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
     setSteps(DEFAULT_KEY_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'todo', detail: undefined })))
     setPhase({ kind: 'running', strategy })
     if (!wxid || !dbRoot) {
-      setPhase({ kind: 'failed', error: '请先选择账号与数据库根目录' })
+      setPhase({ kind: 'failed', error: t('settings.account.acquire.selectFirst') })
       return
     }
     try {
@@ -208,7 +234,7 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
         setPhase({ kind: 'failed' })
       } else {
         setPhase({ kind: 'done' })
-        toast.success(scope === 'image' ? '图片密钥已获取' : '密钥已获取并写入本地配置')
+        toast.success(scope === 'image' ? t('settings.account.acquire.imageDone') : t('settings.account.acquire.done'))
         onFinished(result)
         onClose()
       }
@@ -220,9 +246,14 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
   }
 
   // Kick off once on mount; the ref guards stale completions after 取消 / re-run.
-  useEffect(() => {
+  const startOnMount = useEffectEvent(() => {
     void run('auto')
+  })
+  useEffect(() => {
+    startOnMount()
     return () => {
+      // `runRef` is a run counter, not a DOM node: bumping it on unmount drops the pending completion.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       runRef.current++
     }
   }, [])
@@ -233,21 +264,45 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
   const missing = failed ? missingKeyKinds(steps) : []
   const active = steps.find((s) => s.status === 'doing')
   const header = failed
-    ? scope === 'image' ? '图片密钥获取失败' : '未能自动获取密钥'
-    : scope === 'image' ? '正在获取图片密钥…' : running && phase.strategy === 'memory_scan' ? '正在扫描微信进程内存…' : '正在自动获取密钥…'
-  const failDetail = failed ? (phase.error ?? summary.failed.map((f) => `${f.label}${f.detail ? `：${f.detail}` : ''}`).join('；')) : undefined
+    ? scope === 'image'
+      ? t('settings.account.acquire.imageFailed')
+      : t('settings.account.acquire.failed')
+    : scope === 'image'
+      ? t('settings.account.acquire.imageRunning')
+      : running && phase.strategy === 'memory_scan'
+        ? t('settings.account.acquire.scanning')
+        : t('settings.account.acquire.running')
+  const failDetail = failed
+    ? (phase.error ??
+      summary.failed
+        .map((f) =>
+          f.detail ? t('settings.account.acquire.stepDetail', { label: f.label, detail: f.detail }) : f.label,
+        )
+        .join(t('settings.account.acquire.detailSeparator')))
+    : undefined
 
   return (
-    <div className={cn('flex flex-col gap-2 rounded-item border p-3', failed ? 'border-danger/40 bg-danger/5' : 'border-line-8 bg-content/60')}>
+    <div
+      className={cn(
+        'flex flex-col gap-2 rounded-item border p-3',
+        failed ? 'border-danger/40 bg-danger/5' : 'border-line-8 bg-content/60',
+      )}
+    >
       <div className="flex items-center gap-2">
-        {running ? <Spinner size={13} /> : failed ? <CircleAlert size={14} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" /> : <Check size={14} strokeWidth={2} aria-hidden className="text-ok" />}
+        {running ? (
+          <Spinner size={13} />
+        ) : failed ? (
+          <CircleAlert size={14} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" />
+        ) : (
+          <Check size={14} strokeWidth={2} aria-hidden className="text-ok" />
+        )}
         <span className={cn('min-w-0 flex-1 truncate text-caption', failed ? 'text-danger' : 'text-fg-2')}>
           {header}
           {running && active?.detail ? ` · ${active.detail}` : ''}
         </span>
         {running ? (
           <Button variant="ghost" size="sm" className="h-7" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
         ) : null}
       </div>
@@ -255,15 +310,33 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
         {keyStepsToProgress(steps).map((s) => (
           <li key={s.id} className="flex items-center gap-2">
             <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
-            <span className={cn('min-w-0 flex-1 truncate', s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg-2')}>{s.label}</span>
-            {s.detail ? <span className={cn('shrink-0 truncate text-micro max-w-[55%] text-right', s.status === 'failed' ? 'text-danger' : 'text-fg-3')}>{s.detail}</span> : null}
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate',
+                s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg-2',
+              )}
+            >
+              {s.label}
+            </span>
+            {s.detail ? (
+              <span
+                className={cn(
+                  'shrink-0 truncate text-micro max-w-[55%] text-right',
+                  s.status === 'failed' ? 'text-danger' : 'text-fg-3',
+                )}
+              >
+                {s.detail}
+              </span>
+            ) : null}
           </li>
         ))}
       </ol>
       {failed ? (
         <>
           {failDetail ? <InlineHint kind="error">{failDetail}</InlineHint> : null}
-          {summary.failed.length > 0 && missing.length === 0 ? <InlineHint kind="warning">密钥已获取，但账号验证未通过：请检查数据库根目录是否属于该 wxid。</InlineHint> : null}
+          {summary.failed.length > 0 && missing.length === 0 ? (
+            <InlineHint kind="warning">{t('settings.account.acquire.verifyFailed')}</InlineHint>
+          ) : null}
           <div className="flex items-center gap-2">
             {missing[0] ? (
               <Button
@@ -274,20 +347,20 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
                   onClose()
                 }}
               >
-                手动输入
+                {t('settings.account.acquire.manual')}
               </Button>
             ) : (
               <Button variant="ghost" size="sm" onClick={onClose}>
-                关闭
+                {t('common.close')}
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={() => void run('memory_scan')}>
-              内存扫描重试
+              {t('settings.account.acquire.memoryScan')}
             </Button>
           </div>
         </>
       ) : (
-        <span className="text-note text-fg-3">请勿关闭微信；macOS 若提示重新登录，请退出后重新登录微信</span>
+        <span className="text-note text-fg-3">{t('settings.account.acquire.keepLoggedIn')}</span>
       )}
     </div>
   )

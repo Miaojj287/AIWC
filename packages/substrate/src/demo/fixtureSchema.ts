@@ -8,7 +8,20 @@ import type { WxAccount, WxContact, WxMessage, WxSession } from '@aiwc/protocol'
 export const SessionKindSchema = z.enum(['dm', 'group', 'official', 'system'])
 export const ContactKindSchema = z.enum(['friend', 'group', 'official', 'stranger'])
 export const MessageKindSchema = z.enum([
-  'text', 'image', 'voice', 'video', 'file', 'sticker', 'link', 'card', 'location', 'transfer', 'quote', 'system', 'revoke', 'other',
+  'text',
+  'image',
+  'voice',
+  'video',
+  'file',
+  'sticker',
+  'link',
+  'card',
+  'location',
+  'transfer',
+  'quote',
+  'system',
+  'revoke',
+  'other',
 ])
 
 export const WxAccountSchema = z.object({

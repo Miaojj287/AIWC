@@ -29,7 +29,10 @@ export function KitTab(_props: TabRendererProps) {
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-12 px-10 pb-16 pt-10">
         <header className="flex flex-col gap-1.5">
           <h1 className="text-title font-medium leading-7 text-fg">通用组件 · 状态总表</h1>
-          <p className="text-caption text-fg-3">所有页面共用的基础控件与浮层模板：按钮 / 开关 / 输入 / 反馈 / 浮层 / 空态。各页面的具体实例对应「交互态」看板。</p>
+          <p className="text-caption text-fg-3">
+            所有页面共用的基础控件与浮层模板：按钮 / 开关 / 输入 / 反馈 / 浮层 /
+            空态。各页面的具体实例对应「交互态」看板。
+          </p>
           <nav aria-label="分节" className="mt-1 flex flex-wrap gap-1.5">
             {SECTIONS.map((s) => (
               <a

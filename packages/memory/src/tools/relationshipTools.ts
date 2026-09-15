@@ -1,11 +1,13 @@
 /**
  * relationshipTools — get_relationship_profile over services.relationships (+ substrate for names).
- * Read-only. On the wechat-bot profile the bot may only read the profile of the chat it is bound to.
+ * Read-only. On the wechat-bot profile the bot may only read the profile of the chat it is bound to; a bot
+ * thread without a bound chat reads nothing (fail closed, same rule as substrate's botScope). What the bot
+ * reads is the third-party style view, never the dossier: its reply goes to that very contact.
  */
 import type { RelationshipStore, SubstrateService, ToolResult } from '@aiwc/protocol'
 import { defineTool } from '@aiwc/protocol'
 import { z } from 'zod'
-import { recentSamples } from '../fragments/relationshipFragmentProvider'
+import { recentSamples, renderRelationshipStyle } from '../fragments/relationshipFragmentProvider'
 import { truncateChars } from '../internal/text'
 import type { AnyToolDefinition } from '../types'
 
@@ -21,7 +23,8 @@ const fail = (content: string): ToolResult => ({ content, isError: true })
 export function relationshipTools(): AnyToolDefinition<RelationshipToolServices>[] {
   const get = defineTool<{ contactId: string }, RelationshipToolServices>({
     name: 'get_relationship_profile',
-    description: '读取某个联系人的克隆画像（说话风格、性格、口头禅、回复习惯、关系与边界、最近样本）。未克隆时返回其克隆状态。',
+    description:
+      '读取某个联系人的克隆画像（说话风格、性格、口头禅、回复习惯、关系与边界、最近样本）。未克隆时返回其克隆状态。',
     inputSchema: z.object({ contactId: z.string().min(1).describe('联系人 wxid / 会话 id') }),
     profiles: ['desktop-chat', 'wechat-bot', 'cron'],
     risk: 'read',
@@ -29,8 +32,10 @@ export function relationshipTools(): AnyToolDefinition<RelationshipToolServices>
     summarize: (i) => `读取 ${i.contactId} 的画像`,
     async execute(input, ctx) {
       const { relationships, substrate } = ctx.services
-      if (ctx.profile === 'wechat-bot' && ctx.origin?.chatId && ctx.origin.chatId !== input.contactId) {
-        return fail('机器人只能读取当前会话对象的画像。')
+      if (ctx.profile === 'wechat-bot') {
+        const boundChat = ctx.origin?.chatId?.trim()
+        if (!boundChat) return fail('机器人线程缺少来源会话，无法读取画像。')
+        if (boundChat !== input.contactId) return fail('机器人只能读取当前会话对象的画像。')
       }
       const profile = await relationships.get(input.contactId)
       if (!profile) {
@@ -50,6 +55,8 @@ export function relationshipTools(): AnyToolDefinition<RelationshipToolServices>
               : '尚未克隆'
         return ok(`「${name}」（${input.contactId}）${state}。`)
       }
+      if (ctx.profile === 'wechat-bot')
+        return ok(renderRelationshipStyle(profile) || `「${input.contactId}」的画像里没有可参考的语气和称呼。`)
       const { card, deep } = profile
       const lines = [
         `「${profile.displayName}」（${profile.contactId}）画像 v${profile.version}，${profile.samples.length} 组样本`,
@@ -59,7 +66,11 @@ export function relationshipTools(): AnyToolDefinition<RelationshipToolServices>
         `标点习惯：${card.punctuation || '—'}`,
         `称呼：自称「${card.addressing.self ?? '—'}」，称对方「${card.addressing.other ?? '—'}」`,
         `常聊话题：${card.topics.join('、') || '—'}`,
-        `回复习惯：${Object.entries(card.replyHabits).map(([k, v]) => `${k}→${v}`).join('；') || '—'}`,
+        `回复习惯：${
+          Object.entries(card.replyHabits)
+            .map(([k, v]) => `${k}→${v}`)
+            .join('；') || '—'
+        }`,
         `关系：${deep.relationship || '—'}`,
         `近况与事实：${deep.facts.join('；') || '—'}`,
         `反应模式：${deep.reactionPatterns.join('；') || '—'}`,
@@ -69,7 +80,8 @@ export function relationshipTools(): AnyToolDefinition<RelationshipToolServices>
       const samples = recentSamples(profile.samples, 5)
       if (samples.length) {
         lines.push('最近样本：')
-        for (const s of samples) lines.push(`- 对方：${truncateChars(s.prompt, 80)} → 回：${truncateChars(s.reply, 120)}`)
+        for (const s of samples)
+          lines.push(`- 对方：${truncateChars(s.prompt, 80)} → 回：${truncateChars(s.reply, 120)}`)
       }
       if (profile.corrections.length) lines.push(`用户修正 ${profile.corrections.length} 条（已应用到画像）`)
       return ok(lines.join('\n'))

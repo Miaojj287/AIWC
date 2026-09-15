@@ -10,9 +10,17 @@
  * gets no snapshot at all; it gets a short policy fragment instead, so the model knows the counterpart
  * is not the owner and that nothing about the owner may be disclosed.
  */
-import type { ChannelKind, ContextFragment, FragmentProvider, FragmentProviderContext, MemoryFile, MemorySnapshot, MemoryStore, ToolProfile } from '@aiwc/protocol'
-import { createFragment } from '@aiwc/protocol'
-import { MEMORY_FILES } from '../store/format'
+import type {
+  ChannelKind,
+  ContextFragment,
+  FragmentProvider,
+  FragmentProviderContext,
+  MemoryFile,
+  MemorySnapshot,
+  MemoryStore,
+  ToolProfile,
+} from '@aiwc/protocol'
+import { MEMORY_FILES, createFragment } from '@aiwc/protocol'
 
 export const MEMORY_FRAGMENT_TOKEN_CAP = 1500
 export const MEMORY_FRAGMENT_KIND = 'memory_snapshot'
@@ -67,7 +75,12 @@ export function memoryMarker(file: MemoryFile): string {
 }
 
 export function memoryFragment(file: MemoryFile, block: string): ContextFragment {
-  return createFragment(MEMORY_FRAGMENT_KIND, memoryMarker(file), MEMORY_FRAGMENT_TOKEN_CAP, () => `${memoryMarker(file)}\n${block}\n</memory_snapshot>`)
+  return createFragment(
+    MEMORY_FRAGMENT_KIND,
+    memoryMarker(file),
+    MEMORY_FRAGMENT_TOKEN_CAP,
+    () => `${memoryMarker(file)}\n${block}\n</memory_snapshot>`,
+  )
 }
 
 const MEMORY_POLICY_TEXT = [
@@ -81,10 +94,18 @@ const MEMORY_POLICY_TEXT = [
 
 /** Stable rule injected into third-party threads instead of the snapshot. */
 export function memoryPolicyFragment(): ContextFragment {
-  return createFragment(MEMORY_POLICY_FRAGMENT_KIND, MEMORY_POLICY_MARKER, MEMORY_POLICY_TOKEN_CAP, () => MEMORY_POLICY_TEXT)
+  return createFragment(
+    MEMORY_POLICY_FRAGMENT_KIND,
+    MEMORY_POLICY_MARKER,
+    MEMORY_POLICY_TOKEN_CAP,
+    () => MEMORY_POLICY_TEXT,
+  )
 }
 
-export function memoryFragmentProvider(store: MemoryStore, opts: MemoryFragmentProviderOptions = {}): MemoryFragmentProvider {
+export function memoryFragmentProvider(
+  store: MemoryStore,
+  opts: MemoryFragmentProviderOptions = {},
+): MemoryFragmentProvider {
   const filesFor = opts.filesFor ?? memoryFilesFor
   let snapshot: MemorySnapshot | undefined
   let pending: Promise<MemorySnapshot> | undefined

@@ -3,7 +3,9 @@ import type { MessageKind, WxMedia, WxMessage } from '@aiwc/protocol'
 export const PREVIEW_MAX_CHARS = 80
 
 export function collapseWhitespace(s: string): string {
-  return String(s ?? '').replace(/\s+/g, ' ').trim()
+  return String(s ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export function truncate(s: string, max: number = PREVIEW_MAX_CHARS): string {
@@ -53,5 +55,14 @@ export function previewOf(message: Pick<WxMessage, 'kind' | 'text' | 'media'>): 
 
 /** Whether the message carries searchable / embeddable text. */
 export function isTextBearing(kind: MessageKind): boolean {
-  return kind === 'text' || kind === 'quote' || kind === 'link' || kind === 'card' || kind === 'file' || kind === 'location' || kind === 'transfer' || kind === 'system'
+  return (
+    kind === 'text' ||
+    kind === 'quote' ||
+    kind === 'link' ||
+    kind === 'card' ||
+    kind === 'file' ||
+    kind === 'location' ||
+    kind === 'transfer' ||
+    kind === 'system'
+  )
 }

@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import updates from './fixtures/updates.json'
-import { buildClientVersion, incomingKind, incomingText, isSessionExpiredError, messageKey, messageTimestamp, parseIncomingMessage, type IlinkMessage } from './protocol'
+import {
+  IlinkApiError,
+  buildClientVersion,
+  incomingKind,
+  incomingText,
+  isSessionExpiredError,
+  messageKey,
+  messageTimestamp,
+  parseIncomingMessage,
+  retOfBody,
+  type IlinkMessage,
+} from './protocol'
 import { chunkText, shapeOutboundText, splitExplicitBubbles } from './textSplit'
-import { aesEcbPaddedSize, decodeIncomingBuffer, decryptAesEcb, detectMediaType, encryptAesEcb, normalizeAesKey } from './media'
+import {
+  aesEcbPaddedSize,
+  decodeIncomingBuffer,
+  decryptAesEcb,
+  detectMediaType,
+  encryptAesEcb,
+  normalizeAesKey,
+} from './media'
 
 const msgs = updates.msgs as IlinkMessage[]
 
@@ -18,7 +36,11 @@ describe('iLink protocol parsing', () => {
   it('parses a voice message with transcript and unescapes the CDN url', () => {
     const parsed = parseIncomingMessage(msgs[1]!)
     expect(parsed.voiceTranscript).toBe('下午三点开会')
-    expect(parsed.attachments[0]).toMatchObject({ kind: 'voice', url: 'https://cdn.example/voice1?x=1&y=2', aesKey: '00112233445566778899aabbccddeeff' })
+    expect(parsed.attachments[0]).toMatchObject({
+      kind: 'voice',
+      url: 'https://cdn.example/voice1?x=1&y=2',
+      aesKey: '00112233445566778899aabbccddeeff',
+    })
     expect(incomingKind(parsed)).toBe('voice')
     expect(incomingText(parsed)).toBe('[语音] 下午三点开会')
   })
@@ -26,14 +48,24 @@ describe('iLink protocol parsing', () => {
   it('parses mixed image + text keeping text dominant', () => {
     const parsed = parseIncomingMessage(msgs[2]!)
     expect(parsed.textSegments).toEqual(['看看这张图'])
-    expect(parsed.attachments[0]).toMatchObject({ kind: 'image', mediaType: 'image/jpeg', sizeBytes: 2048, url: 'https://cdn.example/img1' })
+    expect(parsed.attachments[0]).toMatchObject({
+      kind: 'image',
+      mediaType: 'image/jpeg',
+      sizeBytes: 2048,
+      url: 'https://cdn.example/img1',
+    })
     expect(incomingKind(parsed)).toBe('text')
     expect(incomingText(parsed)).toBe('看看这张图\n[图片]')
   })
 
   it('parses a file with name / size / guessed media type', () => {
     const parsed = parseIncomingMessage(msgs[3]!)
-    expect(parsed.attachments[0]).toMatchObject({ kind: 'file', filename: '合同.pdf', mediaType: 'application/pdf', sizeBytes: 12345 })
+    expect(parsed.attachments[0]).toMatchObject({
+      kind: 'file',
+      filename: '合同.pdf',
+      mediaType: 'application/pdf',
+      sizeBytes: 12345,
+    })
     expect(incomingKind(parsed)).toBe('file')
     expect(incomingText(parsed)).toBe('[文件] 合同.pdf')
   })
@@ -61,9 +93,16 @@ describe('iLink protocol parsing', () => {
     expect(messageTimestamp(msgs[2]!, 42)).toBe(42)
   })
 
-  it('recognises the session-expired error and computes the client version header', () => {
-    expect(isSessionExpiredError(new Error('ret -14 session timeout'))).toBe(true)
-    expect(isSessionExpiredError(new Error('HTTP 500'))).toBe(false)
+  it('recognises the session-expired error from structured fields only, and computes the client version header', () => {
+    expect(isSessionExpiredError(new IlinkApiError('sendmessage ret=-14 session timeout', undefined, -14))).toBe(true)
+    expect(
+      isSessionExpiredError(new IlinkApiError('HTTP 401', 401, retOfBody('{"ret":-14,"errmsg":"session timeout"}'))),
+    ).toBe(true)
+    expect(isSessionExpiredError(new IlinkApiError('HTTP 500', 500))).toBe(false)
+    // Text that merely contains "-14" must not log the user out.
+    expect(isSessionExpiredError(new IlinkApiError('HTTP 502 at 2026-09-14', 502))).toBe(false)
+    expect(isSessionExpiredError(new IlinkApiError('sendmessage ret=-140', undefined, -140))).toBe(false)
+    expect(isSessionExpiredError(new Error('ret -14 session timeout'))).toBe(false)
     expect(buildClientVersion('2.4.4')).toBe((2 << 16) | (4 << 8) | 4)
   })
 })
@@ -97,7 +136,13 @@ describe('outbound text shaping', () => {
   })
 
   it('shapeOutboundText combines both', () => {
-    expect(shapeOutboundText(`${'a'.repeat(5)}\n---wx-next---\n${'b'.repeat(9)}`, 4)).toEqual(['aaaa', 'a', 'bbbb', 'bbbb', 'b'])
+    expect(shapeOutboundText(`${'a'.repeat(5)}\n---wx-next---\n${'b'.repeat(9)}`, 4)).toEqual([
+      'aaaa',
+      'a',
+      'bbbb',
+      'bbbb',
+      'b',
+    ])
     expect(shapeOutboundText('')).toEqual([])
   })
 })
@@ -131,7 +176,12 @@ describe('media crypto helpers', () => {
 
   it('decrypts an encrypted image payload and leaves plaintext alone', () => {
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('jpegdata')])
-    const attachment = { kind: 'image' as const, filename: 'a.jpg', mediaType: 'image/jpeg', aesKey: key.toString('hex') }
+    const attachment = {
+      kind: 'image' as const,
+      filename: 'a.jpg',
+      mediaType: 'image/jpeg',
+      aesKey: key.toString('hex'),
+    }
     expect(decodeIncomingBuffer(encryptAesEcb(jpeg, key), attachment).equals(jpeg)).toBe(true)
     expect(decodeIncomingBuffer(jpeg, attachment).equals(jpeg)).toBe(true)
     expect(decodeIncomingBuffer(jpeg, { ...attachment, aesKey: undefined }).equals(jpeg)).toBe(true)

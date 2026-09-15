@@ -4,7 +4,9 @@ import { dialog, shell } from 'electron'
 import type { AppContext } from '../contracts'
 import { resolveAllowedExisting } from '../security/pathAllowList'
 import { formatDateForFile } from '../services/exporter'
+import { currentSystemVersion, supportsTransparency } from '../windows/transparency'
 import type { Handle, HostBridge } from './register'
+import { t } from '../i18n'
 
 /** Schemes `app:openUrl` will hand to the OS: web links, mail, and the macOS / Windows settings deep links. */
 const EXTERNAL_URL = /^(?:https?|mailto|x-apple\.systempreferences|ms-settings):/i
@@ -17,10 +19,17 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
     if (!win || win.isDestroyed()) return
     switch (action) {
       // Go through the existing close event so the user's close preference still applies.
-      case 'close': win.close(); break
-      case 'minimize': win.minimize(); break
-      case 'fullscreen': win.setFullScreen(!win.isFullScreen()); break
-      default: throw new Error('未知窗口操作')
+      case 'close':
+        win.close()
+        break
+      case 'minimize':
+        win.minimize()
+        break
+      case 'fullscreen':
+        win.setFullScreen(!win.isFullScreen())
+        break
+      default:
+        throw new Error(t('main.app.unknownWindowAction'))
     }
   })
 
@@ -31,6 +40,7 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
       platform: process.platform as 'darwin' | 'win32' | 'linux',
       dataDir: ctx.paths.dataRoot,
       isPackaged: host.isPackaged,
+      transparency: supportsTransparency(process.platform, currentSystemVersion()),
     }
   })
 
@@ -43,12 +53,14 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
   handle('app:exportLogs', () => {
     const files = [...ctx.logger.files()].reverse() // oldest first
     const out = join(ctx.paths.exportsDir, `aiwc-logs-${formatDateForFile()}.log`)
-    const chunks: string[] = [`# AIWC ${host.appVersion} · ${process.platform}-${process.arch} · electron ${process.versions.electron ?? '?'}\n`]
+    const chunks: string[] = [
+      `# AIWC ${host.appVersion} · ${process.platform}-${process.arch} · electron ${process.versions.electron ?? '?'}\n`,
+    ]
     for (const f of files) {
       try {
         chunks.push(`\n===== ${f} =====\n`, readFileSync(f, 'utf8'))
       } catch (e) {
-        chunks.push(`\n===== ${f} (读取失败: ${e instanceof Error ? e.message : String(e)}) =====\n`)
+        chunks.push(`\n===== ${f} (read failed: ${e instanceof Error ? e.message : String(e)}) =====\n`)
       }
     }
     writeFileSync(out, chunks.join(''), 'utf8')
@@ -70,23 +82,24 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
    */
   handle('app:openUrl', async ({ url }) => {
     const target = url.trim()
-    if (!EXTERNAL_URL.test(target)) throw new Error('只能打开 http / https / mailto 链接或系统设置')
+    if (!EXTERNAL_URL.test(target)) throw new Error(t('main.app.unsupportedUrl'))
     await shell.openExternal(target)
   })
 
   handle('app:pickDirectory', async ({ title, defaultPath }) => {
     const win = host.getMainWindow()
     const opts: Electron.OpenDialogOptions = {
-      title: title ?? '选择文件夹',
+      title: title ?? t('main.app.pickFolderTitle'),
       defaultPath,
       properties: ['openDirectory', 'createDirectory'],
-      buttonLabel: '选择',
+      buttonLabel: t('main.app.pickFolderButton'),
     }
     const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     const picked = result.canceled ? undefined : result.filePaths[0]
     if (!picked) return null
     // The dialog result is the one renderer-initiated source trusted to widen the allow-list.
-    if (!ctx.allowList.addRoot(picked)) log.warn('picked directory not added to allow-list (filesystem root or home)', { picked })
+    if (!ctx.allowList.addRoot(picked))
+      log.warn('picked directory not added to allow-list (filesystem root or home)', { picked })
     return picked
   })
 

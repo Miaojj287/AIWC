@@ -4,11 +4,22 @@ import { TooltipProvider } from '@/kit'
 import { AccountCard } from './AccountCard'
 import { __resetWizardStoreForTests, useWizardStore } from './wizardStore'
 
-afterEach(() => { cleanup(); __resetWizardStoreForTests() })
+afterEach(() => {
+  cleanup()
+  __resetWizardStoreForTests()
+})
 
 it('shows avatar and nickname above the smaller account ID in the selection and menu', () => {
-  useWizardStore.setState({ dbRoot: '/root', wxid: 'wxid_a', accounts: [{ wxid: 'wxid_a', nickname: '测试昵称', avatarPath: '/avatar.png', dbRoot: '/root', verified: false }] })
-  render(<TooltipProvider><AccountCard /></TooltipProvider>)
+  useWizardStore.setState({
+    dbRoot: '/root',
+    wxid: 'wxid_a',
+    accounts: [{ wxid: 'wxid_a', nickname: '测试昵称', avatarPath: '/avatar.png', dbRoot: '/root', verified: false }],
+  })
+  render(
+    <TooltipProvider>
+      <AccountCard />
+    </TooltipProvider>,
+  )
   const trigger = screen.getByRole('combobox', { name: '微信账号' })
   expect(trigger.textContent).toContain('测试昵称')
   expect(trigger.querySelector('img')?.getAttribute('src')).toBe('aiwc-media:///avatar.png')

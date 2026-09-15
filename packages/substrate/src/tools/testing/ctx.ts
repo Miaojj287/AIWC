@@ -5,7 +5,9 @@ import type { StepId, SubstrateService, ToolContext, ToolProfile, ToolResult } f
 import { asCallId, asThreadId, asTurnId } from '@aiwc/protocol'
 import type { SubstrateToolServices } from '../shared'
 
-export type CtxOverrides = Partial<Pick<ToolContext<SubstrateToolServices>, 'profile' | 'signal' | 'progress' | 'depth' | 'origin' | 'channel'>>
+export type CtxOverrides = Partial<
+  Pick<ToolContext<SubstrateToolServices>, 'profile' | 'signal' | 'progress' | 'depth' | 'origin' | 'channel'>
+>
 
 export function makeCtx(substrate: SubstrateService, overrides: CtxOverrides = {}): ToolContext<SubstrateToolServices> {
   const profile: ToolProfile = overrides.profile ?? 'desktop-chat'
@@ -32,14 +34,12 @@ export function botCtxOverrides(chatId: string | undefined): CtxOverrides {
   return base
 }
 
-/** Parse through the tool's own schema (applies defaults) — mirrors what the kernel does before execute. */
-export function parseInput<I>(schema: { parse(v: unknown): I }, raw: unknown): I {
-  return schema.parse(raw)
-}
-
 /** Validate through the tool's schema, then execute — the same two steps the kernel's dispatch performs. */
 export async function runTool<I>(
-  tool: { inputSchema: { parse(v: unknown): I }; execute(input: I, ctx: ToolContext<SubstrateToolServices>): Promise<ToolResult> },
+  tool: {
+    inputSchema: { parse(v: unknown): I }
+    execute(input: I, ctx: ToolContext<SubstrateToolServices>): Promise<ToolResult>
+  },
   raw: unknown,
   substrate: SubstrateService,
   ctxOverrides?: CtxOverrides,

@@ -4,13 +4,12 @@
  */
 import {
   asThreadId,
-  type ApprovalDecision,
-  type ContextFragment,
   type Event,
   type HistoryItem,
   type ItemId,
   type JsonValue,
   type ModelClient,
+  type PermissionMode,
   type ThreadId,
   type ThreadOrigin,
   type ThreadSettings,
@@ -50,7 +49,8 @@ export interface FakeTool {
 }
 
 export interface FakeRouterFactory extends ToolRouterFactory {
-  builds: Array<{ profile: string; depth: number }>
+  /** every build, with the permission mode its approval getter reported at build time */
+  builds: Array<{ profile: string; depth: number; permissionMode?: PermissionMode }>
   /** dispatch order as observed by the router (start order) */
   dispatchLog: string[]
 }
@@ -61,10 +61,14 @@ export function createFakeRouterFactory(tools: FakeTool[]): FakeRouterFactory {
     builds: [],
     dispatchLog: [],
     build(opts) {
-      factory.builds.push({ profile: opts.profile, depth: opts.depth })
+      factory.builds.push({ profile: opts.profile, depth: opts.depth, permissionMode: opts.permissionMode?.() })
       const visible = tools.filter((t) => !opts.deny?.includes(t.name))
       const router: ToolRouter = {
-        specs: visible.map((t) => ({ name: t.name, description: `fake ${t.name}`, inputJsonSchema: { type: 'object' } })),
+        specs: visible.map((t) => ({
+          name: t.name,
+          description: `fake ${t.name}`,
+          inputJsonSchema: { type: 'object' },
+        })),
         has: (name) => byName.has(name),
         risk: (name) => byName.get(name)?.risk ?? 'read',
         parallelSafe: (name) => byName.get(name)?.parallelSafe ?? false,
@@ -88,14 +92,36 @@ export function createFakeRouterFactory(tools: FakeTool[]): FakeRouterFactory {
           if (!tool) {
             const result: ToolResult = { content: `unknown tool ${call.toolName}`, isError: true }
             ctx.emit({ ...base, status: 'error', output: result.content, isError: true, durationMs: 0 })
-            return { callId: call.callId, toolName: call.toolName, result, isError: true, status: 'error', durationMs: 0 }
+            return {
+              callId: call.callId,
+              toolName: call.toolName,
+              result,
+              isError: true,
+              status: 'error',
+              durationMs: 0,
+            }
           }
           ctx.emit({ ...base, status: 'running' })
           try {
             const result = await tool.execute(call.input, { signal: ctx.signal, callId: call.callId })
             const durationMs = Date.now() - started
-            ctx.emit({ ...base, status: result.isError ? 'error' : 'done', output: result.content, isError: !!result.isError, durationMs, artifacts: result.artifacts })
-            return { callId: call.callId, toolName: call.toolName, result, isError: !!result.isError, status: result.isError ? 'error' : 'done', durationMs, artifacts: result.artifacts }
+            ctx.emit({
+              ...base,
+              status: result.isError ? 'error' : 'done',
+              output: result.content,
+              isError: !!result.isError,
+              durationMs,
+              artifacts: result.artifacts,
+            })
+            return {
+              callId: call.callId,
+              toolName: call.toolName,
+              result,
+              isError: !!result.isError,
+              status: result.isError ? 'error' : 'done',
+              durationMs,
+              artifacts: result.artifacts,
+            }
           } catch (err) {
             const durationMs = Date.now() - started
             const result: ToolResult = { content: err instanceof Error ? err.message : String(err), isError: true }
@@ -116,7 +142,7 @@ export function createFakeApprovalGate(): ApprovalGate & { cancelled: ThreadId[]
   return {
     cancelled: [],
     decide: () => 'approved',
-    ask: async () => 'allow_once' as ApprovalDecision,
+    ask: async () => 'allow_once',
     resolve: () => true,
     cancelAll(threadId) {
       this.cancelled.push(threadId)
@@ -157,7 +183,15 @@ export function createFakeHookRunner(): FakeHookRunner {
 // ------------------------------------------------------------------------------------------ rollout
 
 interface StoredThread {
-  meta: { threadId: ThreadId; origin: ThreadOrigin; settings: ThreadSettings; title: string; createdAt: number; pinned: boolean; archived: boolean }
+  meta: {
+    threadId: ThreadId
+    origin: ThreadOrigin
+    settings: ThreadSettings
+    title: string
+    createdAt: number
+    pinned: boolean
+    archived: boolean
+  }
   lines: RolloutLine[]
 }
 
@@ -179,8 +213,23 @@ export function createMemoryRolloutStore(opts: { rewrite?: boolean } = {}): Memo
     itemsOf: (id) => (threads.get(id)?.lines ?? []).flatMap((l) => (l.type === 'item' ? [l.item] : [])),
     async create(meta) {
       threads.set(meta.threadId, {
-        meta: { ...meta, title: meta.title ?? meta.settings.title ?? '', createdAt: Date.now(), pinned: false, archived: false },
-        lines: [{ ts: Date.now(), type: 'thread_meta', threadId: meta.threadId, origin: meta.origin, settings: meta.settings, title: meta.title }],
+        meta: {
+          ...meta,
+          title: meta.title ?? meta.settings.title ?? '',
+          createdAt: Date.now(),
+          pinned: false,
+          archived: false,
+        },
+        lines: [
+          {
+            ts: Date.now(),
+            type: 'thread_meta',
+            threadId: meta.threadId,
+            origin: meta.origin,
+            settings: meta.settings,
+            title: meta.title,
+          },
+        ],
       })
       store.log.push('create')
     },
@@ -212,6 +261,7 @@ export function createMemoryRolloutStore(opts: { rewrite?: boolean } = {}): Memo
       const out: ThreadRecord[] = []
       for (const t of threads.values()) {
         if (opts?.channel && t.meta.origin.channel !== opts.channel) continue
+        if (opts?.excludeProfiles?.includes(t.meta.settings.profile)) continue
         if (t.meta.archived && !opts?.includeArchived) continue
         if (opts?.query && !t.meta.title.includes(opts.query)) continue
         const items = store.itemsOf(t.meta.threadId)
@@ -251,10 +301,27 @@ export function createMemoryRolloutStore(opts: { rewrite?: boolean } = {}): Memo
       const t = threads.get(threadId)
       if (!t) throw new Error(`no thread ${threadId}`)
       const ts = Date.now()
-      const lines: RolloutLine[] = [{ ts: t.meta.createdAt, type: 'thread_meta', threadId, origin: t.meta.origin, settings: state.settings, title: t.meta.title || undefined }]
+      const lines: RolloutLine[] = [
+        {
+          ts: t.meta.createdAt,
+          type: 'thread_meta',
+          threadId,
+          origin: t.meta.origin,
+          settings: state.settings,
+          title: t.meta.title || undefined,
+        },
+      ]
       if (state.lastCompactedThroughId) {
-        const summary = state.items.find((i) => i.type === 'compaction_summary' && i.foldedThroughId === state.lastCompactedThroughId)
-        if (summary) lines.push({ ts, type: 'compacted', summaryItemId: summary.id, foldedThroughId: state.lastCompactedThroughId })
+        const summary = state.items.find(
+          (i) => i.type === 'compaction_summary' && i.foldedThroughId === state.lastCompactedThroughId,
+        )
+        if (summary)
+          lines.push({
+            ts,
+            type: 'compacted',
+            summaryItemId: summary.id,
+            foldedThroughId: state.lastCompactedThroughId,
+          })
       }
       for (const item of state.items) lines.push({ ts, type: 'item', item })
       if (state.worldState) lines.push({ ts, type: 'world_state', snapshot: state.worldState })
@@ -277,15 +344,25 @@ export function createFakeSkillIndex(skills: SkillMeta[] = []): SkillIndex {
       return `# ${name}`
     },
     indexFragment: () =>
-      createFragment('skills_index', '<skills>', 800, () => (skills.length ? skills.map((s) => `- ${s.name}：${s.description}`).join('\n') : '')),
+      createFragment('skills_index', '<skills>', 800, () =>
+        skills.length ? skills.map((s) => `- ${s.name}：${s.description}`).join('\n') : '',
+      ),
   }
 }
 
-export function createFakeModelResolver(main: ModelClient, auxiliary: ModelClient = main): ModelResolver & { resolutions: number } {
+export interface FakeModelResolver extends ModelResolver {
+  resolutions: number
+  /** the model selection passed to every resolve() call, in order */
+  selections: Array<{ providerId: string; modelId: string } | undefined>
+}
+
+export function createFakeModelResolver(main: ModelClient, auxiliary: ModelClient = main): FakeModelResolver {
   return {
     resolutions: 0,
-    async resolve() {
+    selections: [],
+    async resolve(selection) {
       this.resolutions++
+      this.selections.push(selection)
       return main
     },
     async resolveAuxiliary() {
@@ -294,17 +371,13 @@ export function createFakeModelResolver(main: ModelClient, auxiliary: ModelClien
   }
 }
 
-export function staticFragmentProvider(tier: 'stable' | 'turn', fragments: ContextFragment[]): FragmentProvider {
-  return { tier, provide: async () => fragments }
-}
-
 // ------------------------------------------------------------------------------------------ bundles
 
 export interface TestServices extends KernelServices {
   tools: FakeRouterFactory
   hooks: FakeHookRunner
   rollout: MemoryRolloutStore
-  models: ModelResolver & { resolutions: number }
+  models: FakeModelResolver
 }
 
 export function createTestServices(input: {
@@ -329,11 +402,20 @@ export function createTestServices(input: {
 }
 
 export const testOrigin = (): ThreadOrigin => ({ channel: 'desktop' })
-export const testSettings = (patch?: Partial<ThreadSettings>): ThreadSettings => ({ permissionMode: 'bypass', profile: 'desktop-chat', allowAlways: [], ...patch })
+export const testSettings = (patch?: Partial<ThreadSettings>): ThreadSettings => ({
+  permissionMode: 'bypass',
+  profile: 'desktop-chat',
+  allowAlways: [],
+  ...patch,
+})
 export const testThreadId = (s = 'thr_test'): ThreadId => asThreadId(s)
 
 /** Collects emitted events; `types()` gives the compact sequence used by ordering assertions. */
-export function collectEvents(on: (l: (e: Event) => void) => () => void): { events: Event[]; types: () => string[]; stop: () => void } {
+export function collectEvents(on: (l: (e: Event) => void) => () => void): {
+  events: Event[]
+  types: () => string[]
+  stop: () => void
+} {
   const events: Event[] = []
   const stop = on((e) => {
     events.push(e)
@@ -342,7 +424,11 @@ export function collectEvents(on: (l: (e: Event) => void) => () => void): { even
 }
 
 /** Resolves when an event of the given type is emitted (or rejects after timeoutMs). */
-export function waitForEvent<T extends Event['type']>(on: (l: (e: Event) => void) => () => void, type: T, timeoutMs = 5000): Promise<Extract<Event, { type: T }>> {
+export function waitForEvent<T extends Event['type']>(
+  on: (l: (e: Event) => void) => () => void,
+  type: T,
+  timeoutMs = 5000,
+): Promise<Extract<Event, { type: T }>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       off()

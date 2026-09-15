@@ -17,6 +17,11 @@ import { registerAutoReplyIpc } from './autoreply'
 import { registerGatewayIpc } from './gateway'
 import { registerDiaryIpc } from './diary'
 import { registerFileIpc } from './file'
+import { registerPetIpc } from './pet'
+import { registerOfficeIpc } from './office'
+import { registerTaskIpc } from './task'
+import { t } from '../i18n'
+import { localizeInvokeResult, localizeText } from '../localizePayloads'
 
 /** What the IPC layer needs from the Electron host (index.ts) beyond the composed AppContext. */
 export interface HostBridge {
@@ -30,7 +35,10 @@ export interface HostBridge {
   onGetInfo?: () => void
 }
 
-export type Handler<K extends InvokeChannel> = (req: InvokeReq<K>, event: IpcMainInvokeEvent) => Promise<InvokeRes<K>> | InvokeRes<K>
+export type Handler<K extends InvokeChannel> = (
+  req: InvokeReq<K>,
+  event: IpcMainInvokeEvent,
+) => Promise<InvokeRes<K>> | InvokeRes<K>
 
 export interface Handle {
   <K extends InvokeChannel>(channel: K, fn: Handler<K>): void
@@ -49,13 +57,17 @@ export function createHandle(ctx: AppContext, host: HostBridge, registered: Set<
     ipcMain.handle(channel, async (event, req: unknown) => {
       if (!host.isTrustedSender(event.sender)) {
         log.warn(`rejected ${channel} from untrusted sender`, { id: event.sender.id })
-        throw new Error('拒绝来自未知窗口的请求')
+        throw new Error(t('main.ipc.untrustedSender'))
       }
       const started = Date.now()
       try {
-        return await fn(req as InvokeReq<K>, event)
+        return localizeInvokeResult(channel, await fn(req as InvokeReq<K>, event))
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e))
+        // An empty message would reach the UI as a blank toast / inline hint.
+        if (!err.message.trim()) err.message = t('main.ipc.operationFailed')
+        // Package-emitted Chinese errors (substrate / gateway / memory / kernel) → UI language.
+        else err.message = localizeText(err.message)
         log.warn(`${channel} failed: ${err.message}`)
         throw err
       } finally {
@@ -80,13 +92,11 @@ export function registerIpc(ctx: AppContext, host: HostBridge): void {
   registerGatewayIpc(ctx, host, handle)
   registerDiaryIpc(ctx, host, handle)
   registerFileIpc(ctx, host, handle)
+  registerPetIpc(ctx, host, handle)
+  registerOfficeIpc(ctx, host, handle)
+  registerTaskIpc(ctx, host, handle)
 
   const missing = INVOKE_CHANNELS.filter((c) => !registered.has(c))
   if (missing.length) ctx.logger.child('ipc').error('InvokeMap channels without handler', missing)
   else ctx.logger.child('ipc').info(`registered ${registered.size} ipc channels`)
-}
-
-/** Throws the message the renderer shows inline; used by every handler for user-facing failures. */
-export function userError(message: string): never {
-  throw new Error(message)
 }

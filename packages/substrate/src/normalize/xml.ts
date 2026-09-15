@@ -34,19 +34,28 @@ export function extractXmlValue(xml: string, tagName: string): string {
   const re = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)</${escapeRegExp(tagName)}>`, 'i')
   const m = re.exec(xml)
   if (!m) return ''
-  return (m[1] ?? '').replace(/<!\[CDATA\[/g, '').replace(/\]\]>/g, '').trim()
+  return (m[1] ?? '')
+    .replace(/<!\[CDATA\[/g, '')
+    .replace(/\]\]>/g, '')
+    .trim()
 }
 
 /** `<tag … attr="value">` attribute value. Empty string when absent. */
 export function extractXmlAttribute(xml: string, tagName: string, attrName: string): string {
   if (!xml) return ''
-  const re = new RegExp(`<${escapeRegExp(tagName)}[^>]*?\\s${escapeRegExp(attrName)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i')
+  const re = new RegExp(
+    `<${escapeRegExp(tagName)}[^>]*?\\s${escapeRegExp(attrName)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    'i',
+  )
   const m = re.exec(xml)
   return m ? (m[1] ?? m[2] ?? '') : ''
 }
 
 export function stripXmlTags(s: string): string {
-  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return s
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export interface XmlTextLite {

@@ -11,6 +11,5 @@
     "electron/**/*.ts",
     "packages/**/*.ts",
     "dev/**/*.ts"
-  ],
-  "exclude": ["packages/**/*.test.ts", "electron/**/*.test.ts"]
+  ]
 }

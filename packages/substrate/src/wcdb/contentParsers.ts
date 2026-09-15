@@ -118,8 +118,17 @@ export function parseType49(content: string, rawContent: string = content): stri
 }
 
 const TYPE49_LIKE = new Set<string>([
-  APP_TYPE.TRANSFER, APP_TYPE.RED_PACKET, APP_TYPE.LINK, APP_TYPE.FILE, APP_TYPE.CHAT_HISTORY,
-  APP_TYPE.MINI_PROGRAM, APP_TYPE.MINI_PROGRAM_2, APP_TYPE.URL, APP_TYPE.QUOTE, APP_TYPE.MUSIC, APP_TYPE.GIFT,
+  APP_TYPE.TRANSFER,
+  APP_TYPE.RED_PACKET,
+  APP_TYPE.LINK,
+  APP_TYPE.FILE,
+  APP_TYPE.CHAT_HISTORY,
+  APP_TYPE.MINI_PROGRAM,
+  APP_TYPE.MINI_PROGRAM_2,
+  APP_TYPE.URL,
+  APP_TYPE.QUOTE,
+  APP_TYPE.MUSIC,
+  APP_TYPE.GIFT,
 ])
 
 /** Human-readable text for any message. `localType` is the base type (see splitLocalType). */
@@ -181,7 +190,11 @@ export function parseEmojiInfo(content: string): EmojiInfo {
     if (!match?.[1]) return undefined
     let url = match[1].replace(/&amp;/g, '&')
     if (/^https?%3a/i.test(url)) {
-      try { url = decodeURIComponent(url) } catch { /* keep encoded */ }
+      try {
+        url = decodeURIComponent(url)
+      } catch {
+        /* keep encoded */
+      }
     }
     return url
   }
@@ -231,12 +244,6 @@ export function parseVideoMd5(content: string): string | undefined {
   return result && /^[a-f0-9]{32}$/.test(result) ? result : undefined
 }
 
-/** Video file size in bytes (`length` attribute), used to match hardlink rows without md5. */
-export function parseVideoLength(content: string): number | undefined {
-  const match = /\slength\s*=\s*['"](\d+)['"]/i.exec(content)
-  return match?.[1] ? Number.parseInt(match[1], 10) : undefined
-}
-
 export interface FileInfo {
   fileName?: string
   fileSize?: number
@@ -264,9 +271,23 @@ export function parseLinkInfo(content: string): { title?: string; url?: string; 
 }
 
 const PACKED_INFO_FIELDS = [
-  'packed_info_data', 'packed_info', 'packedInfoData', 'packedInfo', 'PackedInfoData', 'PackedInfo',
-  'packed_info_blob', 'packedInfoBlob', 'BytesExtra', 'bytes_extra', 'reserved0', 'Reserved0',
-  'WCDB_CT_packed_info_data', 'WCDB_CT_packed_info', 'WCDB_CT_PackedInfoData', 'WCDB_CT_PackedInfo', 'WCDB_CT_Reserved0',
+  'packed_info_data',
+  'packed_info',
+  'packedInfoData',
+  'packedInfo',
+  'PackedInfoData',
+  'PackedInfo',
+  'packed_info_blob',
+  'packedInfoBlob',
+  'BytesExtra',
+  'bytes_extra',
+  'reserved0',
+  'Reserved0',
+  'WCDB_CT_packed_info_data',
+  'WCDB_CT_packed_info',
+  'WCDB_CT_PackedInfoData',
+  'WCDB_CT_PackedInfo',
+  'WCDB_CT_Reserved0',
 ]
 
 /** Extract the image `.dat` base name hidden in `packed_info_data`. */
@@ -279,7 +300,7 @@ export function parseImageDatNameFromRow(row: Row): string | undefined {
     printable[i] = byte >= 0x20 && byte <= 0x7e ? byte : 0x20
   }
   const text = printable.toString('latin1')
-  const match = /([0-9a-fA-F]{8,})(?:\.t)?\.dat/.exec(text)
+  const match = /([0-9a-fA-F]{8,})(?:(?:_h|_t|_hd|_thumb|\.t)?(?:_M)?)?\.dat/i.exec(text)
   if (match?.[1]) return match[1].toLowerCase()
   return /([0-9a-fA-F]{16,})/.exec(text)?.[1]?.toLowerCase()
 }
@@ -365,14 +386,6 @@ export function parseVoiceDurationMs(content: string): number | undefined {
   if (!match?.[2]) return undefined
   const ms = Number.parseFloat(match[2])
   return Number.isFinite(ms) && ms > 0 ? Math.round(ms) : undefined
-}
-
-/** Transfer payer/receiver wxids (type 2000). */
-export function parseTransferParties(content: string): { payer?: string; receiver?: string } {
-  return {
-    payer: extractXmlValue(content, 'payer_username') || undefined,
-    receiver: extractXmlValue(content, 'receiver_username') || undefined,
-  }
 }
 
 /** Revoke notices come as `<revokemsg>` sysmsg or plain "撤回了一条消息" text. */

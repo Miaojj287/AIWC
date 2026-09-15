@@ -18,7 +18,9 @@ import { createApp } from './composition'
 import type { AppContext } from './contracts'
 import { registerMediaProtocol, registerMediaScheme } from './protocols/mediaProtocol'
 import { createWindowManager, type WindowManager } from './windows/mainWindow'
-import { installApplicationMenu } from './menu'
+import { installApplicationMenu, type MenuDeps } from './menu'
+import { mainLanguage, setMainLanguage, t } from './i18n'
+import { resolveLanguage } from '@aiwc/i18n'
 import { registerIpc, type HostBridge } from './ipc/register'
 import { formatDateForFile } from './services/exporter'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -70,7 +72,7 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(bootstrap)
-    .catch((e: unknown) => fatal('启动失败', e))
+    .catch((e: unknown) => fatal(t('main.startupFailed'), e))
 }
 
 function buildPaths(): AppPaths {
@@ -85,10 +87,17 @@ function buildPaths(): AppPaths {
 }
 
 function openLogger(paths: AppPaths): Logger {
-  return createLogger({ file: paths.mainLogFile, level: app.isPackaged ? 'info' : 'debug', maxBytes: 2 * 1024 * 1024, maxFiles: 5 })
+  return createLogger({
+    file: paths.mainLogFile,
+    level: app.isPackaged ? 'info' : 'debug',
+    maxBytes: 2 * 1024 * 1024,
+    maxFiles: 5,
+  })
 }
 
 async function bootstrap(): Promise<void> {
+  // Until the config is loaded, main-process copy (a fatal startup dialog) follows the OS language.
+  setMainLanguage(resolveLanguage(app.getLocale()))
   const paths = buildPaths()
   ensureDirs(paths)
   logger = openLogger(paths)
@@ -112,6 +121,8 @@ async function bootstrap(): Promise<void> {
     safeStorage,
     substrateHostEntry: join(here, 'substrateHost.js'),
     env: process.env,
+    systemLocale: app.getLocale(),
+    openExternal: (url) => shell.openExternal(url),
   })
   const context = ctx
 
@@ -153,15 +164,24 @@ async function bootstrap(): Promise<void> {
   }
   registerIpc(context, host)
 
-  installApplicationMenu({
+  const menuDeps: MenuDeps = {
     isMac: process.platform === 'darwin',
     isPackaged: app.isPackaged,
     appName: APP_NAME,
     send: (command, payload) => {
-      if (!sendToActive('app:command', { command, payload })) logger.warn('menu command dropped: no window', { command })
+      if (!sendToActive('app:command', { command, payload }))
+        logger.warn('menu command dropped: no window', { command })
     },
     openDataDir: () => void shell.openPath(paths.dataRoot),
     exportLogs: () => exportLogsFromMenu(context, paths),
+  }
+  installApplicationMenu(menuDeps)
+  // Native menu labels are baked in when the menu is built: rebuild it when the UI language changes.
+  let menuLanguage = mainLanguage()
+  context.config.subscribe((next) => {
+    if (next.general.language === menuLanguage) return
+    menuLanguage = next.general.language
+    installApplicationMenu(menuDeps)
   })
 
   wm.create()
@@ -179,10 +199,10 @@ function exportLogsFromMenu(context: AppContext, paths: AppPaths): void {
     const out = join(paths.exportsDir, `aiwc-logs-${formatDateForFile()}.log`)
     writeFileSync(out, files.map((f) => `\n===== ${f} =====\n${readFileSync(f, 'utf8')}`).join(''), 'utf8')
     shell.showItemInFolder(out)
-    context.toast({ kind: 'success', text: '日志已导出' })
+    context.toast({ kind: 'success', text: t('menu.logsExported') })
   } catch (e) {
     logger.error('export logs failed', e)
-    context.toast({ kind: 'error', text: '导出日志失败' })
+    context.toast({ kind: 'error', text: t('menu.exportLogsFailed') })
   }
 }
 
@@ -214,8 +234,11 @@ function abortSmokeBeforeReady(reason: string): void {
     ensureDirs(paths)
     logger = openLogger(paths)
   } catch (e) {
+    // No log file exists yet: stderr is the only place a failing --smoke run can report to.
+    // eslint-disable-next-line no-console
     console.error('[aiwc --smoke] cannot open main.log:', e)
   }
+  // eslint-disable-next-line no-console
   if (logger === nullLogger) console.error(`[aiwc --smoke] smoke aborted: ${reason}`)
   logger.error(`smoke aborted: ${reason}`, { code: 1 })
   app.exit(1)

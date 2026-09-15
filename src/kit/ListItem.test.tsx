@@ -29,14 +29,46 @@ describe('ListItem hover actions', () => {
   })
 
   it('still overlays the corner (and hides `meta`) when the row has no trailing control', () => {
-    render(<ListItem data-hover title="林文轩" meta="03:08" hoverActions={<button type="button" aria-label="更多操作" />} onSelect={() => {}} />)
+    render(
+      <ListItem
+        data-hover
+        title="林文轩"
+        meta="03:08"
+        hoverActions={<button type="button" aria-label="更多操作" />}
+        onSelect={() => {}}
+      />,
+    )
     const slot = more().parentElement as HTMLElement
     expect(slot.className).toContain('absolute')
     expect(screen.getByText('03:08').className).toContain('group-hover:hidden')
   })
 
   it('does not hide `meta` on hover when nothing overlays it', () => {
-    render(<ListItem title="林文轩" meta="03:08" trailing={<span>2</span>} hoverActions={<button type="button" aria-label="更多操作" />} onSelect={() => {}} />)
+    render(
+      <ListItem
+        title="林文轩"
+        meta="03:08"
+        trailing={<span>2</span>}
+        hoverActions={<button type="button" aria-label="更多操作" />}
+        onSelect={() => {}}
+      />,
+    )
     expect(screen.getByText('03:08').className).not.toContain('group-hover:hidden')
+  })
+})
+
+describe('ListItem subtitle', () => {
+  it('renders the subtitle in a block box so a long preview ends in … instead of a clipped glyph', () => {
+    render(
+      <ListItem
+        title="露营装备交流"
+        subtitle="柏淑芬：好呀，周六早上八点在北门集合，记得带上帐篷和睡袋"
+        onSelect={() => {}}
+      />,
+    )
+    const subtitle = screen.getByText(/柏淑芬/)
+    expect(subtitle.className).toContain('truncate')
+    expect(subtitle.className).toContain('min-w-0')
+    expect(subtitle.className.split(/\s+/)).not.toContain('flex')
   })
 })

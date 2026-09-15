@@ -5,9 +5,12 @@
 import type { ErrorAction, ModelError } from '@aiwc/protocol'
 import { APICallError } from 'ai'
 
-const CONTEXT_RE = /context[_ ]?(length|window)|maximum context|too many tokens|prompt is too long|input is too long|exceeds the (model'?s )?(context|maximum)|max_tokens.*context|token limit|reduce the length/i
-const TOOLS_RE = /tool(s|_choice| use| calling)?[^.]{0,40}(not |un)support|does not support tools|function calling is not/i
-const NETWORK_RE = /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|socket hang up|network|timed out|timeout/i
+const CONTEXT_RE =
+  /context[_ ]?(length|window)|maximum context|too many tokens|prompt is too long|input is too long|exceeds the (model'?s )?(context|maximum)|max_tokens.*context|token limit|reduce the length/i
+const TOOLS_RE =
+  /tool(s|_choice| use| calling)?[^.]{0,40}(not |un)support|does not support tools|function calling is not/i
+const NETWORK_RE =
+  /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|socket hang up|network|timed out|timeout/i
 
 export function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
@@ -44,7 +47,8 @@ export function toModelError(err: unknown): ModelError {
   if (status === 429) return { code: 'rate_limit', message, status, retryable: true }
   if (CONTEXT_RE.test(haystack)) return { code: 'context_overflow', message, status, retryable: false }
   if (TOOLS_RE.test(haystack)) return { code: 'unsupported_tools', message, status, retryable: false }
-  if (status === 400 || status === 404 || status === 422) return { code: 'invalid_request', message, status, retryable: false }
+  if (status === 400 || status === 404 || status === 422)
+    return { code: 'invalid_request', message, status, retryable: false }
   if (status !== undefined && status >= 500) return { code: 'network', message, status, retryable: true }
   if (status === undefined && NETWORK_RE.test(haystack)) return { code: 'network', message, retryable: true }
   return { code: 'unknown', message, status, retryable }

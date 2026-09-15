@@ -7,15 +7,25 @@
  *    disk differs AND no longer round-trips through the parser, the mutation is refused (`blocked`)
  *    and a `.bak.<ts>` copy is taken so nothing is silently lost
  *  - budgets are character based (model independent); addEntry refuses `over_budget` and `duplicate`
+ *  - removeEntry with an expected text re-checks the entry under the lock, so a stale index never removes
+ *    a different entry than the one that was shown and approved
  *  - snapshot() is the only render the kernel injects; it carries a usage header per file
  */
 import type { MemoryBudget, MemoryEntry, MemoryFile, MemorySnapshot, MemoryStore } from '@aiwc/protocol'
+import { MEMORY_FILES, isMemoryFile } from '@aiwc/protocol'
 import { join } from 'node:path'
-import { KeyedMutex, atomicWriteFile, ensureDir, readJsonIfExists, readTextIfExists, sha256, withFileLock } from '../internal/fsx'
+import {
+  KeyedMutex,
+  atomicWriteFile,
+  ensureDir,
+  readJsonIfExists,
+  readTextIfExists,
+  sha256,
+  withFileLock,
+} from '../internal/fsx'
 import { normaliseForCompare } from '../internal/text'
 import {
   DEFAULT_MEMORY_LIMITS,
-  MEMORY_FILES,
   joinEntries,
   parseEntries,
   renderSnapshotBlock,
@@ -60,6 +70,21 @@ export class MemoryDriftError extends Error {
   }
 }
 
+/**
+ * Rejection of removeEntry(file, index, expectedText) when the entry at `index` no longer reads
+ * `expectedText` (the file was edited or reordered after the index was read). Nothing is removed.
+ */
+export class MemoryEntryMismatchError extends Error {
+  readonly file: MemoryFile
+  readonly index: number
+  constructor(file: MemoryFile, index: number) {
+    super(`${file} 第 ${index} 条已不是要删除的内容（记忆在此期间被修改），未删除任何条目`)
+    this.name = 'MemoryEntryMismatchError'
+    this.file = file
+    this.index = index
+  }
+}
+
 export interface MemoryStoreExt extends MemoryStore {
   readonly dir: string
   limits(): Readonly<Record<MemoryFile, number>>
@@ -67,6 +92,11 @@ export interface MemoryStoreExt extends MemoryStore {
 }
 
 const metaKey = (text: string) => sha256(normaliseForCompare(text)).slice(0, 24)
+
+function assertMemoryFile(file: unknown): MemoryFile {
+  if (!isMemoryFile(file)) throw new Error(`unknown memory file: ${JSON.stringify(file)}`)
+  return file
+}
 
 export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
   const dir = opts.dir
@@ -81,8 +111,9 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
   const mutex = new KeyedMutex()
   const listeners = new Set<Listener>()
 
-  const pathFor = (file: MemoryFile) => join(dir, `${file}.md`)
-  const metaPath = (file: MemoryFile) => join(dir, `${file}.meta.json`)
+  // `file` arrives over IPC typed but unchecked; only the four known names may ever become a path.
+  const pathFor = (file: MemoryFile) => join(dir, `${assertMemoryFile(file)}.md`)
+  const metaPath = (file: MemoryFile) => join(dir, `${assertMemoryFile(file)}.meta.json`)
 
   const readRaw = (file: MemoryFile): string => readTextIfExists(pathFor(file)) ?? ''
   const readMeta = (file: MemoryFile): MetaFile => {
@@ -195,7 +226,8 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
         if ('blocked' in loaded) return { ok: false as const, reason: 'blocked' as const }
         const entries = loaded.entries
         const norm = normaliseForCompare(clean)
-        if (entries.some((e) => normaliseForCompare(e) === norm)) return { ok: false as const, reason: 'duplicate' as const }
+        if (entries.some((e) => normaliseForCompare(e) === norm))
+          return { ok: false as const, reason: 'duplicate' as const }
         const next = [...entries, clean]
         if (joinEntries(next).length > limits[file]) return { ok: false as const, reason: 'over_budget' as const }
         persist(file, next, source, [clean])
@@ -222,13 +254,19 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
       })
     },
 
-    async removeEntry(file, index) {
+    async removeEntry(file, index, expectedText) {
       await locked(file, () => {
         const loaded = loadForMutation(file)
         if ('blocked' in loaded) throw new MemoryDriftError(file, loaded.blocked)
         const entries = loaded.entries
         if (!Number.isInteger(index) || index < 0 || index >= entries.length) {
           throw new RangeError(`条目序号越界：${index}（共 ${entries.length} 条）`)
+        }
+        if (
+          expectedText !== undefined &&
+          normaliseForCompare(entries[index] ?? '') !== normaliseForCompare(expectedText)
+        ) {
+          throw new MemoryEntryMismatchError(file, index)
         }
         const next = entries.filter((_, i) => i !== index)
         persist(file, next, 'user', [])
@@ -256,7 +294,10 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
       const hits: Array<{ file: MemoryFile; entry: MemoryEntry; score: number }> = []
       for (const f of ['MEMORY', 'USER'] as const) {
         const entries = entriesOf(f)
-        for (const r of rankEntries(entries.map((e) => e.text), q)) {
+        for (const r of rankEntries(
+          entries.map((e) => e.text),
+          q,
+        )) {
           const entry = entries[r.index]
           if (entry) hits.push({ file: f, entry, score: r.score })
         }

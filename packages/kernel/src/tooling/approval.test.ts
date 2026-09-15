@@ -4,24 +4,37 @@ import { newApprovalId, asThreadId, asTurnId, asCallId } from '@aiwc/protocol'
 import type { ApprovalVerdict } from '../ports'
 import { APPROVAL_MATRIX, BOT_CHANNELS, channelVerdict, createApprovalGate, decideApproval } from './approval'
 
-const MODES: PermissionMode[] = ['ask', 'bypass']
+const MODES: PermissionMode[] = ['ask', 'bypass', 'autopilot']
 const RISKS: ToolRisk[] = ['read', 'write', 'send', 'destructive']
 const CHANNELS: ChannelKind[] = ['desktop', 'wechat-ilink', 'wechat-ui', 'cron', 'observed']
 
 /** Reference oracle written independently of the implementation (ARCHITECTURE §6 + channel rules). */
-function expected(mode: PermissionMode, risk: ToolRisk, channel: ChannelKind, toolName: string, allowed: boolean): ApprovalVerdict {
+function expected(
+  mode: PermissionMode,
+  risk: ToolRisk,
+  channel: ChannelKind,
+  toolName: string,
+  allowed: boolean,
+): ApprovalVerdict {
   const bot = channel === 'wechat-ilink' || channel === 'wechat-ui' || channel === 'observed'
   if (bot) {
     if (risk === 'write' || risk === 'destructive') return 'denied'
     if (risk === 'send') return toolName === 'send_message' || toolName === 'send_media' ? 'approved' : 'denied'
   }
   if (channel === 'cron') {
-    if (risk === 'write') return toolName.startsWith('remember') || toolName.startsWith('memory_') ? 'approved' : 'denied'
-    if (risk === 'send' || risk === 'destructive') return 'denied'
+    // Nobody to ask: reads and memory writes run; the mode (or an allow-list grant) decides the rest, never a prompt.
+    if (risk === 'read') return 'approved'
+    if (risk === 'write' && (toolName.startsWith('remember') || toolName.startsWith('memory_'))) return 'approved'
+    if (risk === 'destructive') return 'denied'
+    if (allowed) return 'approved'
+    if (risk === 'write') return mode === 'ask' ? 'denied' : 'approved'
+    return mode === 'autopilot' ? 'approved' : 'denied'
   }
-  // Only send / destructive ever ask; reads always run; writes ask in Ask mode unless allow-listed.
+  // Destructive always asks; reads always run; writes ask only in Ask mode (unless allow-listed);
+  // sends run without asking only in Autopilot.
   if (risk === 'read') return 'approved'
-  if (risk === 'write') return mode === 'bypass' || allowed ? 'approved' : 'ask'
+  if (risk === 'write') return mode !== 'ask' || allowed ? 'approved' : 'ask'
+  if (risk === 'send') return mode === 'autopilot' ? 'approved' : 'ask'
   return 'ask'
 }
 
@@ -30,6 +43,7 @@ describe('APPROVAL_MATRIX', () => {
     expect(APPROVAL_MATRIX).toEqual({
       ask: { read: 'approved', write: 'allow_list', send: 'ask', destructive: 'ask' },
       bypass: { read: 'approved', write: 'approved', send: 'ask', destructive: 'ask' },
+      autopilot: { read: 'approved', write: 'approved', send: 'approved', destructive: 'ask' },
     })
   })
 
@@ -46,12 +60,80 @@ describe('APPROVAL_MATRIX', () => {
   })
 })
 
+describe('per-call allow keys', () => {
+  it('a grant for the tool covers every key; a key grant covers only that key', () => {
+    const base = { toolName: 'shell', risk: 'write' as const, mode: 'ask' as const, channel: 'desktop' as const }
+    expect(decideApproval({ ...base, allowKey: 'shell:git commit', allowAlways: ['shell'] })).toBe('approved')
+    expect(decideApproval({ ...base, allowKey: 'shell:git commit', allowAlways: ['shell:git commit'] })).toBe(
+      'approved',
+    )
+    expect(decideApproval({ ...base, allowKey: 'shell:rm', allowAlways: ['shell:git commit'] })).toBe('ask')
+  })
+
+  it('destructive calls are never allow-listed, even on a scheduled thread that granted the tool', () => {
+    expect(
+      decideApproval({
+        toolName: 'shell',
+        allowKey: 'shell:rm -rf',
+        risk: 'destructive',
+        mode: 'bypass',
+        channel: 'desktop',
+        allowAlways: ['shell'],
+      }),
+    ).toBe('ask')
+    expect(
+      decideApproval({
+        toolName: 'shell',
+        allowKey: 'shell:rm -rf',
+        risk: 'destructive',
+        mode: 'ask',
+        channel: 'cron',
+        allowAlways: ['shell'],
+      }),
+    ).toBe('denied')
+  })
+
+  it('a scheduled thread runs what its mode covers without asking, and denies the rest', () => {
+    const cron = { channel: 'cron' as const, allowAlways: [] }
+    expect(decideApproval({ ...cron, mode: 'autopilot', toolName: 'office_push_table', risk: 'send' })).toBe('approved')
+    expect(decideApproval({ ...cron, mode: 'bypass', toolName: 'office_push_table', risk: 'send' })).toBe('denied')
+    expect(
+      decideApproval({ ...cron, mode: 'bypass', toolName: 'shell', allowKey: 'shell:lark-cli base', risk: 'write' }),
+    ).toBe('approved')
+    expect(
+      decideApproval({ ...cron, mode: 'ask', toolName: 'shell', allowKey: 'shell:lark-cli base', risk: 'write' }),
+    ).toBe('denied')
+    expect(
+      decideApproval({
+        ...cron,
+        mode: 'ask',
+        toolName: 'shell',
+        allowKey: 'shell:lark-cli base',
+        risk: 'write',
+        allowAlways: ['shell:lark-cli base'],
+      }),
+    ).toBe('approved')
+    expect(
+      decideApproval({ ...cron, mode: 'autopilot', toolName: 'shell', allowKey: 'shell:rm -rf', risk: 'destructive' }),
+    ).toBe('denied')
+    expect(decideApproval({ ...cron, mode: 'ask', toolName: 'shell', allowKey: 'shell:ls', risk: 'read' })).toBe(
+      'approved',
+    )
+  })
+})
+
 describe('legacy permission modes', () => {
   it("a thread persisted with the removed 'plan' mode asks instead of throwing", () => {
     const mode = 'plan' as unknown as PermissionMode
-    expect(decideApproval({ toolName: 'note_write', risk: 'write', mode, channel: 'desktop', allowAlways: [] })).toBe('ask')
-    expect(decideApproval({ toolName: 'lookup', risk: 'read', mode, channel: 'desktop', allowAlways: [] })).toBe('approved')
-    expect(decideApproval({ toolName: 'send_message', risk: 'send', mode, channel: 'desktop', allowAlways: [] })).toBe('ask')
+    expect(decideApproval({ toolName: 'note_write', risk: 'write', mode, channel: 'desktop', allowAlways: [] })).toBe(
+      'ask',
+    )
+    expect(decideApproval({ toolName: 'lookup', risk: 'read', mode, channel: 'desktop', allowAlways: [] })).toBe(
+      'approved',
+    )
+    expect(decideApproval({ toolName: 'send_message', risk: 'send', mode, channel: 'desktop', allowAlways: [] })).toBe(
+      'ask',
+    )
   })
 })
 

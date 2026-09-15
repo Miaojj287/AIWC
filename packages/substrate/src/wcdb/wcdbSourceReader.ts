@@ -5,6 +5,7 @@
  */
 import type { WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
 import type { SourceOpenOptions, SourceReader } from '../source'
+import type { GuardedSql } from '../shared/sqlGuard'
 import { verifyDbKey } from '../key/sqlcipherPage'
 import { buildIdentityKeys, cleanAccountDirName } from './accountUtils'
 import { ContactDirectory } from './contactQueries'
@@ -23,7 +24,6 @@ import { resolveMediaFor, type MediaResolverContext } from './mediaResolver'
 import { resolveWcdbLibrary } from './nativeLib'
 import { OpenWcdbBridge } from './openWcdbBridge'
 import { createBridgeQuery, yieldToLoop, type WcdbQuery } from './query'
-import { assertReadOnlySql, wrapWithLimit } from './querySql'
 import { querySessionActivity, querySessions, querySessionsChangedSince } from './sessionQueries'
 import { MessageTableIndex } from './tableResolver'
 import { watchDbDirs } from './watcher'
@@ -43,6 +43,7 @@ interface OpenState {
   accountDir: string
   sessionDbPath: string
   contactDbPath: string | null
+  emoticonDbPath: string | null
   hardlinkDbPath: string | null
   mediaDbPaths: string[]
   keyHex: string
@@ -100,7 +101,11 @@ export class WcdbSourceReader implements SourceReader {
     }
     if (!sessionDbPath) {
       this.bridge.dispose()
-      throw new Error(lastError.includes('不匹配') ? '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥' : `数据库打开失败：${lastError || '未知原因'}`)
+      throw new Error(
+        lastError.includes('不匹配')
+          ? '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥'
+          : `数据库打开失败：${lastError || '未知原因'}`,
+      )
     }
 
     const q = createBridgeQuery(this.bridge, () => keyHex)
@@ -112,6 +117,7 @@ export class WcdbSourceReader implements SourceReader {
       accountDir: dirname(dbStoragePath),
       sessionDbPath,
       contactDbPath,
+      emoticonDbPath: findNamedDb(dbStoragePath, 'emoticon.db'),
       hardlinkDbPath: findNamedDb(dbStoragePath, 'hardlink.db'),
       mediaDbPaths: findMediaDbs(dbStoragePath),
       keyHex,
@@ -156,7 +162,8 @@ export class WcdbSourceReader implements SourceReader {
     const contacts = s.contacts.available ? s.contacts : null
     const list = await querySessions({ q: s.q, sessionDbPath: s.sessionDbPath, contacts }, yieldToLoop, onPage)
     for (const session of list) {
-      if (session.lastMessageAt) s.lastSortTimestamp = Math.max(s.lastSortTimestamp, Math.floor(session.lastMessageAt / 1000))
+      if (session.lastMessageAt)
+        s.lastSortTimestamp = Math.max(s.lastSortTimestamp, Math.floor(session.lastMessageAt / 1000))
     }
     return list
   }
@@ -198,12 +205,19 @@ export class WcdbSourceReader implements SourceReader {
       accountDir: s.accountDir,
       cacheDir: s.opts.cacheDir,
       nativeDir: this.options.nativeDir,
+      emoticonDbPath: s.emoticonDbPath,
       hardlinkDbPath: s.hardlinkDbPath,
       mediaDbPaths: s.mediaDbPaths,
       imageKeys: s.opts.imageKeys,
       selfKeys: s.selfKeys,
     }
-    const resolved = await resolveMediaFor(ctx, { sessionId: message.sessionId, messageId: message.id, raw: located.raw, row: located.row, locator })
+    const resolved = await resolveMediaFor(ctx, {
+      sessionId: message.sessionId,
+      messageId: message.id,
+      raw: located.raw,
+      row: located.row,
+      locator,
+    })
     if (!resolved) return undefined
     return {
       ...message.media,
@@ -221,30 +235,39 @@ export class WcdbSourceReader implements SourceReader {
     }
   }
 
-  async querySql(db: 'message' | 'contact' | 'session', sql: string, limit: number): Promise<{ columns: string[]; rows: unknown[][] }> {
+  async querySql(
+    db: 'message' | 'contact' | 'session',
+    statement: GuardedSql,
+  ): Promise<{ columns: string[]; rows: unknown[][] }> {
     const s = this.requireOpen()
-    const wrapped = wrapWithLimit(assertReadOnlySql(sql), limit)
     const targets: string[] =
-      db === 'session' ? [s.sessionDbPath] : db === 'contact' ? (s.contactDbPath ? [s.contactDbPath] : []) : this.currentShards().map((x) => x.dbPath)
+      db === 'session'
+        ? [s.sessionDbPath]
+        : db === 'contact'
+          ? s.contactDbPath
+            ? [s.contactDbPath]
+            : []
+          : this.currentShards().map((x) => x.dbPath)
     if (targets.length === 0) throw new Error(`${db} 数据库不可用`)
-    const safeLimit = Math.max(1, Math.min(10_000, Math.floor(limit) || 200))
     let columns: string[] = []
     const rows: unknown[][] = []
     let lastError: unknown
     for (const dbPath of targets) {
       try {
-        const result = s.q.all(dbPath, wrapped)
+        // The guarded statement's LIMIT bounds each shard; statement.limit bounds the merged rows.
+        const result = s.q.all(dbPath, statement.sql)
         for (const row of result) {
           if (columns.length === 0) columns = Object.keys(row)
           rows.push(columns.map((c) => normalizeSqlValue(row[c])))
-          if (rows.length >= safeLimit) return { columns, rows }
+          if (rows.length >= statement.limit) return { columns, rows }
         }
       } catch (error) {
         lastError = error
       }
       if (targets.length > 1) await yieldToLoop()
     }
-    if (rows.length === 0 && columns.length === 0 && lastError) throw lastError instanceof Error ? lastError : new Error(String(lastError))
+    if (rows.length === 0 && columns.length === 0 && lastError)
+      throw lastError instanceof Error ? lastError : new Error(String(lastError))
     return { columns, rows }
   }
 
@@ -278,7 +301,10 @@ export class WcdbSourceReader implements SourceReader {
         return s.contacts.senderNameIn(sessionId, username)
       },
       onShardError: (dbPath, error) => {
-        this.log('warn', 'shard query failed', { dbPath, error: error instanceof Error ? error.message : String(error) })
+        this.log('warn', 'shard query failed', {
+          dbPath,
+          error: error instanceof Error ? error.message : String(error),
+        })
         const text = error instanceof Error ? error.message : String(error)
         if (/malformed|corrupt|not a database/i.test(text)) {
           this.bridge.closeDatabase(dbPath)

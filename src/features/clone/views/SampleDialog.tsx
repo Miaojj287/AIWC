@@ -3,6 +3,7 @@
  * transcript, with 换一批 and 开始克隆 (board 153:415 ②).
  */
 import { Bot, MessageSquare, RefreshCw } from 'lucide-react'
+import { useT } from '@/i18n'
 import { Avatar, Button, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, EmptyState } from '@/kit'
 import { formatClock } from '@/platform/format'
 import { useInvoke } from '@/platform/hooks'
@@ -16,18 +17,35 @@ export interface SampleDialogProps {
 }
 
 export function SampleDialog({ open, onOpenChange, contactId, name, onStart }: SampleDialogProps) {
+  const t = useT()
   const samples = useInvoke('clone:sampleMessages', { contactId, limit: 8 }, [contactId, open], { enabled: open })
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
-        <DialogHeader icon={MessageSquare} tone="accent" title={`${name} · 样本对话`} description="从聊天记录中随机抽取，克隆会学习这些语气与用词" />
+        <DialogHeader
+          icon={MessageSquare}
+          tone="accent"
+          title={t('clone.sampleDialog.title', { name })}
+          description={t('clone.sampleDialog.description')}
+        />
         <DialogBody className="max-h-[46vh]">
           {samples.loading && !samples.data ? (
-            <EmptyState compact variant="loading" title="抽取样本…" />
+            <EmptyState compact variant="loading" title={t('clone.sampleDialog.loading')} />
           ) : samples.error ? (
-            <EmptyState compact variant="error" title="读取失败" description={samples.error.message} action={{ label: '重试', onClick: samples.reload }} />
+            <EmptyState
+              compact
+              variant="error"
+              title={t('clone.sampleDialog.loadFailed')}
+              description={samples.error.message}
+              action={{ label: t('common.retry'), onClick: samples.reload }}
+            />
           ) : (samples.data ?? []).length === 0 ? (
-            <EmptyState compact variant="empty" title="没有可用的文本消息" description="语音与图片不作为样本" />
+            <EmptyState
+              compact
+              variant="empty"
+              title={t('clone.sampleDialog.empty')}
+              description={t('clone.sampleDialog.emptyHint')}
+            />
           ) : (
             <div className="flex flex-col gap-3 py-1">
               {(samples.data ?? []).map((m) => (
@@ -37,7 +55,9 @@ export function SampleDialog({ open, onOpenChange, contactId, name, onStart }: S
                     <span className="text-micro text-fg-3">
                       {m.senderName ?? name} {formatClock(m.createdAt)}
                     </span>
-                    <div className="max-w-[320px] rounded-item rounded-bl-sm bg-panel px-3 py-1.5 text-bubble leading-[22px] text-fg">{m.text}</div>
+                    <div className="max-w-[320px] rounded-item rounded-bl-sm bg-panel px-3 py-1.5 text-bubble leading-[22px] text-fg">
+                      {m.text}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -46,14 +66,14 @@ export function SampleDialog({ open, onOpenChange, contactId, name, onStart }: S
         </DialogBody>
         <DialogFooter className="justify-between">
           <Button variant="link" icon={RefreshCw} onClick={samples.reload} disabled={samples.loading}>
-            换一批
+            {t('clone.sampleDialog.shuffle')}
           </Button>
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              关闭
+              {t('common.close')}
             </Button>
             <Button variant="primary" icon={Bot} onClick={onStart}>
-              开始克隆
+              {t('clone.actions.start')}
             </Button>
           </div>
         </DialogFooter>

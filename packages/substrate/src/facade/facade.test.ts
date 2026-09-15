@@ -7,6 +7,7 @@ import { createMirror, type Mirror } from '../mirror'
 import { createDemoSourceReader } from '../demo/demoSource'
 import type { FixtureInput } from '../demo/fixtureSchema'
 import type { SourceReader } from '../source'
+import { SCHEMA_DISCOVERY_SQL } from '../tools/querySql'
 import { createSubstrateFacade, type SubstrateFacade } from './facade'
 
 const T0 = Date.UTC(2026, 2, 1, 2, 0, 0)
@@ -17,10 +18,37 @@ function makeFixture(): FixtureInput {
   for (let i = 1; i <= DM_COUNT; i++) {
     const self = i % 3 === 0
     const topic = i % 7 === 0 ? '发票明天寄出' : i % 11 === 0 ? 'roadmap 讨论' : `日常闲聊 ${i}`
-    messages.push({ id: `a${i}`, sessionId: 'wxid_alpha', seq: i, createdAt: T0 + i * 60_000, senderId: self ? 'wxid_self' : 'wxid_alpha', senderName: self ? '我' : '阿尔法', isSelf: self, text: topic })
+    messages.push({
+      id: `a${i}`,
+      sessionId: 'wxid_alpha',
+      seq: i,
+      createdAt: T0 + i * 60_000,
+      senderId: self ? 'wxid_self' : 'wxid_alpha',
+      senderName: self ? '我' : '阿尔法',
+      isSelf: self,
+      text: topic,
+    })
   }
-  messages.push({ id: 'v1', sessionId: 'wxid_alpha', seq: DM_COUNT + 1, createdAt: T0 + (DM_COUNT + 1) * 60_000, senderId: 'wxid_alpha', kind: 'voice', text: '', media: { kind: 'voice', path: 'voice/v1.silk', durationMs: 3000 } })
-  for (let i = 1; i <= 5; i++) messages.push({ id: `g${i}`, sessionId: 'demo1@chatroom', seq: i, createdAt: T0 + i * 1000, senderId: `wxid_m${i % 2}`, senderName: `成员${i % 2}`, text: `群里讨论产品市场 ${i}` })
+  messages.push({
+    id: 'v1',
+    sessionId: 'wxid_alpha',
+    seq: DM_COUNT + 1,
+    createdAt: T0 + (DM_COUNT + 1) * 60_000,
+    senderId: 'wxid_alpha',
+    kind: 'voice',
+    text: '',
+    media: { kind: 'voice', path: 'voice/v1.silk', durationMs: 3000 },
+  })
+  for (let i = 1; i <= 5; i++)
+    messages.push({
+      id: `g${i}`,
+      sessionId: 'demo1@chatroom',
+      seq: i,
+      createdAt: T0 + i * 1000,
+      senderId: `wxid_m${i % 2}`,
+      senderName: `成员${i % 2}`,
+      text: `群里讨论产品市场 ${i}`,
+    })
   return {
     version: 1,
     account: { wxid: 'wxid_self', nickname: '演示' },
@@ -54,10 +82,24 @@ afterEach(async () => {
   while (cleanup.length) await cleanup.pop()?.()
 })
 
-function build(o: { embeddings?: EmbeddingClient; transcriber?: VoiceTranscriber; autoSyncOnOpen?: boolean; source?: SourceReader } = {}) {
+function build(
+  o: {
+    embeddings?: EmbeddingClient
+    transcriber?: VoiceTranscriber
+    autoSyncOnOpen?: boolean
+    source?: SourceReader
+  } = {},
+) {
   const mirror: Mirror = createMirror({ dbPath: ':memory:', embeddings: o.embeddings })
   const source = o.source ?? createDemoSourceReader({ fixturePath })
-  const facade: SubstrateFacade = createSubstrateFacade({ source, mirror, transcriber: o.transcriber, cacheDir: dir, autoSyncOnOpen: o.autoSyncOnOpen ?? false, watchDebounceMs: 10 })
+  const facade: SubstrateFacade = createSubstrateFacade({
+    source,
+    mirror,
+    transcriber: o.transcriber,
+    cacheDir: dir,
+    autoSyncOnOpen: o.autoSyncOnOpen ?? false,
+    watchDebounceMs: 10,
+  })
   const events: SubstrateEvent[] = []
   facade.subscribe((e) => events.push(e))
   cleanup.push(async () => {
@@ -75,12 +117,16 @@ describe('facade: connection & sync', () => {
     await facade.openWith(openOpts())
     await facade.sync()
     expect((await facade.listSessions({ limit: 10 })).items.map((s) => s.id)).toContain('wxid_alpha')
-    writeFileSync(file, JSON.stringify({
-      version: 1,
-      account: { wxid: 'account_b', nickname: 'B', avatarPath: 'b.png' },
-      sessions: [{ id: 'friend_b', kind: 'dm', title: 'B 的会话' }],
-      contacts: [], messages: [],
-    }))
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        account: { wxid: 'account_b', nickname: 'B', avatarPath: 'b.png' },
+        sessions: [{ id: 'friend_b', kind: 'dm', title: 'B 的会话' }],
+        contacts: [],
+        messages: [],
+      }),
+    )
     await facade.openWith({ ...openOpts(), wxid: 'account_b' })
     await facade.sync()
     expect((await facade.listSessions({ limit: 10 })).items.map((s) => s.id)).toEqual(['friend_b'])
@@ -95,7 +141,10 @@ describe('facade: connection & sync', () => {
     await facade.openWith(openOpts())
     expect(facade.status().connection).toBe('ready')
     expect(facade.status().account?.wxid).toBe('wxid_self')
-    expect(events.filter((e) => e.type === 'connection').map((e) => (e as { state: string }).state)).toEqual(['connecting', 'ready'])
+    expect(events.filter((e) => e.type === 'connection').map((e) => (e as { state: string }).state)).toEqual([
+      'connecting',
+      'ready',
+    ])
     expect(await facade.listAccounts()).toHaveLength(1)
 
     const status = await facade.sync()
@@ -171,7 +220,9 @@ describe('facade: connection & sync', () => {
     await new Promise((r) => setTimeout(r, 80))
     for (let i = 0; i < 50 && facade.syncEngine.running; i++) await new Promise((r) => setTimeout(r, 10))
     expect(mirror.countMessages('demo1@chatroom')).toBe(5)
-    expect(events.slice(before).some((e) => e.type === 'messages.changed' && e.sessionIds.includes('demo1@chatroom'))).toBe(true)
+    expect(
+      events.slice(before).some((e) => e.type === 'messages.changed' && e.sessionIds.includes('demo1@chatroom')),
+    ).toBe(true)
   })
 })
 
@@ -317,8 +368,13 @@ describe('facade: querySql guardrails', () => {
   it('rejects writes, forces LIMIT, audits and forwards to the source', async () => {
     const { facade, mirror } = build()
     await facade.openWith(openOpts())
-    await expect(facade.querySql({ db: 'message', sql: 'UPDATE messages SET text = 1' })).rejects.toMatchObject({ code: 'sql_rejected' })
-    const r = await facade.querySql({ db: 'message', sql: 'SELECT id FROM messages WHERE session_id = \'wxid_alpha\' ORDER BY seq;' })
+    await expect(facade.querySql({ db: 'message', sql: 'UPDATE messages SET text = 1' })).rejects.toMatchObject({
+      code: 'sql_rejected',
+    })
+    const r = await facade.querySql({
+      db: 'message',
+      sql: "SELECT id FROM messages WHERE session_id = 'wxid_alpha' ORDER BY seq;",
+    })
     expect(r.columns).toEqual(['id'])
     expect(r.rows).toHaveLength(200)
     const small = await facade.querySql({ db: 'message', sql: 'SELECT id FROM messages ORDER BY seq', limit: 3 })
@@ -328,22 +384,52 @@ describe('facade: querySql guardrails', () => {
     expect(log[0]?.sql).toContain('LIMIT 3')
     expect(log[0]?.rows).toBe(3)
     expect(log[1]?.sql).toContain('LIMIT 200')
-    await expect(facade.querySql({ db: 'message', sql: 'SELECT * FROM missing_table' })).rejects.toMatchObject({ code: 'sql_rejected' })
+    await expect(facade.querySql({ db: 'message', sql: 'SELECT * FROM missing_table' })).rejects.toMatchObject({
+      code: 'sql_rejected',
+    })
     expect(mirror.auditLog(1)[0]?.rows).toBe(-1)
 
     const noSql: SourceReader = { ...createDemoSourceReader({ fixturePath }) }
     delete (noSql as { querySql?: unknown }).querySql
     const other = build({ source: noSql })
     await other.facade.openWith(openOpts())
-    await expect(other.facade.querySql({ db: 'message', sql: 'SELECT 1' })).rejects.toMatchObject({ code: 'unsupported' })
+    await expect(other.facade.querySql({ db: 'message', sql: 'SELECT 1' })).rejects.toMatchObject({
+      code: 'unsupported',
+    })
+  })
+
+  it('runs the schema discovery query_sql advertises and rejects every PRAGMA / EXPLAIN form', async () => {
+    const { facade } = build()
+    await facade.openWith(openOpts())
+    const tables = await facade.querySql({ db: 'message', sql: SCHEMA_DISCOVERY_SQL })
+    expect(tables.columns).toEqual(['name', 'sql'])
+    const messages = tables.rows.find((row) => row[0] === 'messages')
+    expect(String(messages?.[1])).toContain('sender_id')
+    for (const sql of [
+      'PRAGMA table_info(messages)',
+      'EXPLAIN SELECT 1',
+      "SELECT * FROM pragma_table_info('messages')",
+      'SELECT * FROM pragma_optimize(0x10002)',
+    ]) {
+      await expect(facade.querySql({ db: 'message', sql }), sql).rejects.toMatchObject({ code: 'sql_rejected' })
+    }
   })
 })
 
 it('upgrades a previously indexed link in a filtered page and keeps it after source reads', async () => {
   const demo = createDemoSourceReader({ fixturePath })
-  const source: SourceReader = { ...demo, kind: 'wcdb', async messagesAfter(id, seq, limit) {
-    return (await demo.messagesAfter(id, seq, limit)).map((m) => ({ ...m, presentationVersion: 1, kind: 'system' as const, text: '我拍了拍好友' }))
-  } }
+  const source: SourceReader = {
+    ...demo,
+    kind: 'wcdb',
+    async messagesAfter(id, seq, limit) {
+      return (await demo.messagesAfter(id, seq, limit)).map((m) => ({
+        ...m,
+        presentationVersion: 1,
+        kind: 'system' as const,
+        text: '我拍了拍好友',
+      }))
+    },
+  }
   const { facade, mirror } = build({ source })
   await facade.openWith(openOpts())
   const old = (await demo.messagesAfter('wxid_alpha', 0, 1))[0]!

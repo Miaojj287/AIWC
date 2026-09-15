@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { describe, expect, it, vi } from 'vitest'
+import { guardSelectSql, SQL_MAX_LIMIT, type GuardedSql } from '../shared/sqlGuard'
 import { substrateTools } from './index'
-import { assertReadOnlySql, querySql, sanitizeCell } from './querySql'
+import { querySql, sanitizeCell, SCHEMA_DISCOVERY_SQL } from './querySql'
 import { body, runTool } from './testing/ctx'
 import { sampleWorld } from './testing/fakeSubstrate'
 import { transcribeVoiceMessage } from './transcribeVoiceMessage'
@@ -37,7 +38,9 @@ describe('transcribe_voice_message', () => {
     const cached = body(await runTool(transcribeVoiceMessage, { sessionId: 'user_a', messageId: 'm3' }, sub))
     expect(cached).toMatchObject({ text: 'cached text', cached: true })
     expect(transcribe).not.toHaveBeenCalled()
-    const forced = body(await runTool(transcribeVoiceMessage, { sessionId: 'user_a', messageId: 'm3', force: true }, sub))
+    const forced = body(
+      await runTool(transcribeVoiceMessage, { sessionId: 'user_a', messageId: 'm3', force: true }, sub),
+    )
     expect(forced.text).toBe('fresh')
     expect(transcribe).toHaveBeenCalledWith('user_a', 'm3', { force: true })
   })
@@ -58,7 +61,11 @@ describe('transcribe_voice_message', () => {
 })
 
 describe('query_sql', () => {
-  const audit = { reason: '需要跨表统计', attemptedTools: ['chat_stats'], whyStructuredToolsInsufficient: 'chat_stats 不支持按月+按人交叉' }
+  const audit = {
+    reason: '需要跨表统计',
+    attemptedTools: ['chat_stats'],
+    whyStructuredToolsInsufficient: 'chat_stats 不支持按月+按人交叉',
+  }
 
   it('reports unavailability when the substrate exposes no querySql', async () => {
     const sub = sampleWorld()
@@ -67,12 +74,18 @@ describe('query_sql', () => {
     expect(body(res).error).toContain('不可用')
     expect(body(res).audit).toEqual(audit)
   })
-  it('forwards a validated SELECT and sanitizes cells', async () => {
-    const sql = vi.fn(async () => ({ columns: ['id', 'blob', 'long'], rows: [[1, new Uint8Array([1, 2, 3]), 'x'.repeat(600)], [2, null, 'ok']] }))
+  it('forwards the statement as written and sanitizes cells', async () => {
+    const sql = vi.fn(async () => ({
+      columns: ['id', 'blob', 'long'],
+      rows: [
+        [1, new Uint8Array([1, 2, 3]), 'x'.repeat(600)],
+        [2, null, 'ok'],
+      ],
+    }))
     const sub = sampleWorld({ querySql: sql })
     const res = await runTool(querySql, { db: 'contact', sql: 'SELECT id FROM contact;', limit: 10, ...audit }, sub)
     expect(res.isError).toBeUndefined()
-    expect(sql).toHaveBeenCalledWith({ db: 'contact', sql: 'SELECT id FROM contact', limit: 10 })
+    expect(sql).toHaveBeenCalledWith({ db: 'contact', sql: 'SELECT id FROM contact;', limit: 10 })
     const out = body(res)
     expect(out.columns).toEqual(['id', 'blob', 'long'])
     expect(out.rowCount).toBe(2)
@@ -82,16 +95,32 @@ describe('query_sql', () => {
     expect(out.truncated).toBe(false)
     expect(out.audit).toEqual(audit)
   })
-  it('rejects non read-only SQL before touching the substrate', async () => {
-    const sql = vi.fn(async () => ({ columns: [], rows: [] }))
-    const sub = sampleWorld({ querySql: sql })
-    for (const bad of ['DROP TABLE contact', 'SELECT 1; SELECT 2', 'UPDATE contact SET remark = 1', 'PRAGMA journal_mode', 'WITH x AS (SELECT 1) DELETE FROM contact']) {
+  it('reports the substrate guard verdict and only advertises statements that pass it', async () => {
+    // Stands in for SubstrateFacade.querySql: the substrate's one guard runs before any source.
+    const source = vi.fn(async (_statement: GuardedSql) => ({
+      columns: ['name', 'sql'],
+      rows: [['contact', 'CREATE TABLE contact(a)']],
+    }))
+    const sub = sampleWorld({ querySql: async (req) => source(guardSelectSql(req.sql, req.limit)) })
+    for (const bad of [
+      'DROP TABLE contact',
+      'SELECT 1; SELECT 2',
+      'UPDATE contact SET remark = 1',
+      'PRAGMA journal_mode',
+      'PRAGMA table_info("contact")',
+      'explain select 1',
+      'WITH x AS (SELECT 1) DELETE FROM contact',
+    ]) {
       const res = await runTool(querySql, { db: 'contact', sql: bad, ...audit }, sub)
       expect(res.isError, bad).toBe(true)
+      expect(body(res).error, bad).toMatch(/只允许|不允许的关键字/)
     }
-    expect(sql).not.toHaveBeenCalled()
-    expect((await runTool(querySql, { db: 'contact', sql: 'PRAGMA table_info("contact")', ...audit }, sub)).isError).toBeUndefined()
-    expect((await runTool(querySql, { db: 'contact', sql: 'explain select 1', ...audit }, sub)).isError).toBeUndefined()
+    expect(source).not.toHaveBeenCalled()
+    const discovery = await runTool(querySql, { db: 'contact', sql: SCHEMA_DISCOVERY_SQL, ...audit }, sub)
+    expect(discovery.isError).toBeUndefined()
+    expect(body(discovery).columns).toEqual(['name', 'sql'])
+    expect(querySql.description).toContain(SCHEMA_DISCOVERY_SQL)
+    expect(querySql.description).not.toMatch(/PRAGMA table_info|SELECT \/ WITH \/ EXPLAIN/)
   })
   it('requires non-empty audit fields via the schema', () => {
     const s = querySql.inputSchema
@@ -99,9 +128,12 @@ describe('query_sql', () => {
     expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, reason: '  ' }).success).toBe(false)
     expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, attemptedTools: [] }).success).toBe(false)
     expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, attemptedTools: [' '] }).success).toBe(false)
-    expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, whyStructuredToolsInsufficient: '' }).success).toBe(false)
+    expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, whyStructuredToolsInsufficient: '' }).success).toBe(
+      false,
+    )
     expect(s.safeParse({ db: 'other', sql: 'SELECT 1', ...audit }).success).toBe(false)
-    expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, limit: 501 }).success).toBe(false)
+    expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, limit: SQL_MAX_LIMIT + 1 }).success).toBe(false)
+    expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit, limit: SQL_MAX_LIMIT }).success).toBe(true)
     expect(s.safeParse({ db: 'message', sql: 'SELECT 1', ...audit }).success).toBe(true)
   })
   it('is desktop-chat / subagent only and serial', () => {
@@ -109,10 +141,7 @@ describe('query_sql', () => {
     expect(querySql.parallelSafe).toBe(false)
     expect(querySql.risk).toBe('read')
   })
-  it('assertReadOnlySql / sanitizeCell helpers', () => {
-    expect(assertReadOnlySql('  select 1 ; ')).toBe('select 1')
-    expect(() => assertReadOnlySql('')).toThrow()
-    expect(() => assertReadOnlySql('INSERT INTO t VALUES (1)')).toThrow()
+  it('sanitizeCell keeps cells small and JSON-safe', () => {
     expect(sanitizeCell(undefined)).toBeNull()
     expect(sanitizeCell(10n)).toBe('10')
     expect(sanitizeCell({ a: 1 })).toBe('{"a":1}')
@@ -150,19 +179,45 @@ describe('substrateTools()', () => {
     }
   })
   it('mounts only origin-scopable tools on the bot profile; everything else is parallel-safe', () => {
-    const bot = tools.filter((t) => t.profiles.includes('wechat-bot')).map((t) => t.name).sort()
+    const bot = tools
+      .filter((t) => t.profiles.includes('wechat-bot'))
+      .map((t) => t.name)
+      .sort()
     // Enumeration / cross-session scans, SQL and STT are never offered to the bot (its replies reach the peer).
-    expect(bot).toEqual(['chat_stats', 'get_context', 'get_timeline', 'group_member_ranking', 'group_members', 'search_messages', 'semantic_search'])
-    for (const name of ['list_sessions', 'list_contacts', 'list_groups', 'search_media', 'query_sql', 'transcribe_voice_message']) {
+    expect(bot).toEqual([
+      'chat_stats',
+      'get_context',
+      'get_timeline',
+      'group_member_ranking',
+      'group_members',
+      'search_messages',
+      'semantic_search',
+    ])
+    for (const name of [
+      'list_sessions',
+      'list_contacts',
+      'list_groups',
+      'search_media',
+      'query_sql',
+      'transcribe_voice_message',
+    ]) {
       expect(bot, name).not.toContain(name)
     }
-    const serial = tools.filter((t) => !t.parallelSafe).map((t) => t.name).sort()
+    const serial = tools
+      .filter((t) => !t.parallelSafe)
+      .map((t) => t.name)
+      .sort()
     expect(serial).toEqual(['query_sql', 'transcribe_voice_message'])
     expect(tools.filter((t) => t.profiles.includes('cron')).map((t) => t.name)).not.toContain('query_sql')
   })
   it('every input schema converts to JSON schema (what the kernel sends to the model)', () => {
     for (const t of tools) {
-      const json = z.toJSONSchema(t.inputSchema as z.ZodType) as { type?: string; properties?: Record<string, unknown> }
+      // Same options as the kernel's zodToJsonSchema: the model writes the INPUT side (time bounds accept date strings).
+      const json = z.toJSONSchema(t.inputSchema as z.ZodType, {
+        io: 'input',
+        unrepresentable: 'throw',
+        target: 'draft-2020-12',
+      }) as { type?: string; properties?: Record<string, unknown> }
       expect(json.type, t.name).toBe('object')
       expect(Object.keys(json.properties ?? {}).length, t.name).toBeGreaterThan(0)
     }

@@ -84,25 +84,6 @@ export function indexFixture(fixture: DemoFixture, now: number): DatasetIndex {
   }
 }
 
-export function previewFor(m: WxMessage): string {
-  switch (m.kind) {
-    case 'image':
-      return '[图片]'
-    case 'video':
-      return '[视频]'
-    case 'voice':
-      return `[语音] ${Math.max(1, Math.round((m.media?.durationMs ?? 0) / 1000))}"`
-    case 'sticker':
-      return '[动画表情]'
-    case 'file':
-      return `[文件] ${m.media?.fileName ?? ''}`.trim()
-    case 'link':
-      return `[链接] ${m.text}`
-    default:
-      return m.text
-  }
-}
-
 /** Text a keyword search should look at: body, voice transcript, quoted text, file name. */
 export function searchableText(m: WxMessage): string {
   const parts = [m.text]

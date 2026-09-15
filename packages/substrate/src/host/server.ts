@@ -1,4 +1,12 @@
-import { type HostedService, type PortLike, type RpcMethod, type RpcResponse, RPC_METHODS, attachPort, isRpcRequest } from './protocol'
+import {
+  type HostedService,
+  type PortLike,
+  type RpcMethod,
+  type RpcResponse,
+  RPC_METHODS,
+  attachPort,
+  isRpcRequest,
+} from './protocol'
 import { isSubstrateError, errorMessage } from '../shared/errors'
 
 const METHODS: ReadonlySet<string> = new Set(RPC_METHODS)
@@ -32,13 +40,20 @@ export function serveSubstrate(service: HostedService, port: PortLike): () => vo
     let response: RpcResponse
     try {
       if (!METHODS.has(method)) throw Object.assign(new Error(`未知方法：${method}`), { code: 'unsupported' })
-      const fn = (service as unknown as Record<RpcMethod, ((...a: unknown[]) => unknown) | undefined>)[method as RpcMethod]
-      if (typeof fn !== 'function') throw Object.assign(new Error(`当前数据源不支持：${method}`), { code: 'unsupported' })
+      const fn = (service as unknown as Record<RpcMethod, ((...a: unknown[]) => unknown) | undefined>)[
+        method as RpcMethod
+      ]
+      if (typeof fn !== 'function')
+        throw Object.assign(new Error(`当前数据源不支持：${method}`), { code: 'unsupported' })
       const result = await fn.apply(service, args)
       response = { id, ok: true, result: result === undefined ? null : result }
     } catch (err) {
       const code = isSubstrateError(err) ? err.code : (err as { code?: unknown } | null)?.code
-      response = { id, ok: false, error: { message: errorMessage(err), code: typeof code === 'string' ? code : undefined } }
+      response = {
+        id,
+        ok: false,
+        error: { message: errorMessage(err), code: typeof code === 'string' ? code : undefined },
+      }
     }
     safePost(response)
     if (method === 'openWith' || method === 'close' || method === 'sync') pushStatus()

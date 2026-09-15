@@ -10,6 +10,8 @@ import {
   ABORTED_MESSAGE,
   READ_PROFILES_NO_BOT,
   TimeRangeRefinement,
+  timeFrom,
+  timeTo,
   anchorOf,
   anchorsMeta,
   clampLimit,
@@ -30,21 +32,35 @@ const SINGLE_SESSION_CANDIDATES = 400
 
 const SearchMediaInput = z
   .object({
-    query: z.string().trim().max(100).optional().describe('按文件名 / 附带文字 / 转写筛选的关键词；不填则按时间返回最近的媒体'),
+    query: z
+      .string()
+      .trim()
+      .max(100)
+      .optional()
+      .describe('按文件名 / 附带文字 / 转写筛选的关键词；不填则按时间返回最近的媒体'),
     sessionId: z.string().trim().min(1).optional().describe('限定某会话（username）；不填则只扫最近活跃的若干会话'),
     kind: z.enum(['image', 'file', 'video', 'sticker']).describe('媒体类型'),
-    from: z.number().int().nonnegative().optional().describe('起始时间，毫秒时间戳'),
-    to: z.number().int().nonnegative().optional().describe('结束时间，毫秒时间戳'),
+    from: timeFrom().optional(),
+    to: timeTo().optional(),
     limit: z.number().int().min(1).max(30).default(10).describe('返回条数上限（≤30）'),
   })
   .refine(TimeRangeRefinement.check, { message: TimeRangeRefinement.message, path: ['from'] })
 
 export type SearchMediaInput = z.infer<typeof SearchMediaInput>
 
-const KIND_LABEL: Record<SearchMediaInput['kind'], string> = { image: '图片', file: '文件', video: '视频', sticker: '表情' }
+const KIND_LABEL: Record<SearchMediaInput['kind'], string> = {
+  image: '图片',
+  file: '文件',
+  video: '视频',
+  sticker: '表情',
+}
 
 function terms(query: string | undefined): string[] {
-  return String(query ?? '').toLowerCase().split(/\s+/).map((t) => t.trim()).filter(Boolean)
+  return String(query ?? '')
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter(Boolean)
 }
 
 function matchScore(m: WxMessage, ts: string[]): number {
@@ -80,7 +96,8 @@ export const searchMedia = defineSubstrateTool({
   parallelSafe: true,
   timeoutMs: 60_000,
   maxOutputChars: 24_000,
-  summarize: (i) => `查找${KIND_LABEL[i.kind]}${i.query ? `「${i.query}」` : ''}${i.sessionId ? `（${i.sessionId}）` : '（最近会话）'}`,
+  summarize: (i) =>
+    `查找${KIND_LABEL[i.kind]}${i.query ? `「${i.query}」` : ''}${i.sessionId ? `（${i.sessionId}）` : '（最近会话）'}`,
   async execute(input, ctx) {
     const refused = refuseForBot(ctx)
     if (refused) return refused
@@ -136,7 +153,9 @@ export const searchMedia = defineSubstrateTool({
           query: input.query ?? null,
           hits,
           coverage,
-          ...(hits.length === 0 ? { note: `没有找到匹配的${KIND_LABEL[input.kind]}；可放宽关键词、指定 sessionId 或扩大时间范围。` } : {}),
+          ...(hits.length === 0
+            ? { note: `没有找到匹配的${KIND_LABEL[input.kind]}；可放宽关键词、指定 sessionId 或扩大时间范围。` }
+            : {}),
         },
         anchorsMeta(hits.map((h) => h.anchor)),
       )

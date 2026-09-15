@@ -3,7 +3,16 @@ import { modelCapabilities, validModelSettings } from '@aiwc/protocol'
  * AI SDK v7 adapter. One sample() = one streamText call with tools passed WITHOUT execute, so every tool
  * call comes back to the kernel (the default stopWhen is one step, which is exactly what we want).
  */
-import type { FinishReason, ModelClient, ModelEntry, ProviderConfig, SamplingPart, SamplingRequest, TokenUsage, ToolSpecForModel } from '@aiwc/protocol'
+import type {
+  FinishReason,
+  ModelClient,
+  ModelEntry,
+  ProviderConfig,
+  SamplingPart,
+  SamplingRequest,
+  TokenUsage,
+  ToolSpecForModel,
+} from '@aiwc/protocol'
 import { jsonSchema, streamText, tool, type JSONSchema7, type ModelMessage, type ToolSet } from 'ai'
 
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]['providerOptions']>
@@ -21,7 +30,10 @@ export interface AiSdkModelClientInput {
 export function specsToToolSet(specs: readonly ToolSpecForModel[]): ToolSet {
   const set: ToolSet = {}
   for (const spec of specs) {
-    set[spec.name] = tool({ description: spec.description, inputSchema: jsonSchema(spec.inputJsonSchema as JSONSchema7) })
+    set[spec.name] = tool({
+      description: spec.description,
+      inputSchema: jsonSchema(spec.inputJsonSchema as JSONSchema7),
+    })
   }
   return set
 }
@@ -60,27 +72,39 @@ export function mapUsage(u: UsageLike | undefined): TokenUsage {
 }
 
 /** UI and runtime share the same capability contract; stale unsupported settings are omitted. */
-export function providerOptionsFor(provider: Pick<ProviderConfig, 'kind' | 'id'>, model: Pick<ModelEntry, 'modelId' | 'capabilities' | 'reasoningEffort' | 'thinkingBudget' | 'fast'>): ProviderOptions | undefined {
+export function providerOptionsFor(
+  provider: Pick<ProviderConfig, 'kind' | 'id'>,
+  model: Pick<ModelEntry, 'modelId' | 'capabilities' | 'reasoningEffort' | 'thinkingBudget' | 'fast'>,
+): ProviderOptions | undefined {
   const c = modelCapabilities(provider, model)
-  const effort = model.reasoningEffort && c.reasoning.includes(model.reasoningEffort) ? model.reasoningEffort : undefined
+  const effort =
+    model.reasoningEffort && c.reasoning.includes(model.reasoningEffort) ? model.reasoningEffort : undefined
   const fast = c.fast && model.fast === true
-  const budget = c.thinking === 'budget' && model.thinkingBudget !== undefined
-    ? Math.max(c.thinkingBudgetMin ?? 0, Math.min(model.thinkingBudget, c.thinkingBudgetMax ?? model.thinkingBudget)) : undefined
+  const budget =
+    c.thinking === 'budget' && model.thinkingBudget !== undefined
+      ? Math.max(c.thinkingBudgetMin ?? 0, Math.min(model.thinkingBudget, c.thinkingBudgetMax ?? model.thinkingBudget))
+      : undefined
   if (!effort && !fast && budget === undefined) return undefined
   switch (provider.kind) {
-    case 'openai': return effort ? { openai: { reasoningEffort: effort === 'off' ? 'none' : effort } } : undefined
+    case 'openai':
+      return effort ? { openai: { reasoningEffort: effort === 'off' ? 'none' : effort } } : undefined
     case 'anthropic': {
       const anthropic: ProviderOptionValues = {}
       if (effort) {
         anthropic.effort = effort
         if (c.thinking === 'adaptive') anthropic.thinking = { type: 'adaptive' }
       }
-      if (budget !== undefined) anthropic.thinking = budget === 0 ? { type: 'disabled' } : { type: 'enabled', budgetTokens: budget }
+      if (budget !== undefined)
+        anthropic.thinking = budget === 0 ? { type: 'disabled' } : { type: 'enabled', budgetTokens: budget }
       if (fast) anthropic.speed = 'fast'
       return { anthropic }
     }
-    case 'google': return { google: { thinkingConfig: budget !== undefined ? { thinkingBudget: budget } : { thinkingLevel: effort } } }
-    default: return undefined
+    case 'google':
+      return {
+        google: { thinkingConfig: budget !== undefined ? { thinkingBudget: budget } : { thinkingLevel: effort } },
+      }
+    default:
+      return undefined
   }
 }
 
@@ -104,15 +128,30 @@ export function createAiSdkModelClient(input: AiSdkModelClientInput): ModelClien
         messages,
         tools,
         toolChoice: tools ? req.toolChoice : undefined,
-        maxOutputTokens: req.maxOutputTokens !== undefined || ref.maxOutputTokens !== undefined ? Math.min(req.maxOutputTokens ?? ref.maxOutputTokens!, capabilities.outputLimit ?? Infinity) : undefined,
-        temperature: capabilities.temperature && !(input.provider.kind === 'anthropic' && capabilities.thinking === 'budget' && settings.thinkingBudget !== undefined && settings.thinkingBudget > 0) ? req.temperature ?? settings.temperature : undefined,
-        providerOptions: input.provider.kind === 'openai' ? { ...providerOptions, openai: { store: false, ...providerOptions?.openai } } : providerOptions,
+        maxOutputTokens:
+          req.maxOutputTokens !== undefined || ref.maxOutputTokens !== undefined
+            ? Math.min(req.maxOutputTokens ?? ref.maxOutputTokens!, capabilities.outputLimit ?? Infinity)
+            : undefined,
+        temperature:
+          capabilities.temperature &&
+          !(
+            input.provider.kind === 'anthropic' &&
+            capabilities.thinking === 'budget' &&
+            settings.thinkingBudget !== undefined &&
+            settings.thinkingBudget > 0
+          )
+            ? (req.temperature ?? settings.temperature)
+            : undefined,
+        providerOptions:
+          input.provider.kind === 'openai'
+            ? { ...providerOptions, openai: { store: false, ...providerOptions?.openai } }
+            : providerOptions,
         abortSignal: req.signal,
         maxRetries: 1,
         // TODO(cache): req.cacheKey is stable per thread; wire provider prompt caching (Anthropic cache_control on
         // the system prompt) once the provider option shape is confirmed against the installed @ai-sdk/anthropic.
       })
-      for await (const part of result.fullStream) {
+      for await (const part of result.stream) {
         switch (part.type) {
           case 'text-delta':
             if (part.text) yield { type: 'text.delta', delta: part.text }

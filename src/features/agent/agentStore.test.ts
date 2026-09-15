@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultConfig, type AiwcBridge, type Event, type EventMap, type HistoryItem, type Op, type ThreadId, type ThreadSummary, type TurnId } from '@aiwc/protocol'
+import {
+  defaultConfig,
+  type AiwcBridge,
+  type Event,
+  type EventMap,
+  type HistoryItem,
+  type Op,
+  type ThreadId,
+  type ThreadSummary,
+  type TurnId,
+} from '@aiwc/protocol'
 import { onCommand } from '@/app/commands'
 import { __setBridgeForTests } from '@/platform/bridge'
-import { __resetConfigStoreForTests } from '@/platform/configStore'
+import { __resetConfigStoreForTests, useConfigStore } from '@/platform/configStore'
 import { __resetShellStoreForTests, useShellStore } from '@/shell/shellStore'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { clearToasts, getToasts } from '@/kit'
@@ -41,14 +51,24 @@ function fakeBridge(threads: ThreadSummary[] = [], history: Record<string, Histo
           return threads
         case 'agent:getThread': {
           const { threadId } = req as { threadId: ThreadId }
-          const summary = threads.find((t) => t.threadId === threadId) ?? { threadId, title: '新会话', origin: { channel: 'desktop' }, settings, createdAt: 1, updatedAt: 1, pinned: false }
+          const summary = threads.find((t) => t.threadId === threadId) ?? {
+            threadId,
+            title: '新会话',
+            origin: { channel: 'desktop' },
+            settings,
+            createdAt: 1,
+            updatedAt: 1,
+            pinned: false,
+          }
           return { summary, items: history[threadId] ?? [] }
         }
         case 'agent:submit':
           ops.push(req as Op)
           return undefined
         case 'agent:listModels':
-          return [{ providerId: 'p', modelId: 'm', label: 'M', contextWindow: 128_000, local: true, supportsTools: true }]
+          return [
+            { providerId: 'p', modelId: 'm', label: 'M', contextWindow: 128_000, local: true, supportsTools: true },
+          ]
         case 'agent:listSkills':
           return [{ name: 'weekly', description: '周报', command: '/周报', source: 'builtin' }]
         case 'agent:suggestPrompts':
@@ -68,8 +88,24 @@ function fakeBridge(threads: ThreadSummary[] = [], history: Record<string, Histo
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-const t1: ThreadSummary = { threadId: 'thr_1' as ThreadId, title: '周报草稿', origin: { channel: 'desktop' }, settings, createdAt: 1, updatedAt: 10, pinned: false }
-const t2: ThreadSummary = { threadId: 'thr_2' as ThreadId, title: '密钥获取逻辑', origin: { channel: 'desktop' }, settings, createdAt: 1, updatedAt: 5, pinned: false }
+const t1: ThreadSummary = {
+  threadId: 'thr_1' as ThreadId,
+  title: '周报草稿',
+  origin: { channel: 'desktop' },
+  settings,
+  createdAt: 1,
+  updatedAt: 10,
+  pinned: false,
+}
+const t2: ThreadSummary = {
+  threadId: 'thr_2' as ThreadId,
+  title: '密钥获取逻辑',
+  origin: { channel: 'desktop' },
+  settings,
+  createdAt: 1,
+  updatedAt: 5,
+  pinned: false,
+}
 
 const store = () => useAgentStore.getState()
 
@@ -86,7 +122,16 @@ describe('agentStore.hydrate', () => {
   it('lists desktop threads, opens the most recent one and loads its history', async () => {
     const turnId = 'trn_1' as TurnId
     const bridge = fakeBridge([t2, t1], {
-      thr_1: [{ type: 'user_message', id: 'u1' as never, turnId, createdAt: 1, content: [{ type: 'text', text: '你好' }], mentions: [] }],
+      thr_1: [
+        {
+          type: 'user_message',
+          id: 'u1' as never,
+          turnId,
+          createdAt: 1,
+          content: [{ type: 'text', text: '你好' }],
+          mentions: [],
+        },
+      ],
     })
     __setBridgeForTests(bridge)
     await store().hydrate()
@@ -122,12 +167,18 @@ describe('agentStore threads & ops', () => {
 
     store().setDraft(id, { text: ' 总结今天 ' })
     await store().send(id)
-    expect(bridge.ops[0]).toMatchObject({ type: 'thread.create', settings: { permissionMode: 'ask', profile: 'desktop-chat' } })
+    expect(bridge.ops[0]).toMatchObject({
+      type: 'thread.create',
+      settings: { permissionMode: 'ask', profile: 'desktop-chat' },
+    })
     expect(store().localIds).toEqual([])
     expect(store().threads[0]?.title).toBe('总结今天')
     const turn = bridge.ops.find((o) => o.type === 'turn.start')
     if (turn?.type !== 'turn.start') throw new Error()
-    expect(turn.input).toEqual({ content: [{ type: 'text', text: '总结今天' }], mentions: [{ kind: 'session', id: 's1', label: '产品市场群' }] })
+    expect(turn.input).toEqual({
+      content: [{ type: 'text', text: '总结今天' }],
+      mentions: [{ kind: 'session', id: 's1', label: '产品市场群' }],
+    })
     expect(turn.mode).toBe('start')
     expect(store().drafts[id]).toEqual({ text: '', mentions: [] })
   })
@@ -136,7 +187,9 @@ describe('agentStore threads & ops', () => {
     const bridge = fakeBridge()
     __setBridgeForTests(bridge)
     let collapsed = false
-    const dispose = onCommand('agent.toggleCollapsed', () => { collapsed = true })
+    const dispose = onCommand('agent.toggleCollapsed', () => {
+      collapsed = true
+    })
     try {
       const id = await store().createThread()
       await store().updateSettings(id, { permissionMode: 'bypass' })
@@ -146,7 +199,9 @@ describe('agentStore threads & ops', () => {
       expect(store().localIds).toEqual([])
       expect(store().views[id]).toBeUndefined()
       expect(bridge.ops).toEqual([])
-    } finally { dispose() }
+    } finally {
+      dispose()
+    }
   })
 
   it('deduplicates simultaneous requests to open an initial tab', async () => {
@@ -174,8 +229,24 @@ describe('agentStore threads & ops', () => {
     expect(store().threads[0]?.title).toBe('新标题')
 
     // ≥ 80% usage → one warning toast with a compact action
-    bridge.emit({ type: 'context.usage', threadId, usage: { usedTokens: 90, maxTokens: 100, breakdown: { system: 1, memory: 1, references: 1, history: 1, tools: 1 } } })
-    bridge.emit({ type: 'context.usage', threadId, usage: { usedTokens: 92, maxTokens: 100, breakdown: { system: 1, memory: 1, references: 1, history: 1, tools: 1 } } })
+    bridge.emit({
+      type: 'context.usage',
+      threadId,
+      usage: {
+        usedTokens: 90,
+        maxTokens: 100,
+        breakdown: { system: 1, memory: 1, references: 1, history: 1, tools: 1 },
+      },
+    })
+    bridge.emit({
+      type: 'context.usage',
+      threadId,
+      usage: {
+        usedTokens: 92,
+        maxTokens: 100,
+        breakdown: { system: 1, memory: 1, references: 1, history: 1, tools: 1 },
+      },
+    })
     const warnings = getToasts().filter((t) => t.kind === 'warning')
     expect(warnings).toHaveLength(1)
     warnings[0]?.action?.onClick()
@@ -188,7 +259,15 @@ describe('agentStore threads & ops', () => {
 
     // unread dot only while collapsed
     store().setCollapsed(true)
-    bridge.emit({ type: 'turn.completed', threadId, turnId, finalText: '好的', usage: { inputTokens: 1, outputTokens: 1 }, steps: 1, at: 2 })
+    bridge.emit({
+      type: 'turn.completed',
+      threadId,
+      turnId,
+      finalText: '好的',
+      usage: { inputTokens: 1, outputTokens: 1 },
+      steps: 1,
+      at: 2,
+    })
     expect(useShellStore.getState().agentUnread).toBe(true)
     store().setCollapsed(false)
     expect(useShellStore.getState().agentUnread).toBe(false)
@@ -204,11 +283,27 @@ describe('agentStore threads & ops', () => {
     const threadId = t1.threadId
     const turnId = 'trn_2' as TurnId
     bridge.emit({ type: 'turn.started', threadId, turnId, at: 1 })
-    bridge.emit({ type: 'approval.requested', threadId, turnId, approvalId: 'apr_1' as never, callId: 'cal_1' as never, toolName: 'send_message', summary: '发送', input: {}, risk: 'send', canAllowAlways: true })
+    bridge.emit({
+      type: 'approval.requested',
+      threadId,
+      turnId,
+      approvalId: 'apr_1' as never,
+      callId: 'cal_1' as never,
+      toolName: 'send_message',
+      summary: '发送',
+      input: {},
+      risk: 'send',
+      canAllowAlways: true,
+    })
     expect(store().views.thr_1?.pendingApprovals).toHaveLength(1)
     await store().resolveApproval(threadId, 'apr_1' as never, 'allow_once')
     expect(store().views.thr_1?.pendingApprovals).toHaveLength(0)
-    expect(bridge.ops.at(-1)).toEqual({ type: 'approval.resolve', threadId, approvalId: 'apr_1', decision: 'allow_once' })
+    expect(bridge.ops.at(-1)).toEqual({
+      type: 'approval.resolve',
+      threadId,
+      approvalId: 'apr_1',
+      decision: 'allow_once',
+    })
     // the kernel's own event is harmless afterwards
     bridge.emit({ type: 'approval.resolved', threadId, approvalId: 'apr_1' as never, decision: 'allow_once' })
     expect(store().views.thr_1?.pendingApprovals).toHaveLength(0)
@@ -243,7 +338,11 @@ describe('agentStore threads & ops', () => {
     await flush()
     await store().updateSettings(t1.threadId, { permissionMode: 'bypass' })
     expect(store().threads[0]?.settings.permissionMode).toBe('bypass')
-    expect(bridge.ops.at(-1)).toEqual({ type: 'thread.settings', threadId: t1.threadId, patch: { permissionMode: 'bypass' } })
+    expect(bridge.ops.at(-1)).toEqual({
+      type: 'thread.settings',
+      threadId: t1.threadId,
+      patch: { permissionMode: 'bypass' },
+    })
     await store().rename(t1.threadId, ' 新名字 ')
     expect(store().threads[0]?.title).toBe('新名字')
     await store().pin(t1.threadId, true)
@@ -259,7 +358,10 @@ describe('agentStore.sendDraft (composer submit)', () => {
     const bridge = fakeBridge()
     __setBridgeForTests(bridge)
     useTabsStore.getState().open({ kind: 'chat', objectId: 's9', title: '投研交流群' })
-    store().setDraft(SCRATCH_DRAFT_KEY, { text: ' 总结今天 ', mentions: [{ kind: 'memory', id: 'MEMORY', label: 'MEMORY.md' }] })
+    store().setDraft(SCRATCH_DRAFT_KEY, {
+      text: ' 总结今天 ',
+      mentions: [{ kind: 'memory', id: 'MEMORY', label: 'MEMORY.md' }],
+    })
     await store().sendDraft()
     const id = store().activeThreadId
     expect(id).not.toBeNull()
@@ -268,7 +370,10 @@ describe('agentStore.sendDraft (composer submit)', () => {
     expect(bridge.ops.map((o) => o.type)).toEqual(['thread.create', 'turn.start'])
     const turn = bridge.ops[1]
     if (turn?.type !== 'turn.start') throw new Error()
-    expect(turn.input).toEqual({ content: [{ type: 'text', text: '总结今天' }], mentions: [s9, { kind: 'memory', id: 'MEMORY', label: 'MEMORY.md' }] })
+    expect(turn.input).toEqual({
+      content: [{ type: 'text', text: '总结今天' }],
+      mentions: [s9, { kind: 'memory', id: 'MEMORY', label: 'MEMORY.md' }],
+    })
     expect(turn.mode).toBe('start')
     expect(store().drafts[id!]).toEqual({ text: '', mentions: [] })
     expect(store().drafts[SCRATCH_DRAFT_KEY]).toEqual({ text: '', mentions: [] })
@@ -286,7 +391,7 @@ describe('agentStore.sendDraft (composer submit)', () => {
     expect(turn.input.mentions).toEqual([s9])
   })
 
-  it('with an open thread: sends that thread\'s draft and leaves the scratch slot alone', async () => {
+  it("with an open thread: sends that thread's draft and leaves the scratch slot alone", async () => {
     const bridge = fakeBridge([t1])
     __setBridgeForTests(bridge)
     await store().hydrate()
@@ -314,7 +419,13 @@ describe('agentStore.sendDraft (composer submit)', () => {
 
   it('keeps the unsent draft in its tab when persistence fails', async () => {
     const bridge = fakeBridge()
-    const failing: AiwcBridge = { ...bridge, invoke: ((channel: string, req: unknown) => (channel === 'agent:submit' ? Promise.reject(new Error('内核未就绪')) : bridge.invoke(channel as never, req as never))) as AiwcBridge['invoke'] }
+    const failing: AiwcBridge = {
+      ...bridge,
+      invoke: ((channel: string, req: unknown) =>
+        channel === 'agent:submit'
+          ? Promise.reject(new Error('内核未就绪'))
+          : bridge.invoke(channel as never, req as never)) as AiwcBridge['invoke'],
+    }
     __setBridgeForTests(failing)
     store().setDraft(SCRATCH_DRAFT_KEY, { text: '总结今天' })
     await store().sendDraft()
@@ -329,10 +440,13 @@ describe('agent panel recovery', () => {
   it('retries a failed history request', async () => {
     const bridge = fakeBridge([t1])
     let attempts = 0
-    __setBridgeForTests({ ...bridge, invoke: (async (channel, req) => {
-      if (channel === 'agent:listThreads' && attempts++ === 0) throw new Error('暂时离线')
-      return bridge.invoke(channel, req as never)
-    }) as AiwcBridge['invoke'] })
+    __setBridgeForTests({
+      ...bridge,
+      invoke: (async (channel, req) => {
+        if (channel === 'agent:listThreads' && attempts++ === 0) throw new Error('暂时离线')
+        return bridge.invoke(channel, req as never)
+      }) as AiwcBridge['invoke'],
+    })
     await store().hydrate()
     expect(store().loadError).toBe('暂时离线')
     await store().hydrate()
@@ -345,9 +459,15 @@ describe('agent panel recovery', () => {
   it('keeps a new local tab when a slower history request finishes', async () => {
     const bridge = fakeBridge([t1])
     let finish!: (threads: ThreadSummary[]) => void
-    __setBridgeForTests({ ...bridge, invoke: ((channel, req) => channel === 'agent:listThreads'
-      ? new Promise((resolve) => { finish = resolve })
-      : bridge.invoke(channel, req as never)) as AiwcBridge['invoke'] })
+    __setBridgeForTests({
+      ...bridge,
+      invoke: ((channel, req) =>
+        channel === 'agent:listThreads'
+          ? new Promise((resolve) => {
+              finish = resolve
+            })
+          : bridge.invoke(channel, req as never)) as AiwcBridge['invoke'],
+    })
     const pending = store().hydrate()
     await flush()
     const id = await store().createThread()
@@ -363,9 +483,15 @@ describe('agent panel recovery', () => {
   it('preserves both the failed message and text typed while sending', async () => {
     const bridge = fakeBridge([t1])
     let fail!: (reason: Error) => void
-    __setBridgeForTests({ ...bridge, invoke: ((channel, req) => channel === 'agent:submit'
-      ? new Promise((_, reject) => { fail = reject })
-      : bridge.invoke(channel, req as never)) as AiwcBridge['invoke'] })
+    __setBridgeForTests({
+      ...bridge,
+      invoke: ((channel, req) =>
+        channel === 'agent:submit'
+          ? new Promise((_, reject) => {
+              fail = reject
+            })
+          : bridge.invoke(channel, req as never)) as AiwcBridge['invoke'],
+    })
     await store().hydrate()
     await flush()
     store().setDraft(t1.threadId, { text: '第一条' })
@@ -405,3 +531,27 @@ describe('commands', () => {
 
 // keep the EventMap import used for type-checking the fake bridge listener signature
 export type _Check = EventMap['agent:event']
+
+describe('agentStore in the Agent window (ui.shellMode = agent)', () => {
+  it('closes the last tab without requesting collapse — the window opens a fresh thread instead', async () => {
+    const bridge = fakeBridge()
+    __setBridgeForTests(bridge)
+    await useConfigStore.getState().hydrate()
+    useConfigStore.setState((s) => ({
+      config: s.config ? { ...s.config, ui: { ...s.config.ui, shellMode: 'agent' } } : s.config,
+    }))
+    let collapsed = 0
+    const dispose = onCommand('agent.toggleCollapsed', () => {
+      collapsed++
+    })
+    try {
+      const id = await store().createThread()
+      store().closeThread(id)
+      expect(collapsed).toBe(0)
+      expect(store().openIds).toEqual([])
+      expect(store().threads).toEqual([])
+    } finally {
+      dispose()
+    }
+  })
+})

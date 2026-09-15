@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AutoReplyRule } from '@aiwc/protocol'
+import { useT } from '@/i18n'
 import { toast } from '@/kit'
 import { invoke, useInvoke } from '@/platform/hooks'
 import { isRuleValid, newRule, rulesEqual, validateRule, type RuleErrors } from './ruleModel'
@@ -30,6 +31,7 @@ export interface RuleEditor {
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEditor {
+  const t = useT()
   const loaded = useInvoke('autoreply:getRule', { sessionId }, [sessionId])
   const [draft, setDraft] = useState<AutoReplyRule | null>(null)
   const [saved, setSaved] = useState<AutoReplyRule | null>(null)
@@ -50,7 +52,7 @@ export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEdit
     dirtyRef.current = false
   }, [sessionId])
 
-  const errors = useMemo(() => (draft ? validateRule(draft) : {}), [draft])
+  const errors = useMemo(() => (draft ? validateRule(draft, t) : {}), [draft, t])
   const valid = isRuleValid(errors)
   const dirty = Boolean(draft && saved && !rulesEqual(draft, saved))
   dirtyRef.current = dirty
@@ -64,15 +66,15 @@ export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEdit
       const result = await invoke('autoreply:saveRule', draft)
       setSaved(result)
       setDraft(result)
-      toast.success(`规则已保存 · ${sessionTitle}`)
+      toast.success(t('autoreply.editor.saved', { name: sessionTitle }))
       return result
     } catch (e) {
-      toast.error('保存规则失败', { detail: message(e) })
+      toast.error(t('autoreply.editor.saveFailed'), { detail: message(e) })
       return undefined
     } finally {
       setSaving(false)
     }
-  }, [draft, valid, sessionTitle])
+  }, [draft, valid, sessionTitle, t])
 
   const reset = useCallback(() => setDraft(saved), [saved])
 
@@ -82,13 +84,13 @@ export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEdit
       const fresh = newRule(sessionId)
       setSaved(fresh)
       setDraft(fresh)
-      toast.success(`已删除「${sessionTitle}」的自动回复规则`)
+      toast.success(t('autoreply.rule.deletedToast', { name: sessionTitle }))
       return true
     } catch (e) {
-      toast.error('删除规则失败', { detail: message(e) })
+      toast.error(t('autoreply.editor.deleteFailed'), { detail: message(e) })
       return false
     }
-  }, [sessionId, sessionTitle])
+  }, [sessionId, sessionTitle, t])
 
   const setEnabled = useCallback(
     async (enabled: boolean) => {
@@ -96,24 +98,47 @@ export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEdit
       if (!saved?.id) {
         // No rule exists yet, so the switch only edits the draft. Say so — silently flipping a switch
         // that changes nothing is exactly the "did that work?" moment 交互准则 1 forbids.
-        toast.info(enabled ? '保存规则后自动回复才会生效' : '规则尚未保存', { detail: '点右下角「保存规则」' })
+        toast.info(enabled ? t('autoreply.editor.saveToActivate') : t('autoreply.editor.notSavedToast'), {
+          detail: t('autoreply.editor.saveRuleHint'),
+        })
         return
       }
       const before = saved
       setSaved({ ...saved, enabled })
       try {
         await invoke('autoreply:setEnabled', { sessionId, enabled })
-        toast.success(enabled ? `已启用「${sessionTitle}」的自动回复` : `已暂停「${sessionTitle}」的自动回复`, {
-          detail: enabled ? '对方若还有没回的消息，会先补回一条' : undefined,
-        })
+        toast.success(
+          enabled
+            ? t('autoreply.rule.enabledToast', { name: sessionTitle })
+            : t('autoreply.rule.pausedToast', { name: sessionTitle }),
+          {
+            detail: enabled ? t('autoreply.rule.enabledToastDetail') : undefined,
+          },
+        )
       } catch (e) {
         setSaved(before)
         patch({ enabled: before.enabled })
-        toast.error('切换失败', { detail: message(e) })
+        toast.error(t('autoreply.rule.toggleFailed'), { detail: message(e) })
       }
     },
-    [patch, saved, sessionId, sessionTitle],
+    [patch, saved, sessionId, sessionTitle, t],
   )
 
-  return { loading: loaded.loading && !draft, error: loaded.error, reload: loaded.reload, draft, saved, exists: Boolean(saved?.id), errors, valid, dirty, saving, patch, save, reset, remove, setEnabled }
+  return {
+    loading: loaded.loading && !draft,
+    error: loaded.error,
+    reload: loaded.reload,
+    draft,
+    saved,
+    exists: Boolean(saved?.id),
+    errors,
+    valid,
+    dirty,
+    saving,
+    patch,
+    save,
+    reset,
+    remove,
+    setEnabled,
+  }
 }

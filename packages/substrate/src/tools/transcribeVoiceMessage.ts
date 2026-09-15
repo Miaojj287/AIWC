@@ -21,7 +21,7 @@ export const transcribeVoiceMessage = defineSubstrateTool({
   name: 'transcribe_voice_message',
   description:
     '把 get_context / get_timeline 返回的语音消息转成文字。仅在语音内容会影响结论时调用；sessionId、messageId 直接用消息 anchor 里的值。默认复用已有转写；只有用户明确要求重新识别才传 force=true。本地模型在本机识别，不出本机；在线模式会把音频发给你配置的服务商。\n' +
-    'Transcribe one voice message (local STT or the configured online provider). Pass the anchor\'s sessionId / messageId; force=true re-runs recognition.',
+    "Transcribe one voice message (local STT or the configured online provider). Pass the anchor's sessionId / messageId; force=true re-runs recognition.",
   inputSchema: TranscribeInput,
   profiles: PROFILES,
   risk: 'read',
@@ -39,15 +39,31 @@ export const transcribeVoiceMessage = defineSubstrateTool({
     try {
       const message = await substrate.getMessage(input.sessionId, input.messageId)
       if (!message) {
-        return fail('找不到该消息：会话可能尚未同步，或 messageId 无效。', { sessionId: input.sessionId, messageId: input.messageId })
+        return fail('找不到该消息：会话可能尚未同步，或 messageId 无效。', {
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+        })
       }
       if (message.kind !== 'voice') {
-        return fail(`该消息不是语音（kind=${message.kind}），无需转写。`, { sessionId: input.sessionId, messageId: input.messageId, kind: message.kind })
+        return fail(`该消息不是语音（kind=${message.kind}），无需转写。`, {
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+          kind: message.kind,
+        })
       }
       const anchor = anchorOf(message)
       const cached = message.media?.transcript?.trim()
       if (cached && !input.force) {
-        return ok({ anchor, time: fmtTime(message.createdAt), sender: message.isSelf ? '我' : message.senderName || message.senderId, text: cached, cached: true }, anchorsMeta([anchor]))
+        return ok(
+          {
+            anchor,
+            time: fmtTime(message.createdAt),
+            sender: message.isSelf ? '我' : message.senderName || message.senderId,
+            text: cached,
+            cached: true,
+          },
+          anchorsMeta([anchor]),
+        )
       }
       ctx.progress('正在识别语音…')
       const text = await substrate.transcribeVoice(input.sessionId, input.messageId, { force: input.force })
@@ -65,7 +81,10 @@ export const transcribeVoiceMessage = defineSubstrateTool({
         anchorsMeta([anchor]),
       )
     } catch (error) {
-      return fail(describeToolError(error, 'transcribe_voice_message 执行失败'), { sessionId: input.sessionId, messageId: input.messageId })
+      return fail(describeToolError(error, 'transcribe_voice_message 执行失败'), {
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+      })
     }
   },
 })

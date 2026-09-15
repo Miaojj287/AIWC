@@ -49,7 +49,7 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
   }
 
   const messagesOf = (sessionId: string): WxMessage[] =>
-    state.removedIndex.has(sessionId) ? [] : data.messagesBySession.get(sessionId) ?? []
+    state.removedIndex.has(sessionId) ? [] : (data.messagesBySession.get(sessionId) ?? [])
 
   const setSync = (patch: Partial<SyncStatus>) => {
     state.sync = { ...state.sync, ...patch }
@@ -70,7 +70,10 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
     return state.sync
   }
 
-  function filterMessages(list: WxMessage[], q: { from?: number; to?: number; senderIds?: string[]; kinds?: string[] }): WxMessage[] {
+  function filterMessages(
+    list: WxMessage[],
+    q: { from?: number; to?: number; senderIds?: string[]; kinds?: string[] },
+  ): WxMessage[] {
     const senders = q.senderIds && q.senderIds.length ? new Set(q.senderIds) : undefined
     const kinds = q.kinds && q.kinds.length ? new Set(q.kinds) : undefined
     return list.filter(
@@ -118,8 +121,12 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
     if (q.metric === 'time_distribution') {
       const groupBy = q.groupBy ?? 'hour'
       const buckets = new Map<string, { bucket: string; label: string; count: number; order: number }>()
-      if (groupBy === 'hour') for (let h = 0; h < 24; h++) buckets.set(String(h), { bucket: String(h), label: `${String(h).padStart(2, '0')}:00`, count: 0, order: h })
-      if (groupBy === 'weekday') for (let d = 0; d < 7; d++) buckets.set(String(d), { bucket: String(d), label: WEEKDAY_LABELS[d] ?? String(d), count: 0, order: d })
+      if (groupBy === 'hour')
+        for (let h = 0; h < 24; h++)
+          buckets.set(String(h), { bucket: String(h), label: `${String(h).padStart(2, '0')}:00`, count: 0, order: h })
+      if (groupBy === 'weekday')
+        for (let d = 0; d < 7; d++)
+          buckets.set(String(d), { bucket: String(d), label: WEEKDAY_LABELS[d] ?? String(d), count: 0, order: d })
       for (const m of list) {
         const d = new Date(m.createdAt)
         let key: string
@@ -146,7 +153,9 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
         row.count++
         buckets.set(key, row)
       }
-      const rows = [...buckets.values()].sort((a, b) => a.order - b.order).map(({ bucket, label, count }) => ({ bucket, label, count }))
+      const rows = [...buckets.values()]
+        .sort((a, b) => a.order - b.order)
+        .map(({ bucket, label, count }) => ({ bucket, label, count }))
       return { metric: 'time_distribution', rows, total: list.length }
     }
 
@@ -177,7 +186,8 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
     ]
     const byKind = new Map<string, number>()
     for (const m of list) byKind.set(m.kind, (byKind.get(m.kind) ?? 0) + 1)
-    for (const [kind, count] of [...byKind.entries()].sort((a, b) => b[1] - a[1])) rows.push({ key: `kind:${kind}`, label: kind, value: count })
+    for (const [kind, count] of [...byKind.entries()].sort((a, b) => b[1] - a[1]))
+      rows.push({ key: `kind:${kind}`, label: kind, value: count })
     return { metric: 'overview', rows, total: list.length }
   }
 
@@ -207,7 +217,9 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
   }
 
   function fallbackTranscript(m: WxMessage): string {
-    const candidates = messagesOf(m.sessionId).filter((x) => x.senderId === m.senderId && x.kind === 'text' && x.text.length > 4)
+    const candidates = messagesOf(m.sessionId).filter(
+      (x) => x.senderId === m.senderId && x.kind === 'text' && x.text.length > 4,
+    )
     return candidates.length ? ctx.rng.pick(candidates).text : '（未能识别出有效内容）'
   }
 
@@ -292,6 +304,7 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
       }
       return { items: list.slice(-q.limit), hasMore: list.length > q.limit }
     },
+    'substrate:getMessage': ({ sessionId, messageId }) => messagesOf(sessionId).find((m) => m.id === messageId),
     'substrate:getContext': ({ anchor, radius }) => {
       const list = messagesOf(anchor.sessionId)
       let idx = list.findIndex((m) => m.id === anchor.messageId)
@@ -315,7 +328,12 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
           let occurrences = 0
           for (let i = first; i >= 0; i = lower.indexOf(needle, i + needle.length)) occurrences++
           const recency = (m.createdAt - data.range.from) / span
-          hits.push({ message: m, score: 1 + 0.2 * (occurrences - 1) + 0.5 * recency, snippet: snippetFor(hay, needle), source: 'fts' })
+          hits.push({
+            message: m,
+            score: 1 + 0.2 * (occurrences - 1) + 0.5 * recency,
+            snippet: snippetFor(hay, needle),
+            source: 'fts',
+          })
         }
       }
       hits.sort((a, b) => b.score - a.score)
@@ -324,8 +342,16 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
     'substrate:listContacts': (q) => {
       const kind = q.kind ?? 'all'
       const needle = q.query?.trim().toLowerCase()
-      let pool: WxContact[] = kind === 'group' ? groupContacts(data) : kind === 'all' ? [...data.contactList, ...groupContacts(data)] : data.contactList.filter((c) => c.kind === kind)
-      if (needle) pool = pool.filter((c) => [c.nickname, c.remark, c.alias, c.username].some((v) => v?.toLowerCase().includes(needle)))
+      let pool: WxContact[] =
+        kind === 'group'
+          ? groupContacts(data)
+          : kind === 'all'
+            ? [...data.contactList, ...groupContacts(data)]
+            : data.contactList.filter((c) => c.kind === kind)
+      if (needle)
+        pool = pool.filter((c) =>
+          [c.nickname, c.remark, c.alias, c.username].some((v) => v?.toLowerCase().includes(needle)),
+        )
       pool = [...pool].sort((a, b) => (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0))
       const offset = q.offset ?? 0
       return { items: pool.slice(offset, offset + q.limit), total: pool.length }

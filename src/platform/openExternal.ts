@@ -7,6 +7,7 @@
  * `app:openUrl` hands http(s) / mailto / OS-settings links to the system browser. `openTarget` picks
  * the right one, so callers can just pass whatever the message or document contained.
  */
+import { t } from '@/i18n'
 import { toast } from '@/kit'
 import { invoke } from './hooks'
 
@@ -23,29 +24,20 @@ export async function openUrl(url: string): Promise<void> {
   try {
     await invoke('app:openUrl', { url })
   } catch (e) {
-    toast.error('无法打开链接', { detail: message(e) })
+    toast.error(t('app.open.linkFailed'), { detail: message(e) })
   }
 }
 
 /** Open a local file or folder with the system default application. Reports failures as a toast. */
-export async function openLocalPath(path: string, what = '文件'): Promise<void> {
+export async function openLocalPath(path: string, what = t('app.open.file')): Promise<void> {
   try {
     await invoke('app:openPath', { path })
   } catch (e) {
-    toast.error(`无法打开${what}`, { detail: message(e) })
+    toast.error(t('app.open.pathFailed', { what }), { detail: message(e) })
   }
 }
 
 /** Route by shape: URLs go to the browser, everything else to the file opener. */
-export async function openTarget(target: string, what = '文件'): Promise<void> {
+export async function openTarget(target: string, what = t('app.open.file')): Promise<void> {
   return isExternalUrl(target) ? openUrl(target) : openLocalPath(target, what)
-}
-
-/** Reveal a file in Finder / Explorer. Reports failures as a toast. */
-export async function revealPath(path: string): Promise<void> {
-  try {
-    await invoke('file:reveal', { path })
-  } catch (e) {
-    toast.error('无法在文件夹中显示', { detail: message(e) })
-  }
 }

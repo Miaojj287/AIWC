@@ -12,8 +12,16 @@
  *  - renderPersonaTurn(): what this particular message reminds you of — similar real replies, real
  *    chat excerpts, the user's corrections and past episodes. Rebuilt every turn.
  */
-import type { PersonaCard, PersonaDeep, PersonaNote, PersonaPair, PersonaSample, PersonaStats, RelationshipProfile } from '@aiwc/protocol'
-import { PERSONA_BURST_MARKER, splitPersonaBubbles } from '@aiwc/protocol'
+import type {
+  PersonaCard,
+  PersonaDeep,
+  PersonaNote,
+  PersonaPair,
+  PersonaSample,
+  PersonaStats,
+  RelationshipProfile,
+} from '@aiwc/protocol'
+import { PERSONA_BURST_MARKER } from '@aiwc/protocol'
 import { truncateChars } from '../internal/text'
 
 /** A line holding only this marker separates two consecutive bubbles of one reply (protocol-level). */
@@ -33,7 +41,8 @@ const list = (items: readonly string[], max: number) => items.slice(0, max).filt
 /** Reply-length guidance from the real corpus; short enough to be a rule, not a novel. */
 function replyLengthLine(stats: PersonaStats | undefined): string {
   const avg = Math.max(4, Math.round(stats?.avgSubjectChars ?? 0) || 18)
-  const burst = stats?.avgSubjectBurst && stats.avgSubjectBurst > 1.2 ? `你平时一轮平均发 ${stats.avgSubjectBurst} 条。` : ''
+  const burst =
+    stats?.avgSubjectBurst && stats.avgSubjectBurst > 1.2 ? `你平时一轮平均发 ${stats.avgSubjectBurst} 条。` : ''
   return `- 微信短消息风格：单条 ${avg} 字左右，超过两句话通常拆成几条连发。${burst}要拆成多条时，在两条之间单独输出一行「${BURST_MARKER}」。`
 }
 
@@ -56,27 +65,43 @@ export function renderPersonaCard(card: PersonaCard, displayName: string): strin
   if (card.addressing.self) lines.push(`你的自称：${card.addressing.self}`)
   if (card.addressing.other) lines.push(`你对对方的称呼：${card.addressing.other}`)
   if (card.topics.length) lines.push(`你们常聊：${list(card.topics, 10)}`)
-  const habits = Object.entries(card.replyHabits).filter(([k, v]) => k.trim() && v.trim()).slice(0, 8)
+  const habits = Object.entries(card.replyHabits)
+    .filter(([k, v]) => k.trim() && v.trim())
+    .slice(0, 8)
   if (habits.length) {
     lines.push('你的回复习惯：', ...habits.map(([k, v]) => `- ${k} → ${truncateChars(v, 60)}`))
   }
-  return lines.length > 1 ? lines : [`【你的说话方式】`, `没有提炼到明确的风格，就用最普通的口语，像 ${displayName} 平时随口说话那样。`]
+  return lines.length > 1
+    ? lines
+    : [`【你的说话方式】`, `没有提炼到明确的风格，就用最普通的口语，像 ${displayName} 平时随口说话那样。`]
 }
 
 export function renderPersonaDeep(deep: PersonaDeep): string[] {
   const lines: string[] = []
   if (deep.facts.length) {
-    lines.push('', '【你的生活背景】（这些就是你自己的事，自然地知道，别像背资料）', ...deep.facts.slice(0, 15).map((f) => `- ${f}`))
+    lines.push(
+      '',
+      '【你的生活背景】（这些就是你自己的事，自然地知道，别像背资料）',
+      ...deep.facts.slice(0, 15).map((f) => `- ${f}`),
+    )
   }
   if (deep.relationship) lines.push('', `【你们的关系】${truncateChars(deep.relationship, 200)}`)
   if (deep.reactionPatterns.length) {
     lines.push('', '【你在不同情境下的典型反应】', ...deep.reactionPatterns.slice(0, 10).map((r) => `- ${r}`))
   }
   if (deep.boundaries.length) {
-    lines.push('', '【你的立场与边界】（不熟的领域别装懂，回避的话题照样回避）', ...deep.boundaries.slice(0, 8).map((b) => `- ${b}`))
+    lines.push(
+      '',
+      '【你的立场与边界】（不熟的领域别装懂，回避的话题照样回避）',
+      ...deep.boundaries.slice(0, 8).map((b) => `- ${b}`),
+    )
   }
   if (deep.sharedEvents.length) {
-    lines.push('', '【你们的共同经历】', ...deep.sharedEvents.slice(0, 10).map((e) => `- ${e.when ? `${e.when}：` : ''}${e.what}`))
+    lines.push(
+      '',
+      '【你们的共同经历】',
+      ...deep.sharedEvents.slice(0, 10).map((e) => `- ${e.when ? `${e.when}：` : ''}${e.what}`),
+    )
   }
   return lines
 }
@@ -91,13 +116,22 @@ function renderSamples(samples: readonly PersonaSample[]): string[] {
   return [
     '',
     '【你过去真实的回复方式】（「／」分隔的是当时连发的多条消息）',
-    ...picked.map((s) => (s.prompt ? `对方: ${s.prompt}\n你: ${s.reply}${s.corrected ? '（本人确认过的说法）' : ''}` : `你: ${s.reply}${s.corrected ? '（本人确认过的说法）' : ''}`)),
+    ...picked.map((s) =>
+      s.prompt
+        ? `对方: ${s.prompt}\n你: ${s.reply}${s.corrected ? '（本人确认过的说法）' : ''}`
+        : `你: ${s.reply}${s.corrected ? '（本人确认过的说法）' : ''}`,
+    ),
   ]
 }
 
 /** The persona's own name and the counterpart's, from the profile's point of view. */
-export function personaNames(profile: Pick<RelationshipProfile, 'displayName' | 'role'>): { self: string; other: string } {
-  return profile.role === 'self' ? { self: '我（用户本人）', other: '对方' } : { self: profile.displayName, other: '对方' }
+export function personaNames(profile: Pick<RelationshipProfile, 'displayName' | 'role'>): {
+  self: string
+  other: string
+} {
+  return profile.role === 'self'
+    ? { self: '我（用户本人）', other: '对方' }
+    : { self: profile.displayName, other: '对方' }
 }
 
 /**
@@ -157,12 +191,19 @@ export function renderPersonaTurn(input: PersonaTurnInput, marker = PERSONA_TURN
   if (pairs.length) {
     lines.push(
       '【你过去遇到类似话题时的真实回复】（针对紧挨在这上面的那条消息想起来的；最值得参考的范例：当时你就是这么回的，语气、长度、分条都照这个感觉来）',
-      ...pairs.map((p) => [p.context ? `(之前聊到: ${p.context})` : '', `对方: ${p.prompt}`, `你: ${p.replies.join('／')}`].filter(Boolean).join('\n')),
+      ...pairs.map((p) =>
+        [p.context ? `(之前聊到: ${p.context})` : '', `对方: ${p.prompt}`, `你: ${p.replies.join('／')}`]
+          .filter(Boolean)
+          .join('\n'),
+      ),
     )
   }
   if (memories.length) {
     if (lines.length > 1) lines.push('')
-    lines.push('【可能相关的真实聊天片段】（针对上面那条消息翻出来的旧聊天；可自然提及，但别逐字背诵、别主动复述无关内容）', ...memories.map((m) => `- ${truncateChars(m.replace(/\s+/g, ' '), 160)}`))
+    lines.push(
+      '【可能相关的真实聊天片段】（针对上面那条消息翻出来的旧聊天；可自然提及，但别逐字背诵、别主动复述无关内容）',
+      ...memories.map((m) => `- ${truncateChars(m.replace(/\s+/g, ' '), 160)}`),
+    )
   }
   if (episodes.length) {
     if (lines.length > 1) lines.push('')
@@ -170,11 +211,11 @@ export function renderPersonaTurn(input: PersonaTurnInput, marker = PERSONA_TURN
   }
   if (corrections.length) {
     if (lines.length > 1) lines.push('')
-    lines.push('【扮演纠正】（对方明确指出过的问题，必须遵守，优先级高于上面的一切）', ...corrections.map((c) => `- ${c.text}`))
+    lines.push(
+      '【扮演纠正】（对方明确指出过的问题，必须遵守，优先级高于上面的一切）',
+      ...corrections.map((c) => `- ${c.text}`),
+    )
   }
   lines.push(marker.replace('<', '</'))
   return lines.join('\n')
 }
-
-/** Split one model reply into WeChat-style bubbles (re-export: the renderer uses the protocol copy). */
-export const splitBubbles = splitPersonaBubbles

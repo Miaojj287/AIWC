@@ -21,7 +21,15 @@ const thread = (n: number, patch: Partial<ThreadSummary> = {}): ThreadSummary =>
   ...patch,
 })
 
-function renderTabs(all: ThreadSummary[], onSelect = vi.fn(), spies: { onAction?: ReturnType<typeof vi.fn>; onPin?: ReturnType<typeof vi.fn> } = {}) {
+function renderTabs(
+  all: ThreadSummary[],
+  onSelect = vi.fn(),
+  spies: {
+    onAction?: ReturnType<typeof vi.fn>
+    onPin?: ReturnType<typeof vi.fn>
+    onOpenWindow?: ReturnType<typeof vi.fn>
+  } = {},
+) {
   const noop = () => undefined
   render(
     <ThreadTabs
@@ -36,6 +44,7 @@ function renderTabs(all: ThreadSummary[], onSelect = vi.fn(), spies: { onAction?
       onPin={spies.onPin ?? noop}
       onAction={spies.onAction ?? noop}
       onToggleCollapsed={noop}
+      onOpenWindow={spies.onOpenWindow ?? noop}
     />,
   )
   return onSelect
@@ -43,7 +52,10 @@ function renderTabs(all: ThreadSummary[], onSelect = vi.fn(), spies: { onAction?
 
 describe('<ThreadTabs> history popover', () => {
   it('lists recent threads as kit menu rows (h42 with description) and selects on click', async () => {
-    const all = [thread(1, { contextRef: { kind: 'session', id: 's1', label: '产品市场群' } }), thread(2, { pinned: true })]
+    const all = [
+      thread(1, { contextRef: { kind: 'session', id: 's1', label: '产品市场群' } }),
+      thread(2, { pinned: true }),
+    ]
     const onSelect = renderTabs(all)
     fireEvent.click(screen.getByRole('button', { name: '历史会话' }))
     const options = await screen.findAllByRole('option')
@@ -88,7 +100,22 @@ describe('<ThreadTabs> thread actions', () => {
     const draft = thread(1)
     const onAction = vi.fn()
     const noop = () => undefined
-    render(<ThreadTabs open={[draft]} all={[]} activeId={draft.threadId} mac onSelect={noop} onClose={noop} onCloseOthers={noop} onNew={noop} onPin={noop} onAction={onAction} onToggleCollapsed={noop} />)
+    render(
+      <ThreadTabs
+        open={[draft]}
+        all={[]}
+        activeId={draft.threadId}
+        mac
+        onSelect={noop}
+        onClose={noop}
+        onCloseOthers={noop}
+        onNew={noop}
+        onPin={noop}
+        onAction={onAction}
+        onToggleCollapsed={noop}
+        onOpenWindow={noop}
+      />,
+    )
     fireEvent.keyDown(screen.getByRole('button', { name: '会话菜单' }), { key: 'Enter' })
     const rename = await screen.findByRole('menuitem', { name: '重命名会话' })
     expect(rename.getAttribute('aria-disabled')).not.toBe('true')
@@ -121,5 +148,17 @@ describe('<ThreadTabs> thread actions', () => {
     expect(remove.className).toContain('danger')
     fireEvent.click(remove)
     expect(onAction).toHaveBeenCalledWith('delete', 'thr_1')
+  })
+})
+
+describe('<ThreadTabs> Agent window entry', () => {
+  it('shows the 「Agent 窗口」 pill as the rightmost control and reports the click', () => {
+    const onOpenWindow = vi.fn()
+    renderTabs([thread(1)], vi.fn(), { onOpenWindow })
+    const pill = screen.getByRole('button', { name: 'Agent 窗口' })
+    const controls = pill.parentElement!
+    expect(controls.lastElementChild).toBe(pill)
+    fireEvent.click(pill)
+    expect(onOpenWindow).toHaveBeenCalledTimes(1)
   })
 })

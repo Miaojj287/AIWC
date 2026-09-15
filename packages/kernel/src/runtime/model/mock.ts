@@ -80,7 +80,12 @@ export function createMockModelClient(script: MockScript): MockModelClient {
       return
     }
     for (const call of step.toolCalls ?? []) {
-      yield { type: 'tool_call', callId: call.callId ?? `mock_call_${++mockCallSeq}`, name: call.name, input: call.input }
+      yield {
+        type: 'tool_call',
+        callId: call.callId ?? `mock_call_${++mockCallSeq}`,
+        name: call.name,
+        input: call.input,
+      }
     }
     yield { type: 'finish', reason: step.toolCalls?.length ? 'tool_calls' : 'stop', usage }
   }

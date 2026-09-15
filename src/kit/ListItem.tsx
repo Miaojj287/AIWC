@@ -32,7 +32,21 @@ export interface ListItemProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
  * `data-hover` forces the hover look (gallery / screenshots).
  */
 export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListItem(
-  { leading, title, subtitle, meta, trailing, hoverActions, selected = false, disabled = false, onSelect, dense = false, className, onKeyDown, ...rest },
+  {
+    leading,
+    title,
+    subtitle,
+    meta,
+    trailing,
+    hoverActions,
+    selected = false,
+    disabled = false,
+    onSelect,
+    dense = false,
+    className,
+    onKeyDown,
+    ...rest
+  },
   ref,
 ) {
   const interactive = Boolean(onSelect) && !disabled
@@ -62,7 +76,8 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
         'group relative flex w-full select-none items-center gap-2.5 rounded-item px-2.5 text-left outline-none',
         dense ? 'min-h-11 py-1.5' : 'min-h-14 py-2',
         'transition-colors duration-(--dur-fast)',
-        interactive && 'cursor-pointer hover:bg-hover-5 data-[hover]:bg-hover-5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70',
+        interactive &&
+          'cursor-pointer hover:bg-hover-5 data-[hover]:bg-hover-5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70',
         selected && 'bg-accent-12 hover:bg-accent-12',
         disabled && 'pointer-events-none opacity-40',
         className,
@@ -73,9 +88,23 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-body font-medium leading-4.5 text-fg">{title}</span>
-          {meta ? <span className={cn('shrink-0 font-latin text-micro text-fg-3', overlayActions && 'group-hover:hidden group-focus-within:hidden group-data-[hover]:hidden')}>{meta}</span> : null}
+          {meta ? (
+            <span
+              className={cn(
+                'shrink-0 font-latin text-micro text-fg-3',
+                overlayActions && 'group-hover:hidden group-focus-within:hidden group-data-[hover]:hidden',
+              )}
+            >
+              {meta}
+            </span>
+          ) : null}
         </div>
-        {subtitle ? <div className="flex min-w-0 items-center gap-1.5 truncate text-caption leading-4 text-fg-3">{subtitle}</div> : null}
+        {/* A block box, not a flex row: text-overflow only renders on the box that owns the text, so a plain
+            string subtitle inside `flex … truncate` used to clip mid-glyph. Callers that mix a dot / Badge with
+            text wrap them in their own `flex` span, whose truncating child still gets the ellipsis. */}
+        {subtitle ? (
+          <div className="min-w-0 truncate text-caption leading-4 text-fg-3 [&>*+*]:ml-1.5">{subtitle}</div>
+        ) : null}
       </div>
       {trailing || (hoverActions && !overlayActions) ? (
         <div className="flex shrink-0 items-center gap-1">

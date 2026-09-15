@@ -23,11 +23,26 @@ const ctxFor = (profile: 'persona' | 'desktop-chat', userText = ''): FragmentPro
   userText,
 })
 
-const pair = (over: Partial<PersonaPair> & { prompt: string; replies: string[] }): PersonaPair => ({ at: 1_700_000_000_000, ...over })
+const pair = (over: Partial<PersonaPair> & { prompt: string; replies: string[] }): PersonaPair => ({
+  at: 1_700_000_000_000,
+  ...over,
+})
 
 describe('persona prompt', () => {
   it('speaks in the first person, carries the mined profile and states the burst convention', () => {
-    const text = renderPersonaIdentity(sampleProfile({ stats: { messageCount: 900, subjectMessageCount: 420, avgSubjectChars: 9, avgSubjectBurst: 2.4, voiceCount: 30, transcribedVoiceCount: 30, voiceRatio: 0.5 } }))
+    const text = renderPersonaIdentity(
+      sampleProfile({
+        stats: {
+          messageCount: 900,
+          subjectMessageCount: 420,
+          avgSubjectChars: 9,
+          avgSubjectBurst: 2.4,
+          voiceCount: 30,
+          transcribedVoiceCount: 30,
+          voiceRatio: 0.5,
+        },
+      }),
+    )
     expect(text.startsWith('<persona>')).toBe(true)
     expect(text).toContain('你是「李娜」')
     expect(text).toContain('不要承认或暗示自己是 AI')
@@ -43,7 +58,14 @@ describe('persona prompt', () => {
 
   it('flips to the first person for a self clone and survives an empty profile', () => {
     expect(renderPersonaIdentity(sampleProfile({ role: 'self' }))).toContain('扮演使用这台电脑的用户本人')
-    const bare = renderPersonaIdentity(sampleProfile({ card: { tone: [], traits: [], catchphrases: [], punctuation: '', addressing: {}, topics: [], replyHabits: {} }, deep: { facts: [], relationship: '', reactionPatterns: [], boundaries: [], sharedEvents: [] }, samples: [], stats: undefined }))
+    const bare = renderPersonaIdentity(
+      sampleProfile({
+        card: { tone: [], traits: [], catchphrases: [], punctuation: '', addressing: {}, topics: [], replyHabits: {} },
+        deep: { facts: [], relationship: '', reactionPatterns: [], boundaries: [], sharedEvents: [] },
+        samples: [],
+        stats: undefined,
+      }),
+    )
     expect(bare).toContain('没有提炼到明确的风格')
     expect(bare).toContain('单条 18 字左右') // falls back to a plausible default rather than 0
   })
@@ -79,7 +101,10 @@ describe('persona prompt', () => {
     expect(splitPersonaBubbles('')).toEqual([])
     // mid-stream the marker arrives a few characters at a time: never show the fragment to the user
     for (let i = 1; i <= PERSONA_BURST_MARKER.length; i++) {
-      expect(splitPersonaBubbles(`在的\n${PERSONA_BURST_MARKER.slice(0, i)}`, true), PERSONA_BURST_MARKER.slice(0, i)).toEqual(['在的'])
+      expect(
+        splitPersonaBubbles(`在的\n${PERSONA_BURST_MARKER.slice(0, i)}`, true),
+        PERSONA_BURST_MARKER.slice(0, i),
+      ).toEqual(['在的'])
     }
     expect(splitPersonaBubbles(`在的\n${PERSONA_BURST_MARKER}\n咋`, true)).toEqual(['在的', '咋'])
     // only the marker separates bubbles: a plain newline stays inside one bubble, dash and all
@@ -139,8 +164,25 @@ describe('personaFragmentProvider', () => {
     const substrate: SubstrateService = {
       ...createFakeSubstrate({ sessions: [fakeSession({ id: CONTACT })], messages: [] }),
       search: async (): Promise<SearchHit[]> => [
-        { message: fakeMessage({ sessionId: CONTACT, seq: 1, createdAt: 1, text: '上次那家川菜真香' }), score: 1, snippet: '上次那家川菜真香', source: 'fts' },
-        { message: fakeMessage({ sessionId: CONTACT, seq: 2, createdAt: 2, isSelf: true, senderId: 'me', text: '是吧我也这么觉得' }), score: 1, snippet: '是吧我也这么觉得', source: 'fts' },
+        {
+          message: fakeMessage({ sessionId: CONTACT, seq: 1, createdAt: 1, text: '上次那家川菜真香' }),
+          score: 1,
+          snippet: '上次那家川菜真香',
+          source: 'fts',
+        },
+        {
+          message: fakeMessage({
+            sessionId: CONTACT,
+            seq: 2,
+            createdAt: 2,
+            isSelf: true,
+            senderId: 'me',
+            text: '是吧我也这么觉得',
+          }),
+          score: 1,
+          snippet: '是吧我也这么觉得',
+          source: 'fts',
+        },
       ],
     }
 
@@ -174,7 +216,11 @@ describe('personaFragmentProvider', () => {
     const empty = createRelationshipStore({ dir: tmp() })
     expect(await personaIdentityProvider({ relationships: empty }).provide(ctxFor('persona'))).toEqual([])
     const relationships = await setup()
-    const broken = { ...relationships, listPairs: async () => Promise.reject(new Error('disk gone')), listNotes: async () => Promise.reject(new Error('disk gone')) }
+    const broken = {
+      ...relationships,
+      listPairs: async () => Promise.reject(new Error('disk gone')),
+      listNotes: async () => Promise.reject(new Error('disk gone')),
+    }
     expect(await personaFragmentProvider({ relationships: broken }).provide(ctxFor('persona', '在吗'))).toEqual([])
   })
 
@@ -191,8 +237,14 @@ describe('personaFragmentProvider', () => {
 describe('director notes store', () => {
   it('caps corrections and episodes separately, newest kept, and deletes by timestamp', async () => {
     const store = createRelationshipStore({ dir: tmp() })
-    await store.addNotes(CONTACT, Array.from({ length: 25 }, (_, i) => ({ kind: 'correction' as const, text: `规则 ${i}` })))
-    await store.addNotes(CONTACT, Array.from({ length: 12 }, (_, i) => ({ kind: 'episode' as const, text: `聊了 ${i}` })))
+    await store.addNotes(
+      CONTACT,
+      Array.from({ length: 25 }, (_, i) => ({ kind: 'correction' as const, text: `规则 ${i}` })),
+    )
+    await store.addNotes(
+      CONTACT,
+      Array.from({ length: 12 }, (_, i) => ({ kind: 'episode' as const, text: `聊了 ${i}` })),
+    )
     const notes = await store.listNotes(CONTACT)
     const corrections = notes.filter((n) => n.kind === 'correction')
     const episodes = notes.filter((n) => n.kind === 'episode')
@@ -219,8 +271,14 @@ describe('director notes store', () => {
 
 describe('reflectConversation', () => {
   it('turns what the user said about the impersonation into rules plus one episode', async () => {
-    const model = createScriptedModel(() => '```json\n{"corrections":["她不会说「你放心」，会说「安啦～」","她喊我老张"," "],"summary":"聊了搬家的事"}\n```')
-    const notes = await reflectConversation(model, { displayName: '李娜', transcript: '我: 你放心\n李娜的分身: 你放心' })
+    const model = createScriptedModel(
+      () =>
+        '```json\n{"corrections":["她不会说「你放心」，会说「安啦～」","她喊我老张"," "],"summary":"聊了搬家的事"}\n```',
+    )
+    const notes = await reflectConversation(model, {
+      displayName: '李娜',
+      transcript: '我: 你放心\n李娜的分身: 你放心',
+    })
     expect(notes).toEqual([
       { kind: 'correction', text: '她不会说「你放心」，会说「安啦～」' },
       { kind: 'correction', text: '她喊我老张' },
@@ -230,9 +288,19 @@ describe('reflectConversation', () => {
   })
 
   it('renders the transcript oldest-first and keeps the most recent part when it is long', () => {
-    const text = renderTranscript([{ role: 'user', text: '在吗' }, { role: 'assistant', text: '在' }, { role: 'user', text: '  ' }], '李娜')
+    const text = renderTranscript(
+      [
+        { role: 'user', text: '在吗' },
+        { role: 'assistant', text: '在' },
+        { role: 'user', text: '  ' },
+      ],
+      '李娜',
+    )
     expect(text).toBe('我: 在吗\n李娜的分身: 在')
-    const long = renderTranscript(Array.from({ length: 400 }, (_, i) => ({ role: 'user' as const, text: `第 ${i} 句话`.repeat(4) })), '李娜')
+    const long = renderTranscript(
+      Array.from({ length: 400 }, (_, i) => ({ role: 'user' as const, text: `第 ${i} 句话`.repeat(4) })),
+      '李娜',
+    )
     expect(long.length).toBeLessThanOrEqual(6000)
     expect(long).toContain('第 399 句话') // the tail, not the head, is what matters
   })
@@ -245,9 +313,22 @@ describe('group corpus', () => {
       fakeMessage({ sessionId: 'g@chatroom', seq: 1, createdAt: base, senderId: 'wxid_other', text: '周末团建去哪' }),
       fakeMessage({ sessionId: 'g@chatroom', seq: 2, createdAt: base + 10_000, senderId: CONTACT, text: '我投爬山' }),
       fakeMessage({ sessionId: 'g@chatroom', seq: 3, createdAt: base + 20_000, senderId: CONTACT, text: '别又是吃饭' }),
-      fakeMessage({ sessionId: 'g@chatroom', seq: 4, createdAt: base + 30_000, isSelf: true, senderId: 'me', text: '我都行' }),
+      fakeMessage({
+        sessionId: 'g@chatroom',
+        seq: 4,
+        createdAt: base + 30_000,
+        isSelf: true,
+        senderId: 'me',
+        text: '我都行',
+      }),
       // hours later: a new conversation, so the line above must not be treated as its context
-      fakeMessage({ sessionId: 'g@chatroom', seq: 5, createdAt: base + 5 * 3_600_000, senderId: CONTACT, text: '睡了' }),
+      fakeMessage({
+        sessionId: 'g@chatroom',
+        seq: 5,
+        createdAt: base + 5 * 3_600_000,
+        senderId: CONTACT,
+        text: '睡了',
+      }),
     ]
   }
 

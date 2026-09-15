@@ -5,7 +5,22 @@
 import { FolderOpen, KeyRound, Link, RefreshCw, RotateCcw, ScanLine, ShieldCheck, Image } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { WxAccount } from '@aiwc/protocol'
-import { Avatar, Badge, Button, Card, ConfirmDialog, EmptyState, IconButton, InlineHint, Input, Select, Skeleton, toast, type SelectOption } from '@/kit'
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  IconButton,
+  InlineHint,
+  Input,
+  Select,
+  Skeleton,
+  toast,
+  type SelectOption,
+} from '@/kit'
+import { useT } from '@/i18n'
 import { useAccountStatus } from '@/platform/useAccountStatus'
 import { toMediaUrl } from '@/platform/mediaUrl'
 import { useConfig } from '@/platform/configStore'
@@ -14,16 +29,17 @@ import { invoke, useInvoke } from '@/platform/hooks'
 import { secretRefFor, type KeyKind } from '../accountModel'
 import { activateAccount, errorMessage, refreshConfig, saveConfig } from '../hooks'
 import { PagePlaceholder, SRow, Section } from '../pageKit'
-import { InlineKeyAcquire, ManualKeyForm, SecretField } from './AccountKeys'
+import { InlineKeyAcquire, SecretField } from './AccountKeys'
+import { OfficeSection } from './OfficeSection'
 
 export function AccountPage() {
+  const t = useT()
   const account = useConfig((c) => c.account)
   const status = useAccountStatus()
   const accounts = useInvoke('substrate:listAccounts', { dbRoot: account?.dbRoot }, [account?.dbRoot])
   const [switching, setSwitching] = useState(false)
   const [keyVersion, setKeyVersion] = useState(0)
   const [acquire, setAcquire] = useState<'all' | 'image' | null>(null)
-  const [manual, setManual] = useState<KeyKind | null>(null)
   const [verifyWxid, setVerifyWxid] = useState<string | undefined>(account?.wxid)
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState<string | undefined>()
@@ -45,7 +61,11 @@ export function AccountPage() {
     value: a.wxid,
     label: a.nickname ?? a.wxid,
     description: a.wxid,
-    badge: a.verified ? <Badge tone="ok">已验证</Badge> : <Badge tone="warn">未验证</Badge>,
+    badge: a.verified ? (
+      <Badge tone="ok">{t('settings.account.verified')}</Badge>
+    ) : (
+      <Badge tone="warn">{t('settings.account.unverified')}</Badge>
+    ),
   }))
 
   const switchAccount = async (wxid: string) => {
@@ -57,9 +77,8 @@ export function AccountPage() {
       if (await activateAccount({ wxid, dbRoot: target.dbRoot, verifiedAt: target.verified ? Date.now() : 0 })) {
         setVerifyError(undefined)
         setAcquire(null)
-        setManual(null)
         accounts.reload()
-        toast.success(`已切换到「${target.nickname ?? target.wxid}」并刷新会话`)
+        toast.success(t('settings.account.switched', { name: target.nickname ?? target.wxid }))
       }
     } finally {
       setSwitching(false)
@@ -71,11 +90,16 @@ export function AccountPage() {
     try {
       accounts.reload()
       const detected = await invoke('substrate:detectWeChat', undefined)
-      if (detected.dbRoot && detected.dbRoot !== account.dbRoot) await saveConfig({ account: { dbRoot: detected.dbRoot } })
+      if (detected.dbRoot && detected.dbRoot !== account.dbRoot)
+        await saveConfig({ account: { dbRoot: detected.dbRoot } })
       const found = await invoke('substrate:listAccounts', { dbRoot: detected.dbRoot ?? account.dbRoot })
-      toast.success(`扫描完成 · 发现 ${found.length} 个账号${detected.running ? '' : ' · 微信未运行'}`)
+      toast.success(
+        t(detected.running ? 'settings.account.scan.done' : 'settings.account.scan.doneNotRunning', {
+          n: found.length,
+        }),
+      )
     } catch (e) {
-      toast.error('扫描失败', { detail: errorMessage(e) })
+      toast.error(t('settings.account.scan.failed'), { detail: errorMessage(e) })
     } finally {
       setScanning(false)
     }
@@ -83,17 +107,22 @@ export function AccountPage() {
 
   const pickDir = async (kind: 'dbRoot' | 'cacheDir') => {
     try {
-      const picked = await invoke('app:pickDirectory', { title: kind === 'dbRoot' ? '选择微信数据库根目录' : '选择缓存目录', defaultPath: kind === 'dbRoot' ? account.dbRoot : account.cacheDir })
+      const picked = await invoke('app:pickDirectory', {
+        title: kind === 'dbRoot' ? t('settings.account.dbRoot.pickTitle') : t('settings.account.cacheDir.pickTitle'),
+        defaultPath: kind === 'dbRoot' ? account.dbRoot : account.cacheDir,
+      })
       if (!picked) return
-      await saveConfig({ account: kind === 'dbRoot' ? { dbRoot: picked, verifiedAt: undefined } : { cacheDir: picked } })
+      await saveConfig({
+        account: kind === 'dbRoot' ? { dbRoot: picked, verifiedAt: undefined } : { cacheDir: picked },
+      })
     } catch (e) {
-      toast.error('选择目录失败', { detail: errorMessage(e) })
+      toast.error(t('settings.account.pickDirFailed'), { detail: errorMessage(e) })
     }
   }
 
   const verify = async () => {
     if (!verifyWxid || !account.dbRoot) {
-      setVerifyError('请先选择 wxid 与数据库根目录')
+      setVerifyError(t('settings.account.verify.selectFirst'))
       return
     }
     setVerifying(true)
@@ -101,11 +130,11 @@ export function AccountPage() {
     try {
       const res = await invoke('substrate:verifyAccount', { wxid: verifyWxid, dbRoot: account.dbRoot })
       if (res.ok) {
-        if (!await activateAccount({ wxid: verifyWxid, dbRoot: account.dbRoot, verifiedAt: Date.now() })) return
-        toast.success('账号验证通过 · 已保存为当前账号')
+        if (!(await activateAccount({ wxid: verifyWxid, dbRoot: account.dbRoot, verifiedAt: Date.now() }))) return
+        toast.success(t('settings.account.verify.passed'))
       } else {
-        setVerifyError(res.error ?? '该目录与所选 wxid 不匹配')
-        toast.error('账号验证失败')
+        setVerifyError(res.error ?? t('settings.account.verify.mismatch'))
+        toast.error(t('settings.account.verify.failed'))
       }
     } catch (e) {
       setVerifyError(errorMessage(e))
@@ -120,16 +149,15 @@ export function AccountPage() {
       const target = { wxid: verifyWxid ?? account.wxid ?? '', dbRoot: account.dbRoot ?? '' }
       const res = await invoke('substrate:testConnection', target)
       if (res.ok) {
-        if (!await activateAccount({ ...target, verifiedAt: Date.now() })) return
+        if (!(await activateAccount({ ...target, verifiedAt: Date.now() }))) return
         setVerifyError(undefined)
-        toast.success('连接成功 · 数据库可读')
-      }
-      else {
-        setVerifyError(res.error ?? '连接失败')
-        toast.error('连接失败', { detail: res.error })
+        toast.success(t('settings.account.verify.connected'))
+      } else {
+        setVerifyError(res.error ?? t('settings.account.verify.connectFailed'))
+        toast.error(t('settings.account.verify.connectFailed'), { detail: res.error })
       }
     } catch (e) {
-      toast.error('连接失败', { detail: errorMessage(e) })
+      toast.error(t('settings.account.verify.connectFailed'), { detail: errorMessage(e) })
     } finally {
       setTesting(false)
     }
@@ -142,116 +170,219 @@ export function AccountPage() {
 
   return (
     <>
-      <AccountCard account={current} wxid={activeWxid ?? account.wxid} dbRoot={current?.dbRoot ?? account.dbRoot} loading={accounts.loading} options={accountOptions} onSwitch={(w) => void switchAccount(w)} onRescan={() => void rescan()} scanning={scanning} switching={switching} />
+      <AccountCard
+        account={current}
+        wxid={activeWxid ?? account.wxid}
+        dbRoot={current?.dbRoot ?? account.dbRoot}
+        loading={accounts.loading}
+        options={accountOptions}
+        onSwitch={(w) => void switchAccount(w)}
+        onRescan={() => void rescan()}
+        scanning={scanning}
+        switching={switching}
+      />
 
-      {mismatch ? <InlineHint kind="warning">配置账号与当前连接不一致，请在上方选择要连接的账号。</InlineHint> : null}
-      <Section title="目录与账号验证">
+      {mismatch ? <InlineHint kind="warning">{t('settings.account.mismatch')}</InlineHint> : null}
+      <Section title={t('settings.account.sections.dirs')}>
         <Card variant="rows">
-          <SRow id="account.dbRoot" title="数据库根目录" description="微信账号数据所在目录，通常是包含 db_storage 的目录" stacked>
-            <Input mono readOnly size="sm" aria-label="数据库根目录" value={account.dbRoot ?? ''} placeholder="未设置 · 点击右侧图标选择" trailing={<IconButton size="xs" icon={FolderOpen} label="浏览" onClick={() => void pickDir('dbRoot')} className="text-fg-3" />} />
-          </SRow>
-          <SRow id="account.cacheDir" title="缓存目录" description="可选，留空时使用默认目录；建议选择空间充足的磁盘" stacked>
+          <SRow
+            id="account.dbRoot"
+            title={t('settings.account.dbRoot.title')}
+            help={t('settings.account.dbRoot.help')}
+            stacked
+          >
             <Input
               mono
               readOnly
               size="sm"
-              aria-label="缓存目录"
+              aria-label={t('settings.account.dbRoot.title')}
+              value={account.dbRoot ?? ''}
+              placeholder={t('settings.account.dbRoot.unset')}
+              trailing={
+                <IconButton
+                  size="xs"
+                  icon={FolderOpen}
+                  label={t('settings.account.dbRoot.browse')}
+                  onClick={() => void pickDir('dbRoot')}
+                  className="text-fg-3"
+                />
+              }
+            />
+          </SRow>
+          <SRow
+            id="account.cacheDir"
+            title={t('settings.account.cacheDir.title')}
+            description={t('settings.account.cacheDir.description')}
+            help={t('settings.account.cacheDir.help')}
+            stacked
+          >
+            <Input
+              mono
+              readOnly
+              size="sm"
+              aria-label={t('settings.account.cacheDir.title')}
               value={account.cacheDir ?? ''}
-              placeholder="默认目录（应用数据目录下的 cache）"
+              placeholder={t('settings.account.cacheDir.placeholder')}
               trailing={
                 <>
-                  <IconButton size="xs" icon={FolderOpen} label="选择目录" onClick={() => void pickDir('cacheDir')} className="text-fg-3" />
-                  <IconButton size="xs" icon={RotateCcw} label="恢复默认" disabled={!account.cacheDir} onClick={() => setResetCache(true)} className="text-fg-3" />
+                  <IconButton
+                    size="xs"
+                    icon={FolderOpen}
+                    label={t('settings.account.cacheDir.pick')}
+                    onClick={() => void pickDir('cacheDir')}
+                    className="text-fg-3"
+                  />
+                  <IconButton
+                    size="xs"
+                    icon={RotateCcw}
+                    label={t('settings.account.cacheDir.reset')}
+                    disabled={!account.cacheDir}
+                    onClick={() => setResetCache(true)}
+                    className="text-fg-3"
+                  />
                 </>
               }
             />
           </SRow>
           <SRow
             id="account.verify"
-            title="账号验证"
-            badge={!mismatch && current?.verified && account.verifiedAt ? <Badge tone="ok">已验证</Badge> : <Badge tone="warn">未验证</Badge>}
-            description="确认 wxid 与数据库目录匹配，验证成功后才会保存为当前账号配置"
+            title={t('settings.account.verify.title')}
+            badge={
+              !mismatch && current?.verified && account.verifiedAt ? (
+                <Badge tone="ok">{t('settings.account.verified')}</Badge>
+              ) : (
+                <Badge tone="warn">{t('settings.account.unverified')}</Badge>
+              )
+            }
+            description={t('settings.account.verify.description')}
+            help={t('settings.account.verify.help')}
             stacked
             footer={verifyError ? <InlineHint kind="error">{verifyError}</InlineHint> : null}
           >
             <div className="flex flex-wrap items-center gap-2">
-              <Select aria-label="待验证的 wxid" options={accountOptions} value={verifyWxid ?? null} onValueChange={setVerifyWxid} placeholder={accounts.loading ? '读取中…' : '选择 wxid'} className="min-w-[220px] font-mono" />
+              <Select
+                aria-label={t('settings.account.verify.wxidLabel')}
+                options={accountOptions}
+                value={verifyWxid ?? null}
+                onValueChange={setVerifyWxid}
+                placeholder={accounts.loading ? t('settings.account.loading') : t('settings.account.verify.selectWxid')}
+                className="min-w-[220px] font-mono"
+              />
               <Button variant="ghost" icon={ScanLine} onClick={() => void rescan()} loading={scanning}>
-                扫描目录
+                {t('settings.account.verify.scanDir')}
               </Button>
-              <Button variant="ghost" icon={ShieldCheck} onClick={() => void verify()} loading={verifying} disabled={!verifyWxid}>
-                验证账号
+              <Button
+                variant="ghost"
+                icon={ShieldCheck}
+                onClick={() => void verify()}
+                loading={verifying}
+                disabled={!verifyWxid}
+              >
+                {t('settings.account.verify.verify')}
               </Button>
               <Button variant="link" icon={Link} onClick={() => void testConnection()} loading={testing}>
-                测试连接
+                {t('settings.account.verify.testConnection')}
               </Button>
             </div>
           </SRow>
         </Card>
       </Section>
 
-      <Section title="解密密钥">
+      <Section title={t('settings.account.sections.keys')}>
         <Card variant="rows">
           <SRow
             id="account.dbKey"
-            title="数据库解密密钥"
-            description="64 位十六进制密钥，用于验证当前账号数据库连接"
+            title={t('settings.account.dbKey.title')}
+            description={t('settings.account.dbKey.description')}
+            help={t('settings.account.dbKey.help')}
             stacked
             footer={
               <>
                 {acquire === 'all' ? (
-                  <InlineKeyAcquire key="acquire-all" wxid={account.wxid} dbRoot={account.dbRoot} scope="all" onFinished={afterKeys} onManual={setManual} onClose={() => setAcquire(null)} />
+                  <InlineKeyAcquire
+                    key="acquire-all"
+                    wxid={account.wxid}
+                    dbRoot={account.dbRoot}
+                    scope="all"
+                    onFinished={afterKeys}
+                    onManual={(kind) => document.getElementById(`account-key-${kind}`)?.focus()}
+                    onClose={() => setAcquire(null)}
+                  />
                 ) : null}
-                {manual === 'db_key' ? <ManualKeyForm kind="db_key" onSaved={() => { setManual(null); afterKeys() }} onCancel={() => setManual(null)} /> : null}
               </>
             }
           >
-            <div className="flex items-center gap-2">
-              <SecretField kind="db_key" secretRef={secretRefFor(account, 'db_key')} version={keyVersion} label="解密密钥" className="flex-1" />
-              <Button variant="outline" icon={KeyRound} onClick={() => setAcquire('all')}>
-                自动获取密钥
-              </Button>
-              <Button variant="link" onClick={() => setManual(manual === 'db_key' ? null : 'db_key')}>
-                手动输入
+            <div className="flex flex-wrap items-center gap-2">
+              <SecretField
+                kind="db_key"
+                secretRef={secretRefFor(account, 'db_key')}
+                version={keyVersion}
+                onSaved={afterKeys}
+                label={t('settings.account.dbKey.fieldLabel')}
+                className="min-w-[200px] flex-1"
+              />
+              <Button variant="primary" icon={KeyRound} onClick={() => setAcquire('all')}>
+                {t('settings.account.dbKey.acquire')}
               </Button>
             </div>
           </SRow>
 
           <SRow
             id="account.imageKeys"
-            title="图片解密密钥"
-            description="优先走 kvcomm + wxid 验真，失败时回退到微信进程内存扫描"
+            title={t('settings.account.imageKeys.title')}
+            help={t('settings.account.imageKeys.help')}
             stacked
             footer={
               <>
                 {acquire === 'image' ? (
-                  <InlineKeyAcquire key="acquire-image" wxid={account.wxid} dbRoot={account.dbRoot} scope="image" onFinished={afterKeys} onManual={setManual} onClose={() => setAcquire(null)} />
+                  <InlineKeyAcquire
+                    key="acquire-image"
+                    wxid={account.wxid}
+                    dbRoot={account.dbRoot}
+                    scope="image"
+                    onFinished={afterKeys}
+                    onManual={(kind) => document.getElementById(`account-key-${kind}`)?.focus()}
+                    onClose={() => setAcquire(null)}
+                  />
                 ) : null}
-                {manual && manual !== 'db_key' ? <ManualKeyForm kind={manual} onSaved={() => { setManual(null); afterKeys() }} onCancel={() => setManual(null)} /> : null}
               </>
             }
           >
             <div className="flex flex-wrap items-end gap-3">
-              <LabeledSecret label="XOR 密钥" kind="image_xor" secretRef={secretRefFor(account, 'image_xor')} version={keyVersion} className="w-[120px]" />
-              <LabeledSecret label="AES 密钥" kind="image_aes" secretRef={secretRefFor(account, 'image_aes')} version={keyVersion} className="min-w-[200px] flex-1" />
-              <Button variant="outline" icon={Image} onClick={() => setAcquire('image')}>
-                自动获取图片密钥
+              <LabeledSecret
+                label={t('settings.account.imageKeys.xor')}
+                kind="image_xor"
+                secretRef={secretRefFor(account, 'image_xor')}
+                version={keyVersion}
+                onSaved={afterKeys}
+                className="w-[120px]"
+              />
+              <LabeledSecret
+                label={t('settings.account.imageKeys.aes')}
+                kind="image_aes"
+                secretRef={secretRefFor(account, 'image_aes')}
+                version={keyVersion}
+                onSaved={afterKeys}
+                className="min-w-[200px] flex-1"
+              />
+              <Button variant="primary" icon={Image} onClick={() => setAcquire('image')}>
+                {t('settings.account.imageKeys.acquire')}
               </Button>
-              <Button variant="link" onClick={() => setManual(manual === 'image_xor' ? null : 'image_xor')}>手动输入 XOR</Button>
-              <Button variant="link" onClick={() => setManual(manual === 'image_aes' ? null : 'image_aes')}>手动输入 AES</Button>
             </div>
           </SRow>
         </Card>
       </Section>
 
+      <OfficeSection />
+
       <ConfirmDialog
         open={resetCache}
         onOpenChange={setResetCache}
-        title="恢复默认缓存目录？"
-        description="将改回应用数据目录下的 cache，已有缓存不会自动移动。"
-        confirmLabel="恢复"
+        title={t('settings.account.cacheDir.resetTitle')}
+        description={t('settings.account.cacheDir.resetDescription')}
+        confirmLabel={t('settings.account.cacheDir.resetConfirm')}
         onConfirm={async () => {
-          if (await saveConfig({ account: { cacheDir: '' } })) toast.success('已恢复默认缓存目录')
+          if (await saveConfig({ account: { cacheDir: '' } })) toast.success(t('settings.account.cacheDir.resetDone'))
           setResetCache(false)
         }}
       />
@@ -259,7 +390,18 @@ export function AccountPage() {
   )
 }
 
-function LabeledSecret({ label, className, ...rest }: { label: string; kind: KeyKind; secretRef: string; version: number; className?: string }) {
+function LabeledSecret({
+  label,
+  className,
+  ...rest
+}: {
+  label: string
+  kind: KeyKind
+  secretRef: string
+  version: number
+  onSaved: () => void
+  className?: string
+}) {
   return (
     <div className={`flex flex-col gap-1 ${className ?? ''}`}>
       <span className="text-micro text-fg-3">{label}</span>
@@ -280,7 +422,18 @@ interface AccountCardProps {
   switching: boolean
 }
 
-function AccountCard({ account, wxid, dbRoot, loading, options, onSwitch, onRescan, scanning, switching }: AccountCardProps) {
+function AccountCard({
+  account,
+  wxid,
+  dbRoot,
+  loading,
+  options,
+  onSwitch,
+  onRescan,
+  scanning,
+  switching,
+}: AccountCardProps) {
+  const t = useT()
   if (!account && !wxid) {
     return (
       <Card>
@@ -293,7 +446,13 @@ function AccountCard({ account, wxid, dbRoot, loading, options, onSwitch, onResc
             </div>
           </div>
         ) : (
-          <EmptyState compact variant="empty" title="尚未检测到微信账号" description="确认微信已登录，然后重新扫描本机目录" action={{ label: '重新扫描', onClick: onRescan, icon: RefreshCw, variant: 'ghost' }} />
+          <EmptyState
+            compact
+            variant="empty"
+            title={t('settings.account.card.emptyTitle')}
+            description={t('settings.account.card.emptyDescription')}
+            action={{ label: t('settings.account.card.rescan'), onClick: onRescan, icon: RefreshCw, variant: 'ghost' }}
+          />
         )}
       </Card>
     )
@@ -301,27 +460,39 @@ function AccountCard({ account, wxid, dbRoot, loading, options, onSwitch, onResc
   const name = account?.nickname ?? wxid ?? ''
   const id = account?.wxid ?? wxid ?? ''
   return (
-    <Card data-setting-row="account.current" className="flex items-center gap-3">
+    <Card data-setting-row="account.current" className="flex flex-wrap items-center gap-3">
       <Avatar id={id} name={name} src={toMediaUrl(account?.avatarPath)} size={44} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-bubble font-medium leading-5 text-fg">{name}</span>
-          <Badge tone={account?.verified ? 'ok' : 'warn'}>{account?.verified ? '当前激活' : '未验证'}</Badge>
+      <div className="flex min-w-[160px] flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate text-bubble font-medium leading-5 text-fg">{name}</span>
+          <Badge tone={account?.verified ? 'ok' : 'warn'}>
+            {account?.verified ? t('settings.account.card.active') : t('settings.account.unverified')}
+          </Badge>
         </div>
-        <div className="flex items-center gap-2 text-micro text-fg-3">
-          <span className="shrink-0">微信 ID</span>
-          <span className="truncate font-mono" title={id}>
+        <div className="flex min-w-0 items-center gap-2 text-micro text-fg-3">
+          <span className="shrink-0">{t('settings.account.card.wechatId')}</span>
+          <span className="min-w-0 truncate font-mono" title={id}>
             {id}
           </span>
         </div>
         <div className="truncate font-mono text-micro text-fg-3" title={dbRoot}>
-          {dbRoot ? truncateMiddle(dbRoot, 56) : '数据库根目录未设置'}
+          {dbRoot ? truncateMiddle(dbRoot, 56) : t('settings.account.card.dbRootUnset')}
         </div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
-        <Select disabled={switching} aria-label="切换账号" options={options} value={wxid ?? null} onValueChange={onSwitch} placeholder={loading ? '读取中…' : '切换账号'} align="end" className="min-w-[140px]" />
+      {/* In a narrow settings column the switcher drops to its own row instead of squeezing the name to nothing. */}
+      <div className="flex shrink-0 flex-col items-end gap-2 @max-[720px]/settings:w-full @max-[720px]/settings:flex-row @max-[720px]/settings:items-center">
+        <Select
+          disabled={switching}
+          aria-label={t('settings.account.card.switch')}
+          options={options}
+          value={wxid ?? null}
+          onValueChange={onSwitch}
+          placeholder={loading ? t('settings.account.loading') : t('settings.account.card.switch')}
+          align="end"
+          className="min-w-[140px] max-w-[220px]"
+        />
         <Button variant="ghost" icon={RefreshCw} onClick={onRescan} loading={scanning}>
-          重新扫描
+          {t('settings.account.card.rescan')}
         </Button>
       </div>
     </Card>

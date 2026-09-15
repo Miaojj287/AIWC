@@ -3,40 +3,56 @@
  * 退出设置向导 confirm. Figma 155:415.
  */
 import { CircleAlert, KeyRound, Lock, Settings, ShieldCheck } from 'lucide-react'
+import { useT, type MessageKey } from '@/i18n'
 import { Button, ConfirmDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from '@/kit'
 import { openUrl } from '@/platform/openExternal'
 
-const AGREEMENT_SECTIONS: Array<{ title: string; body: string[] }> = [
+/** Catalog keys: section heading + paragraphs. */
+const AGREEMENT_SECTIONS: Array<{ title: MessageKey; body: MessageKey[] }> = [
   {
-    title: '一、数据完全本地',
-    body: ['AIWC 仅在你的电脑本地读取微信数据库与图片资源。解密、索引、统计、导出和记忆写入都在本机完成，不会把聊天记录上传到任何服务器。', '只有当你在「设置 › AI 接入」中配置了在线模型时，你主动发给 Agent 的内容（以及你 @ 引用的消息）才会发送给你配置的模型服务商；界面会在对应位置说明数据去向。'],
+    title: 'onboarding.agreement.sections.local.title',
+    body: ['onboarding.agreement.sections.local.p1', 'onboarding.agreement.sections.local.p2'],
   },
   {
-    title: '二、你的授权范围',
-    body: ['本软件仅供分析你本人的微信账号，或已获得明确授权的账号。请勿用于未经授权的数据读取、监控他人或任何违反法律法规的用途。', '自动回复与 AI 克隆功能会代表你发送消息；发送前默认需要你确认，并且所有出站消息都会留下本地审计记录。'],
+    title: 'onboarding.agreement.sections.scope.title',
+    body: ['onboarding.agreement.sections.scope.p1', 'onboarding.agreement.sections.scope.p2'],
   },
   {
-    title: '三、密钥与安全',
-    body: ['数据库解密密钥、图片密钥和模型 API Key 由系统安全存储（macOS Keychain / Windows DPAPI）保管，只在本机可读取，界面上默认打码显示。', '你可以随时在「设置 › 账号」中移除密钥、删除本地索引与缓存。'],
+    title: 'onboarding.agreement.sections.keys.title',
+    body: ['onboarding.agreement.sections.keys.p1', 'onboarding.agreement.sections.keys.p2'],
   },
   {
-    title: '四、免责',
-    body: ['本软件按「现状」提供。因使用本软件造成的任何直接或间接损失（包括但不限于账号风险、数据丢失），开发者不承担责任。', '微信是腾讯公司的注册商标。AIWC 与腾讯公司没有任何关联。'],
+    title: 'onboarding.agreement.sections.disclaimer.title',
+    body: ['onboarding.agreement.sections.disclaimer.p1', 'onboarding.agreement.sections.disclaimer.p2'],
   },
 ]
 
-export function AgreementDialog({ open, onOpenChange, onAgree }: { open: boolean; onOpenChange(open: boolean): void; onAgree(): void }) {
+export function AgreementDialog({
+  open,
+  onOpenChange,
+  onAgree,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  onAgree(): void
+}) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="xl">
-        <DialogHeader icon={ShieldCheck} tone="ok" title="用户协议与隐私政策" description="请阅读后勾选同意。全文很短，重点是：数据不出本机，功能仅限你本人的账号。" />
+        <DialogHeader
+          icon={ShieldCheck}
+          tone="ok"
+          title={t('onboarding.agreement.title')}
+          description={t('onboarding.agreement.description')}
+        />
         <DialogBody className="max-h-[52vh] gap-4 pr-1">
           {AGREEMENT_SECTIONS.map((s) => (
             <section key={s.title} className="flex flex-col gap-1.5">
-              <h3 className="text-body font-medium text-fg">{s.title}</h3>
+              <h3 className="text-body font-medium text-fg">{t(s.title)}</h3>
               {s.body.map((p, i) => (
                 <p key={i} className="text-caption leading-[18px] text-fg-2">
-                  {p}
+                  {t(p)}
                 </p>
               ))}
             </section>
@@ -44,7 +60,7 @@ export function AgreementDialog({ open, onOpenChange, onAgree }: { open: boolean
         </DialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            关闭
+            {t('common.close')}
           </Button>
           <Button
             onClick={() => {
@@ -52,7 +68,7 @@ export function AgreementDialog({ open, onOpenChange, onAgree }: { open: boolean
               onOpenChange(false)
             }}
           >
-            我已阅读并同意
+            {t('onboarding.agreement.agree')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -62,24 +78,46 @@ export function AgreementDialog({ open, onOpenChange, onAgree }: { open: boolean
 
 const SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'
 
-export function PermissionDialog({ open, onOpenChange, onRetry }: { open: boolean; onOpenChange(open: boolean): void; onRetry(): void }) {
+export function PermissionDialog({
+  open,
+  onOpenChange,
+  onRetry,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  onRetry(): void
+}) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
-        <DialogHeader icon={Lock} tone="danger" title="需要「完全磁盘访问」权限" description="内存扫描需要读取微信进程数据。请在 系统设置 › 隐私与安全性 › 完全磁盘访问 中勾选 AIWC，然后回到这里重试。" />
+        <DialogHeader
+          icon={Lock}
+          tone="danger"
+          title={t('onboarding.permission.title')}
+          description={t('onboarding.permission.description')}
+        />
         <DialogBody>
           <ol className="flex flex-col gap-1.5 text-caption text-fg-2">
-            {['打开 系统设置 › 隐私与安全性', '在「完全磁盘访问」中勾选 AIWC', '回到 AIWC 点击重试'].map((t, i) => (
-              <li key={t} className="flex items-center gap-2">
-                <span className="flex size-4 items-center justify-center rounded-chip border border-(--line-25) font-latin text-micro text-fg-3">{i + 1}</span>
-                {t}
+            {(
+              [
+                'onboarding.permission.stepOpenSettings',
+                'onboarding.permission.stepEnable',
+                'onboarding.permission.stepRetry',
+              ] as const
+            ).map((step, i) => (
+              <li key={step} className="flex items-center gap-2">
+                <span className="flex size-4 items-center justify-center rounded-chip border border-(--line-25) font-latin text-micro text-fg-3">
+                  {i + 1}
+                </span>
+                {t(step)}
               </li>
             ))}
           </ol>
         </DialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            稍后
+            {t('onboarding.permission.later')}
           </Button>
           <Button
             variant="outline"
@@ -88,10 +126,10 @@ export function PermissionDialog({ open, onOpenChange, onRetry }: { open: boolea
               onRetry()
             }}
           >
-            重试
+            {t('common.retry')}
           </Button>
           <Button icon={Settings} onClick={() => void openUrl(SETTINGS_URL)}>
-            打开系统设置
+            {t('onboarding.permission.openSettings')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -99,14 +137,28 @@ export function PermissionDialog({ open, onOpenChange, onRetry }: { open: boolea
   )
 }
 
-export function ConnectFailDialog({ error, onOpenChange, onReacquire }: { error: string | undefined; onOpenChange(open: boolean): void; onReacquire(): void }) {
+export function ConnectFailDialog({
+  error,
+  onOpenChange,
+  onReacquire,
+}: {
+  error: string | undefined
+  onOpenChange(open: boolean): void
+  onReacquire(): void
+}) {
+  const t = useT()
   return (
     <Dialog open={error !== undefined} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
-        <DialogHeader icon={CircleAlert} tone="danger" title="无法打开数据库" description={`${error ?? ''}。通常是解密密钥与该账号不匹配，请重新自动获取密钥或确认 wxid。`} />
+        <DialogHeader
+          icon={CircleAlert}
+          tone="danger"
+          title={t('onboarding.connectFail.title')}
+          description={t('onboarding.connectFail.description', { error: error ?? '' })}
+        />
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            返回修改
+            {t('onboarding.connectFail.back')}
           </Button>
           <Button
             icon={KeyRound}
@@ -115,7 +167,7 @@ export function ConnectFailDialog({ error, onOpenChange, onReacquire }: { error:
               onReacquire()
             }}
           >
-            重新获取密钥
+            {t('onboarding.connectFail.reacquire')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -123,19 +175,27 @@ export function ConnectFailDialog({ error, onOpenChange, onReacquire }: { error:
   )
 }
 
-export function ExitDialog({ open, onOpenChange, onExit }: { open: boolean; onOpenChange(open: boolean): void; onExit(): void }) {
+export function ExitDialog({
+  open,
+  onOpenChange,
+  onExit,
+}: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  onExit(): void
+}) {
+  const t = useT()
   return (
     <ConfirmDialog
       open={open}
       onOpenChange={onOpenChange}
       icon={CircleAlert}
       tone="warn"
-      title="退出设置向导？"
-      description="已填写的路径与密钥会保留在本机，下次打开可继续。"
-      cancelLabel="继续设置"
-      confirmLabel="退出"
+      title={t('onboarding.exit.title')}
+      description={t('onboarding.exit.description')}
+      cancelLabel={t('onboarding.exit.continue')}
+      confirmLabel={t('onboarding.exit.confirm')}
       onConfirm={onExit}
     />
   )
 }
-

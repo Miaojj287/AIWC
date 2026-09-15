@@ -2,7 +2,8 @@
  * Keyboard-injection port for the WeChat desktop client. Implementations only move focus, paste and
  * press Enter — they never decide *whether* to send; that is the sender's job (verify + halt).
  */
-export type InjectFailure = 'unsupported' | 'no-window' | 'focus-failed' | 'busy' | 'no-permission' | 'automation-denied'
+export type InjectFailure =
+  'unsupported' | 'no-window' | 'focus-failed' | 'busy' | 'no-permission' | 'automation-denied'
 
 export class InjectorError extends Error {
   constructor(

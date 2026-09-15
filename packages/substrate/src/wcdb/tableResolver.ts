@@ -60,7 +60,8 @@ export class MessageTableIndex {
     const refs: MessageTableRef[] = []
     for (const shard of this.listShards()) {
       const tables = this.tablesOfShard(shard.dbPath)
-      for (const tableName of tables.hashes.get(hash) ?? []) refs.push({ dbPath: shard.dbPath, tableName, kind: shard.kind })
+      for (const tableName of tables.hashes.get(hash) ?? [])
+        refs.push({ dbPath: shard.dbPath, tableName, kind: shard.kind })
     }
     return refs
   }
@@ -75,7 +76,10 @@ export class MessageTableIndex {
     let sortSeqAllPositive = false
     if (hasSortSeq) {
       try {
-        const row = this.q.get(ref.dbPath, `SELECT COUNT(*) AS c FROM ${quoteIdent(ref.tableName)} WHERE sort_seq IS NULL OR sort_seq <= 0`)
+        const row = this.q.get(
+          ref.dbPath,
+          `SELECT COUNT(*) AS c FROM ${quoteIdent(ref.tableName)} WHERE sort_seq IS NULL OR sort_seq <= 0`,
+        )
         sortSeqAllPositive = Number(row?.['c'] ?? 1) === 0
       } catch {
         sortSeqAllPositive = false

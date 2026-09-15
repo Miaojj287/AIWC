@@ -2,12 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildIdentityKeys,
   classifyContactKind,
-  classifySessionKind,
   cleanAccountDirName,
   identityMatches,
-  isGroupUsername,
-  isOfficialAccountUsername,
-  isSystemUsername,
   shouldKeepSession,
 } from './accountUtils'
 
@@ -29,22 +25,18 @@ describe('identity matching', () => {
 })
 
 describe('classification', () => {
-  it('classifies session kinds', () => {
-    expect(classifySessionKind('123@chatroom')).toBe('group')
-    expect(classifySessionKind('gh_news')).toBe('official')
-    expect(classifySessionKind('wxid_friend')).toBe('dm')
-    expect(classifySessionKind('filehelper')).toBe('system')
-  })
   it('classifies contact kinds and drops system contacts', () => {
     expect(classifyContactKind('room@chatroom', {})).toBe('group')
     expect(classifyContactKind('gh_x', {})).toBe('official')
     expect(classifyContactKind('filehelper', {})).toBeNull()
+    expect(classifyContactKind('placeholder_foldgroup', {})).toBeNull()
     expect(classifyContactKind('wxid_friend', { flag: 1 })).toBe('friend')
   })
-  it('recognises groups and official accounts', () => {
-    expect(isGroupUsername('a@chatroom')).toBe(true)
-    expect(isOfficialAccountUsername('gh_abc')).toBe(true)
-    expect(isSystemUsername('weixin')).toBe(true)
+  it('uses the anchored group rule and the shared system list', () => {
+    expect(classifyContactKind('room@im.chatroom', {})).toBe('group')
+    expect(classifyContactKind('room@chatroom.example', { flag: 1 })).toBe('friend')
+    expect(classifyContactKind('wxapp_demo@app', {})).toBeNull()
+    expect(classifyContactKind('my_service_desk', { flag: 1 })).toBe('friend')
   })
 })
 

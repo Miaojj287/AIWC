@@ -5,7 +5,10 @@ import { TAB_FUNCTION } from '@/workspace/tabsStore'
 import { registerFeatures } from './registerFeatures'
 import { descriptorFor } from './tabCommands'
 
-vi.mock('@/features/replydesk/store', () => ({ startReplyDesk: vi.fn().mockResolvedValue(undefined), useReplyDeskCount: () => 0 }))
+vi.mock('@/features/replydesk/store', () => ({
+  startReplyDesk: vi.fn().mockResolvedValue(undefined),
+  useReplyDeskCount: () => 0,
+}))
 
 /*
  * ⌘⇧K (web mode) ends in tabsStore.open({ kind: 'kit' }); the Workspace then needs a renderer for that

@@ -28,7 +28,10 @@ export interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 't
   compact?: boolean
 }
 
-const VARIANT: Record<EmptyStateVariant, { icon: IconComponent; box: string; spin?: boolean; button: ButtonProps['variant'] }> = {
+const VARIANT: Record<
+  EmptyStateVariant,
+  { icon: IconComponent; box: string; spin?: boolean; button: ButtonProps['variant'] }
+> = {
   empty: { icon: Inbox, box: 'bg-line-8 text-fg-3', button: 'primary' },
   loading: { icon: Loader, box: 'bg-accent-15 text-accent', spin: true, button: 'ghost' },
   error: { icon: CircleAlert, box: 'bg-danger/15 text-danger', button: 'ghost' },
@@ -39,7 +42,18 @@ const VARIANT: Record<EmptyStateVariant, { icon: IconComponent; box: string; spi
  * EmptyState — the one template for empty / loading / error / no-results (CLAUDE.md §4.7).
  * Figma 154:1191: icon box 44 r12 + title 14 Medium + description 12 weak + optional buttons.
  */
-export function EmptyState({ variant = 'empty', icon, title, description, action, secondaryAction, bordered = false, compact = false, className, ...rest }: EmptyStateProps) {
+export function EmptyState({
+  variant = 'empty',
+  icon,
+  title,
+  description,
+  action,
+  secondaryAction,
+  bordered = false,
+  compact = false,
+  className,
+  ...rest
+}: EmptyStateProps) {
   const meta = VARIANT[variant]
   const Icon = icon ?? meta.icon
   const showActions = variant !== 'loading' && (action || secondaryAction)
@@ -55,20 +69,41 @@ export function EmptyState({ variant = 'empty', icon, title, description, action
       )}
       {...rest}
     >
-      <div className={cn('flex shrink-0 items-center justify-center rounded-card', meta.box, compact ? 'size-9' : 'size-11')}>
-        <Icon size={compact ? 18 : ICON_SIZE.emptyState} strokeWidth={ICON_STROKE} aria-hidden className={meta.spin ? 'animate-spin' : undefined} />
+      <div
+        className={cn(
+          'flex shrink-0 items-center justify-center rounded-card',
+          meta.box,
+          compact ? 'size-9' : 'size-11',
+        )}
+      >
+        <Icon
+          size={compact ? 18 : ICON_SIZE.emptyState}
+          strokeWidth={ICON_STROKE}
+          aria-hidden
+          className={meta.spin ? 'animate-spin' : undefined}
+        />
       </div>
       <div className={cn('font-medium text-fg', compact ? 'text-body' : 'text-bubble')}>{title}</div>
       {description ? <div className="max-w-[320px] text-caption text-fg-3">{description}</div> : null}
       {showActions ? (
         <div className="mt-1 flex items-center gap-2">
           {action ? (
-            <Button variant={action.variant ?? meta.button} icon={action.icon} onClick={action.onClick} size={compact ? 'sm' : 'default'}>
+            <Button
+              variant={action.variant ?? meta.button}
+              icon={action.icon}
+              onClick={action.onClick}
+              size={compact ? 'sm' : 'default'}
+            >
               {action.label}
             </Button>
           ) : null}
           {secondaryAction ? (
-            <Button variant={secondaryAction.variant ?? 'link'} icon={secondaryAction.icon} onClick={secondaryAction.onClick} size={compact ? 'sm' : 'default'}>
+            <Button
+              variant={secondaryAction.variant ?? 'link'}
+              icon={secondaryAction.icon}
+              onClick={secondaryAction.onClick}
+              size={compact ? 'sm' : 'default'}
+            >
               {secondaryAction.label}
             </Button>
           ) : null}

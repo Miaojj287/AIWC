@@ -3,43 +3,76 @@
  * Pure data — the search index and the Tab both derive from it.
  */
 import type { CommandMap } from '@/app/commands'
+import { t, type MessageKey } from '@/i18n'
 
 export type SettingsPage = NonNullable<CommandMap['tab.openSettings']['page']>
 
-export const SETTINGS_PAGES: readonly SettingsPage[] = ['general', 'account', 'ai', 'memory', 'about']
+export const SETTINGS_PAGES: readonly SettingsPage[] = ['general', 'account', 'pets', 'ai', 'memory', 'about']
 
 export interface SettingsPageMeta {
   /** Nav label. */
-  label: string
+  label: MessageKey
   /** Page title (20px). */
-  title: string
+  title: MessageKey
   /** One-line description under the title (weak). */
-  description: string
+  description: MessageKey
   /** lucide icon name used by the nav. */
-  icon: 'sliders-horizontal' | 'user-round' | 'cpu' | 'book-open' | 'info'
+  icon: 'sliders-horizontal' | 'user-round' | 'paw-print' | 'cpu' | 'book-open' | 'info'
 }
 
 export const PAGE_META: Record<SettingsPage, SettingsPageMeta> = {
-  general: { label: '常规', title: '常规', description: '外观与启动行为', icon: 'sliders-horizontal' },
-  account: { label: '账号', title: '账号管理', description: '当前微信账号、数据库连接与解密密钥', icon: 'user-round' },
-  ai: { label: 'AI 接入', title: 'AI 接入', description: 'Agent 使用的大模型，以及语音转文字的转写方式', icon: 'cpu' },
-  memory: { label: '记忆', title: 'AI 记忆', description: 'Agent 跨会话记住的事实、你的画像与工作规则，均为本地 Markdown 文件', icon: 'book-open' },
-  about: { label: '版本与支持', title: '版本与支持', description: '版本信息、协议与日志', icon: 'info' },
+  general: {
+    label: 'settings.nav.pages.general.label',
+    title: 'settings.nav.pages.general.title',
+    description: 'settings.nav.pages.general.description',
+    icon: 'sliders-horizontal',
+  },
+  account: {
+    label: 'settings.nav.pages.account.label',
+    title: 'settings.nav.pages.account.title',
+    description: 'settings.nav.pages.account.description',
+    icon: 'user-round',
+  },
+  ai: {
+    label: 'settings.nav.pages.ai.label',
+    title: 'settings.nav.pages.ai.title',
+    description: 'settings.nav.pages.ai.description',
+    icon: 'cpu',
+  },
+  pets: {
+    label: 'settings.nav.pages.pets.label',
+    title: 'settings.nav.pages.pets.title',
+    description: 'settings.nav.pages.pets.description',
+    icon: 'paw-print',
+  },
+  memory: {
+    label: 'settings.nav.pages.memory.label',
+    title: 'settings.nav.pages.memory.title',
+    description: 'settings.nav.pages.memory.description',
+    icon: 'book-open',
+  },
+  about: {
+    label: 'settings.nav.pages.about.label',
+    title: 'settings.nav.pages.about.title',
+    description: 'settings.nav.pages.about.description',
+    icon: 'info',
+  },
 }
 
 export interface NavGroup {
   id: string
-  label: string
+  label: MessageKey
   pages: SettingsPage[]
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
-  { id: 'common', label: '通用', pages: ['general', 'account'] },
-  { id: 'ai', label: 'AI', pages: ['ai', 'memory'] },
-  { id: 'about', label: '关于', pages: ['about'] },
+  { id: 'common', label: 'settings.nav.groups.common', pages: ['general', 'account', 'pets'] },
+  { id: 'ai', label: 'settings.nav.groups.ai', pages: ['ai', 'memory'] },
+  { id: 'about', label: 'settings.nav.groups.about', pages: ['about'] },
 ]
 
-export const isSettingsPage = (v: unknown): v is SettingsPage => typeof v === 'string' && (SETTINGS_PAGES as readonly string[]).includes(v)
+export const isSettingsPage = (v: unknown): v is SettingsPage =>
+  typeof v === 'string' && (SETTINGS_PAGES as readonly string[]).includes(v)
 
 /** Tab state stored on the settings TabDescriptor. */
 export interface SettingsTabState {
@@ -47,4 +80,11 @@ export interface SettingsTabState {
   highlight?: string
 }
 
-export const SETTINGS_TAB = { kind: 'settings', objectId: 'settings', title: '设置' } as const
+/** `title` is read when the descriptor is spread into tabs.open; the strip shows the title registered in index.ts. */
+export const SETTINGS_TAB = {
+  kind: 'settings',
+  objectId: 'settings',
+  get title(): string {
+    return t('settings.nav.tabTitle')
+  },
+} as const

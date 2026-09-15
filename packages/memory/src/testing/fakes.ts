@@ -21,7 +21,9 @@ export interface FakeSubstrateData {
   contacts?: WxContact[]
 }
 
-export function fakeMessage(over: Partial<WxMessage> & { sessionId: string; seq: number; createdAt: number }): WxMessage {
+export function fakeMessage(
+  over: Partial<WxMessage> & { sessionId: string; seq: number; createdAt: number },
+): WxMessage {
   const id = over.id ?? `${over.sessionId}:${over.seq}`
   return {
     id,
@@ -111,7 +113,10 @@ export interface ScriptedModel extends ModelClient {
 }
 
 /** A ModelClient that streams whatever `handler` returns; a thrown Error becomes an `error` part. */
-export function createScriptedModel(handler: ScriptedHandler, opts: { chunk?: number; modelId?: string } = {}): ScriptedModel {
+export function createScriptedModel(
+  handler: ScriptedHandler,
+  opts: { chunk?: number; modelId?: string } = {},
+): ScriptedModel {
   const calls: Array<{ system: string; user: string }> = []
   const chunk = opts.chunk ?? 7
   return {
@@ -129,16 +134,18 @@ export function createScriptedModel(handler: ScriptedHandler, opts: { chunk?: nu
       const first = req.history[0]
       const user =
         first && first.type === 'user_message'
-          ? first.content
-              .map((p) => (p.type === 'text' ? p.text : ''))
-              .join('')
+          ? first.content.map((p) => (p.type === 'text' ? p.text : '')).join('')
           : ''
       calls.push({ system: req.system, user })
       let text: string
       try {
         text = await handler(req.system, user, req)
       } catch (e) {
-        const error: ModelError = { code: 'unknown', message: e instanceof Error ? e.message : String(e), retryable: false }
+        const error: ModelError = {
+          code: 'unknown',
+          message: e instanceof Error ? e.message : String(e),
+          retryable: false,
+        }
         yield { type: 'error', error }
         return
       }

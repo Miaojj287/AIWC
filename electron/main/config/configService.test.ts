@@ -39,7 +39,10 @@ describe('configService', () => {
     const svc = createConfigService({ file })
     const seen: string[] = []
     svc.subscribe((next, prev) => seen.push(`${prev.agent.permissionMode}->${next.agent.permissionMode}`))
-    const next = svc.set({ agent: { permissionMode: 'bypass' }, ai: { providers: [{ id: 'p1', kind: 'openai', label: 'OpenAI', models: [] }] } })
+    const next = svc.set({
+      agent: { permissionMode: 'bypass' },
+      ai: { providers: [{ id: 'p1', kind: 'openai', label: 'OpenAI', models: [] }] },
+    })
     expect(next.agent.permissionMode).toBe('bypass')
     expect(next.agent.maxStepsPerTurn).toBe(40)
     expect(next.ai.providers[0]?.id).toBe('p1')
@@ -95,6 +98,37 @@ describe('configService', () => {
     expect(readdirSync(dir).some((f) => f.startsWith('config.json.bak-'))).toBe(true)
   })
 
+  it('upgrades untouched legacy palettes without overwriting a customized palette', () => {
+    const file = join(dir, 'config.json')
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        general: {
+          appearance: {
+            light: { accent: '#c45100', background: '#f7f8fa', foreground: '#1a1b22', contrast: 35 },
+            dark: { accent: '#123456', background: '#15161c', foreground: '#e8e9ee', contrast: 35 },
+          },
+        },
+      }),
+    )
+    const appearance = createConfigService({ file }).get().general.appearance
+    expect(appearance.light).toEqual({
+      accent: '#4e82ef',
+      background: '#ffffff',
+      surface: '#e9e9e9',
+      foreground: '#000000',
+      contrast: 35,
+    })
+    expect(appearance.dark).toEqual({
+      accent: '#123456',
+      background: '#15161c',
+      surface: '#27282e',
+      foreground: '#e8e9ee',
+      contrast: 35,
+    })
+  })
+
   it('keeps transformed fields in memory but excludes them from persistence', () => {
     const file = join(dir, 'config.json')
     const resetSession = (cfg: AppConfig): AppConfig => ({
@@ -103,11 +137,19 @@ describe('configService', () => {
       onboarding: { completed: false },
     })
     const svc = createConfigService({ file, transformLoaded: resetSession, transformPersisted: resetSession })
-    svc.set({ account: { wxid: 'wxid_dev', dbRoot: '/wechat' }, onboarding: { completed: true }, general: { theme: 'light' } })
+    svc.set({
+      account: { wxid: 'wxid_dev', dbRoot: '/wechat' },
+      onboarding: { completed: true },
+      general: { theme: 'light' },
+    })
 
     expect(svc.get().account.wxid).toBe('wxid_dev')
     expect(svc.get().onboarding.completed).toBe(true)
-    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ account: {}, onboarding: { completed: false }, general: { theme: 'light' } })
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({
+      account: {},
+      onboarding: { completed: false },
+      general: { theme: 'light' },
+    })
 
     const again = createConfigService({ file, transformLoaded: resetSession, transformPersisted: resetSession })
     expect(again.get().account).toEqual({})

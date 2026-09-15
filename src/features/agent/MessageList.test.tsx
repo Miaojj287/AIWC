@@ -14,25 +14,91 @@ afterEach(cleanup)
 const turnId = 'trn_1' as TurnId
 
 const items: ThreadItem[] = [
-  { kind: 'user', id: 'u1', turnId, content: [{ type: 'text', text: '帮我总结「产品市场群」今天的讨论' }], mentions: [{ kind: 'session', id: 's1', label: '产品市场群' }] },
-  { kind: 'assistant', id: 'a1', turnId, text: '好的，我先读取该群今天的消息。', streaming: false, durationMs: 3200, modelId: 'demo' },
+  {
+    kind: 'user',
+    id: 'u1',
+    turnId,
+    content: [{ type: 'text', text: '帮我总结「产品市场群」今天的讨论' }],
+    mentions: [{ kind: 'session', id: 's1', label: '产品市场群' }],
+  },
+  {
+    kind: 'assistant',
+    id: 'a1',
+    turnId,
+    text: '好的，我先读取该群今天的消息。',
+    streaming: false,
+    durationMs: 3200,
+    modelId: 'demo',
+  },
   {
     kind: 'tools',
     id: 't1',
     turnId,
     calls: [
-      { callId: 'c1' as CallId, toolName: 'read_session', summary: '读取 产品市场群 · 今日 128 条消息', status: 'done', risk: 'read', input: { chat: 's1' }, output: { total: 128 }, startedAt: 0, durationMs: 800 },
-      { callId: 'c2' as CallId, toolName: 'send_message', summary: '推送到 投研交流群', status: 'awaiting_approval', risk: 'send', input: { to: 'g2' }, startedAt: 0, approvalId: 'apr_1' as ApprovalId },
+      {
+        callId: 'c1' as CallId,
+        toolName: 'read_session',
+        summary: '读取 产品市场群 · 今日 128 条消息',
+        status: 'done',
+        risk: 'read',
+        input: { chat: 's1' },
+        output: { total: 128 },
+        startedAt: 0,
+        durationMs: 800,
+      },
+      {
+        callId: 'c2' as CallId,
+        toolName: 'send_message',
+        summary: '推送到 投研交流群',
+        status: 'awaiting_approval',
+        risk: 'send',
+        input: { to: 'g2' },
+        startedAt: 0,
+        approvalId: 'apr_1' as ApprovalId,
+      },
     ],
   },
-  { kind: 'artifact', id: 'art1', turnId, callId: 'c1' as CallId, artifact: { kind: 'file', title: '周报草稿.md', path: '/tmp/周报草稿.md' } },
+  {
+    kind: 'artifact',
+    id: 'art1',
+    turnId,
+    callId: 'c1' as CallId,
+    artifact: { kind: 'file', title: '周报草稿.md', path: '/tmp/周报草稿.md' },
+  },
   { kind: 'compaction', id: 'cmp1', freedTokens: 58_000 },
-  { kind: 'plan', id: 'p1', turnId, steps: [{ title: '搜索', status: 'done' }, { title: '整理', status: 'doing' }] },
-  { kind: 'error', id: 'e1', turnId, error: { code: 'auth', message: 'API Key 无效或已过期', retryable: false }, actions: [{ label: '去改 Key', action: 'open_settings_ai' }, { label: '重试', action: 'retry' }] },
+  {
+    kind: 'plan',
+    id: 'p1',
+    turnId,
+    steps: [
+      { title: '搜索', status: 'done' },
+      { title: '整理', status: 'doing' },
+    ],
+  },
+  {
+    kind: 'error',
+    id: 'e1',
+    turnId,
+    error: { code: 'auth', message: 'API Key 无效或已过期', retryable: false },
+    actions: [
+      { label: '去改 Key', action: 'open_settings_ai' },
+      { label: '重试', action: 'retry' },
+    ],
+  },
   { kind: 'aborted', id: 'ab1', turnId, reason: 'interrupted' },
 ]
 
-const approval: ApprovalRequest = { approvalId: 'apr_1' as ApprovalId, callId: 'c2' as CallId, turnId, toolName: 'send_message', summary: '推送到 投研交流群', detail: '周报草稿 · 本周 6 个议题', input: { to: 'g2' }, risk: 'send', canAllowAlways: true }
+const approval: ApprovalRequest = {
+  approvalId: 'apr_1' as ApprovalId,
+  callId: 'c2' as CallId,
+  turnId,
+  toolName: 'send_message',
+  summary: '推送到 投研交流群',
+  detail: '周报草稿 · 本周 6 个议题',
+  input: { to: 'g2' },
+  risk: 'send',
+  canAllowAlways: true,
+}
 
 describe('<MessageList>', () => {
   it('renders every item kind with its copy', () => {
@@ -85,13 +151,27 @@ describe('<MessageList>', () => {
   })
 
   it('while an approval is open the turn reads as paused, not generating', () => {
-    render(<MessageList items={items} streaming turnStartedAt={Date.now() - 4100} pendingApprovals={[approval]} onResolveApproval={() => {}} />)
+    render(
+      <MessageList
+        items={items}
+        streaming
+        turnStartedAt={Date.now() - 4100}
+        pendingApprovals={[approval]}
+        onResolveApproval={() => {}}
+      />,
+    )
     expect(screen.getByText('已暂停，等待你确认上面的操作')).toBeTruthy()
     expect(screen.queryByText(/正在生成/)).toBeNull()
   })
 
   it('hides 总是允许 when the tool cannot be allow-listed', () => {
-    render(<MessageList items={items} pendingApprovals={[{ ...approval, canAllowAlways: false, risk: 'destructive' }]} onResolveApproval={() => {}} />)
+    render(
+      <MessageList
+        items={items}
+        pendingApprovals={[{ ...approval, canAllowAlways: false, risk: 'destructive' }]}
+        onResolveApproval={() => {}}
+      />,
+    )
     expect(screen.queryByRole('button', { name: '总是允许' })).toBeNull()
     expect(screen.getByText('此操作不可恢复，请确认。')).toBeTruthy()
   })
@@ -104,7 +184,9 @@ describe('<MessageList>', () => {
     fireEvent.click(screen.getByRole('button', { name: '去改 Key' }))
     expect(openSettings).toHaveBeenCalledWith({ page: 'ai' })
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(onResend).toHaveBeenCalledWith('帮我总结「产品市场群」今天的讨论', [{ kind: 'session', id: 's1', label: '产品市场群' }])
+    expect(onResend).toHaveBeenCalledWith('帮我总结「产品市场群」今天的讨论', [
+      { kind: 'session', id: 's1', label: '产品市场群' },
+    ])
     off()
   })
 
@@ -117,17 +199,48 @@ describe('<MessageList>', () => {
     off()
   })
 
-  it('shows the empty thread with suggestions, and the streaming indicator with 停止生成', () => {
+  it('keeps stopping in the composer rather than duplicating it in the transcript', () => {
     const onSuggestion = vi.fn()
-    const { unmount } = render(<MessageList items={[]} suggestions={['总结今天的产品市场群', '找发票']} onSuggestion={onSuggestion} />)
+    const { unmount } = render(
+      <MessageList items={[]} suggestions={['总结今天的产品市场群', '找发票']} onSuggestion={onSuggestion} />,
+    )
     expect(screen.getByText('新会话')).toBeTruthy()
     fireEvent.click(screen.getByText('总结今天的产品市场群'))
     expect(onSuggestion).toHaveBeenCalledWith('总结今天的产品市场群')
     unmount()
-    const onStop = vi.fn()
-    render(<MessageList items={[items[0]!]} streaming turnStartedAt={Date.now() - 4100} onStop={onStop} />)
+    render(<MessageList items={[items[0]!]} streaming turnStartedAt={Date.now() - 4100} />)
     expect(screen.getByText(/正在生成 · 已用/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '停止生成' }))
-    expect(onStop).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
+  })
+
+  it('offers turn actions only after the final response, including corrections', () => {
+    const first: ThreadItem = { kind: 'assistant', id: 'first', turnId, text: 'Initial response', streaming: false }
+    const last: ThreadItem = { ...first, id: 'last', text: 'Correction' }
+    const regenerate = vi.fn()
+    const { rerender } = render(<MessageList items={[first, last]} onRegenerate={regenerate} />)
+    expect(screen.getAllByRole('button', { name: '重新生成' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '复制' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '重新生成' }))
+    expect(regenerate).toHaveBeenCalledWith(last)
+    rerender(<MessageList items={[first, { ...last, streaming: true }]} streaming onRegenerate={regenerate} />)
+    expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+  })
+
+  it('keeps completed history readable while omitting empty streaming placeholders', () => {
+    const previous: ThreadItem = {
+      kind: 'assistant',
+      id: 'previous',
+      turnId,
+      text: 'Completed response',
+      streaming: false,
+    }
+    const next: ThreadItem = { ...previous, id: 'next', turnId: 'trn_next' as TurnId, text: '', streaming: true }
+    render(<MessageList items={[previous, next]} streaming onRegenerate={vi.fn()} />)
+    expect(screen.getByText('Completed response')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '复制' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: '重新生成' })).toBeNull()
+    expect(screen.getByTestId('message-list').querySelectorAll('[data-item="assistant"]')).toHaveLength(1)
   })
 })

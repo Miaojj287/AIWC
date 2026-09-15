@@ -5,17 +5,31 @@
 import { Check, Circle, CircleAlert, Eye, EyeOff, KeyRound, RefreshCw, ScanSearch, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppConfig, KeyAcquireStep } from '@aiwc/protocol'
+import { useT } from '@/i18n'
 import { Badge, Button, Card, FieldLabel, ICON_STROKE, IconButton, InlineHint, Input, Spinner, cn, toast } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
-import { KEY_KINDS, KEY_META, hasKey, summariseKeys, type KeyKind, type KeyState } from './gating'
+import { KEY_KINDS, KEY_META, KEY_STEP_LABELS, hasKey, summariseKeys, type KeyKind, type KeyState } from './gating'
 import { useWizardStore } from './wizardStore'
 
-const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = { db_key: 'dbKeyRef', image_xor: 'imageXorKeyRef', image_aes: 'imageAesKeyRef' }
+const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = {
+  db_key: 'dbKeyRef',
+  image_xor: 'imageXorKeyRef',
+  image_aes: 'imageAesKeyRef',
+}
 
 /** Masked value of an acquired key; 👁 reads the real hex from the secret store (default masked, CLAUDE.md §6). */
-function AcquiredKeyInput({ kind, state }: { kind: KeyKind; state: Extract<KeyState, { status: 'acquired' | 'manual' }> }) {
-  const ref = useConfig((c) => c.account[KEY_REFS[kind]]) || ({ db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' } as const)[kind]
+function AcquiredKeyInput({
+  kind,
+  state,
+}: {
+  kind: KeyKind
+  state: Extract<KeyState, { status: 'acquired' | 'manual' }>
+}) {
+  const t = useT()
+  const ref =
+    useConfig((c) => c.account[KEY_REFS[kind]]) ||
+    ({ db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' } as const)[kind]
   const [revealed, setRevealed] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
   useEffect(() => setRevealed(undefined), [ref, state])
@@ -31,16 +45,16 @@ function AcquiredKeyInput({ kind, state }: { kind: KeyKind; state: Extract<KeySt
       return
     }
     if (typeof ref !== 'string' || !ref) {
-      toast.info('密钥已保存在系统安全存储中，暂无法在此显示')
+      toast.info(t('onboarding.keys.storedNotViewable'))
       return
     }
     setBusy(true)
     try {
       const hex = await invoke('secret:reveal', { ref })
       if (hex) setRevealed(hex)
-      else toast.info('系统安全存储中没有这枚密钥')
+      else toast.info(t('onboarding.keys.notInStore'))
     } catch (e) {
-      toast.error(`读取失败：${e instanceof Error ? e.message : String(e)}`)
+      toast.error(t('onboarding.keys.revealFailed', { detail: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -52,12 +66,25 @@ function AcquiredKeyInput({ kind, state }: { kind: KeyKind; state: Extract<KeySt
       readOnly
       revealable={false}
       value={shown ? (known ?? '') : '•'.repeat(Math.min(meta.hexLength, 48))}
-      aria-label={`${meta.label}（已获取）`}
+      aria-label={t('onboarding.keys.acquiredAria', { label: t(meta.label) })}
       wrapperClassName="flex-1"
       trailing={
         <>
-          <IconButton size="xs" icon={shown ? EyeOff : Eye} label={shown ? '隐藏' : '显示'} loading={busy} onClick={() => void toggle()} className="text-fg-3" />
-          <Badge tone="ok">{state.status === 'acquired' && state.source === 'cached' ? '已缓存' : state.status === 'manual' ? '手动' : '已获取'}</Badge>
+          <IconButton
+            size="xs"
+            icon={shown ? EyeOff : Eye}
+            label={shown ? t('onboarding.keys.hide') : t('onboarding.keys.reveal')}
+            loading={busy}
+            onClick={() => void toggle()}
+            className="text-fg-3"
+          />
+          <Badge tone="ok">
+            {state.status === 'acquired' && state.source === 'cached'
+              ? t('onboarding.keys.cached')
+              : state.status === 'manual'
+                ? t('onboarding.keys.manual')
+                : t('onboarding.keys.acquired')}
+          </Badge>
         </>
       }
     />
@@ -65,6 +92,7 @@ function AcquiredKeyInput({ kind, state }: { kind: KeyKind; state: Extract<KeySt
 }
 
 function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState; wide?: boolean }) {
+  const t = useT()
   const setManualKey = useWizardStore((s) => s.setManualKey)
   const clearKey = useWizardStore((s) => s.clearKey)
   const acquire = useWizardStore((s) => s.acquire)
@@ -94,13 +122,36 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
 
   return (
     <div className={cn('flex flex-col gap-1.5', wide && 'col-span-2')}>
-      <div className={cn('flex items-center gap-3 rounded-item border p-2', failed ? 'border-danger/40 bg-danger/5' : 'border-line-6 bg-content/60')}>
-        <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-item', present ? 'bg-ok/15 text-ok' : failed ? 'bg-danger/15 text-danger' : 'bg-accent-15 text-accent')}>
-          {present ? <Check size={15} strokeWidth={2} aria-hidden /> : failed ? <CircleAlert size={15} strokeWidth={1.75} aria-hidden /> : <KeyRound size={15} strokeWidth={1.75} aria-hidden />}
+      <div
+        className={cn(
+          'flex items-center gap-3 rounded-item border p-2',
+          failed ? 'border-danger/40 bg-danger/5' : 'border-line-6 bg-content/60',
+        )}
+      >
+        <span
+          className={cn(
+            'flex size-8 shrink-0 items-center justify-center rounded-item',
+            present ? 'bg-ok/15 text-ok' : failed ? 'bg-danger/15 text-danger' : 'bg-accent-15 text-accent',
+          )}
+        >
+          {present ? (
+            <Check size={15} strokeWidth={2} aria-hidden />
+          ) : failed ? (
+            <CircleAlert size={15} strokeWidth={1.75} aria-hidden />
+          ) : (
+            <KeyRound size={15} strokeWidth={1.75} aria-hidden />
+          )}
         </span>
         <div className="flex w-[124px] shrink-0 flex-col gap-0.5">
-          <span className={cn('text-body font-medium', failed ? 'text-danger' : 'text-fg')}>{meta.label}</span>
-          <span className="truncate text-micro text-fg-3">{meta.description}</span>
+          <span
+            className={cn('truncate text-body font-medium', failed ? 'text-danger' : 'text-fg')}
+            title={t(meta.label)}
+          >
+            {t(meta.label)}
+          </span>
+          <span className="truncate text-micro text-fg-3" title={t(meta.description)}>
+            {t(meta.description)}
+          </span>
         </div>
         {state.status === 'acquired' || state.status === 'manual' ? (
           <AcquiredKeyInput kind={kind} state={state} />
@@ -109,7 +160,11 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
             mono
             type="password"
             value={draft}
-            placeholder={kind === 'image_aes' ? '粘贴 16 字符或 32 位十六进制密钥' : `粘贴 ${meta.hexLength} 位十六进制密钥`}
+            placeholder={
+              kind === 'image_aes'
+                ? t('onboarding.keys.pasteAes')
+                : t('onboarding.keys.pasteHex', { n: meta.hexLength })
+            }
             onChange={(e) => {
               setDraft(e.target.value)
               setError(undefined)
@@ -117,14 +172,24 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
             onKeyDown={(e) => e.key === 'Enter' && void commit()}
             disabled={saving || acquiring}
             error={Boolean(error)}
-            aria-label={meta.label}
+            aria-label={t(meta.label)}
             wrapperClassName="flex-1"
           />
         )}
-        {!present ? <Button variant="outline" size="sm" loading={saving} disabled={!draft.trim() || acquiring} onClick={() => void commit()}>保存</Button> : null}
+        {!present ? (
+          <Button
+            variant="outline"
+            size="sm"
+            loading={saving}
+            disabled={!draft.trim() || acquiring}
+            onClick={() => void commit()}
+          >
+            {t('common.save')}
+          </Button>
+        ) : null}
         {present ? (
           <Button variant="ghost" size="sm" onClick={() => clearKey(kind)} disabled={acquiring}>
-            清除
+            {t('onboarding.keys.clear')}
           </Button>
         ) : null}
       </div>
@@ -135,10 +200,16 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
             {state.error}
           </InlineHint>
           <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => void acquire('auto')} disabled={acquiring}>
-            重试
+            {t('common.retry')}
           </Button>
-          <Button variant="outline" size="sm" icon={ScanSearch} onClick={() => void acquire('memory_scan')} disabled={acquiring}>
-            内存扫描
+          <Button
+            variant="outline"
+            size="sm"
+            icon={ScanSearch}
+            onClick={() => void acquire('memory_scan')}
+            disabled={acquiring}
+          >
+            {t('onboarding.keys.memoryScan')}
           </Button>
         </div>
       ) : null}
@@ -159,6 +230,7 @@ const STEP_ICON: Record<KeyAcquireStep['status'], React.ReactNode> = {
  * prompt — plus a 取消 button while running (CLAUDE.md §4.5, long tasks stay cancellable).
  */
 function KeyAcquireProgress() {
+  const t = useT()
   const acquiring = useWizardStore((s) => s.acquiring)
   const steps = useWizardStore((s) => s.acquireSteps)
   const strategy = useWizardStore((s) => s.acquireStrategy)
@@ -170,28 +242,45 @@ function KeyAcquireProgress() {
       <div className="flex items-center gap-2">
         <Spinner size={13} />
         <span className="min-w-0 flex-1 truncate text-caption text-fg-2">
-          {strategy === 'memory_scan' ? '正在扫描微信进程内存…' : '正在获取微信数据密钥…'}
+          {strategy === 'memory_scan' ? t('onboarding.keys.scanningMemory') : t('onboarding.keys.fetchingKeys')}
           {active?.detail ? ` · ${active.detail}` : ''}
         </span>
         <Button variant="ghost" size="sm" onClick={cancelAcquire}>
-          取消
+          {t('common.cancel')}
         </Button>
       </div>
       <ol className="flex flex-col gap-1.5">
         {steps.map((s) => (
           <li key={s.id} data-status={s.status} className="flex items-center gap-2 text-tab">
             <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
-            <span className={cn('min-w-0 flex-1 truncate', s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg')}>{s.label}</span>
-            {s.detail ? <span className={cn('shrink-0 truncate text-micro max-w-[55%] text-right', s.status === 'failed' ? 'text-danger' : 'text-fg-3')}>{s.detail}</span> : null}
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate',
+                s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg',
+              )}
+            >
+              {s.label || t(KEY_STEP_LABELS[s.id])}
+            </span>
+            {s.detail ? (
+              <span
+                className={cn(
+                  'shrink-0 truncate text-micro max-w-[55%] text-right',
+                  s.status === 'failed' ? 'text-danger' : 'text-fg-3',
+                )}
+              >
+                {s.detail}
+              </span>
+            ) : null}
           </li>
         ))}
       </ol>
-      <span className="text-note text-fg-3">请保持微信处于登录状态；macOS 若提示重新登录，请退出后重新登录微信</span>
+      <span className="text-note text-fg-3">{t('onboarding.keys.stayLoggedIn')}</span>
     </div>
   )
 }
 
 export function KeysCard() {
+  const t = useT()
   const keys = useWizardStore((s) => s.keys)
   const acquiring = useWizardStore((s) => s.acquiring)
   const acquire = useWizardStore((s) => s.acquire)
@@ -201,21 +290,41 @@ export function KeysCard() {
   const canAcquire = Boolean(wxid && dbRoot) && !acquiring
 
   const status = acquiring
-    ? { kind: 'info' as const, text: '获取中…' }
+    ? { kind: 'info' as const, text: t('onboarding.keys.acquiring') }
     : summary.complete
-      ? { kind: 'success' as const, text: '已全部获取' }
+      ? { kind: 'success' as const, text: t('onboarding.keys.allAcquired') }
       : summary.failed.length
-        ? { kind: 'error' as const, text: `已获取 ${summary.done} / ${summary.total} 个密钥` }
+        ? { kind: 'error' as const, text: t('onboarding.keys.progress', { done: summary.done, total: summary.total }) }
         : summary.done
-          ? { kind: 'warning' as const, text: `已获取 ${summary.done} / ${summary.total} 个密钥` }
+          ? {
+              kind: 'warning' as const,
+              text: t('onboarding.keys.progress', { done: summary.done, total: summary.total }),
+            }
           : undefined
 
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <FieldLabel icon={KeyRound} label="微信数据密钥" help="数据库解密密钥、图片 XOR 密钥、图片 AES 密钥。优先从 kvcomm 缓存读取并用 wxid 验真，失败时回退到内存扫描" hint="三部分一次获取" status={status} className="min-w-0 flex-1" />
-        <Button icon={Sparkles} loading={acquiring} onClick={() => void acquire('auto')} disabled={!canAcquire} title={!wxid || !dbRoot ? '请先选择数据库路径与账号' : undefined}>
-          {acquiring ? '获取中…' : summary.done > 0 ? '重新获取' : '自动获取'}
+        <FieldLabel
+          icon={KeyRound}
+          label={t('onboarding.keys.label')}
+          help={t('onboarding.keys.help')}
+          hint={t('onboarding.keys.hint')}
+          status={status}
+          className="min-w-0 flex-1"
+        />
+        <Button
+          icon={Sparkles}
+          loading={acquiring}
+          onClick={() => void acquire('auto')}
+          disabled={!canAcquire}
+          title={!wxid || !dbRoot ? t('onboarding.keys.selectFirst') : undefined}
+        >
+          {acquiring
+            ? t('onboarding.keys.acquiring')
+            : summary.done > 0
+              ? t('onboarding.keys.acquireAgain')
+              : t('onboarding.keys.acquire')}
         </Button>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -227,10 +336,16 @@ export function KeysCard() {
       <KeyAcquireProgress />
       {!summary.complete && summary.done > 0 && !acquiring && summary.failed.length === 0 ? (
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" icon={ScanSearch} onClick={() => void acquire('memory_scan')} disabled={!canAcquire}>
-            自动获取图片密钥
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ScanSearch}
+            onClick={() => void acquire('memory_scan')}
+            disabled={!canAcquire}
+          >
+            {t('onboarding.keys.acquireImageKeys')}
           </Button>
-          <span className="text-note text-fg-3">图片密钥缺失时只影响图片预览，可稍后在「设置 › 账号」中获取</span>
+          <span className="text-note text-fg-3">{t('onboarding.keys.imageKeysLater')}</span>
         </div>
       ) : null}
     </Card>

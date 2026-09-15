@@ -3,6 +3,7 @@
  * out of the markdown, date labels. Tested in diaryModel.test.ts.
  */
 import type { DiaryEntry } from '@aiwc/protocol'
+import { t, type MessageKey } from '@/i18n'
 
 export type DiaryListItem = Pick<DiaryEntry, 'date' | 'generatedAt' | 'degraded'>
 
@@ -16,7 +17,15 @@ export interface MonthGroup {
 }
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const WEEKDAYS: readonly MessageKey[] = [
+  'diary.date.weekdays.sun',
+  'diary.date.weekdays.mon',
+  'diary.date.weekdays.tue',
+  'diary.date.weekdays.wed',
+  'diary.date.weekdays.thu',
+  'diary.date.weekdays.fri',
+  'diary.date.weekdays.sat',
+]
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 export function parseDateKey(date: string): { y: number; m: number; d: number } | undefined {
@@ -41,7 +50,7 @@ export function groupByMonth(items: readonly DiaryListItem[]): MonthGroup[] {
     const p = parseDateKey(item.date)
     if (!p) continue
     const key = `${p.y}-${pad2(p.m)}`
-    const g = groups.get(key) ?? { key, label: `${p.y} 年 ${p.m} 月`, items: [] }
+    const g = groups.get(key) ?? { key, label: t('diary.date.month', { year: p.y, month: p.m }), items: [] }
     g.items.push(item)
     groups.set(key, g)
   }
@@ -54,16 +63,16 @@ export function groupByMonth(items: readonly DiaryListItem[]): MonthGroup[] {
 export function diaryDateLabel(date: string): string {
   const p = parseDateKey(date)
   if (!p) return date
-  const wd = WEEKDAYS[new Date(p.y, p.m - 1, p.d).getDay()] ?? ''
-  return `${p.m}月${p.d}日 ${wd}`.trim()
+  const wd = WEEKDAYS[new Date(p.y, p.m - 1, p.d).getDay()]
+  return t('diary.date.label', { month: p.m, day: p.d, weekday: wd ? t(wd) : '' }).trim()
 }
 
 /** 2026 年 9 月 5 日 · 周六 */
 export function diaryTitle(date: string): string {
   const p = parseDateKey(date)
   if (!p) return date
-  const wd = WEEKDAYS[new Date(p.y, p.m - 1, p.d).getDay()] ?? ''
-  return `${p.y} 年 ${p.m} 月 ${p.d} 日 · ${wd}`
+  const wd = WEEKDAYS[new Date(p.y, p.m - 1, p.d).getDay()]
+  return t('diary.date.title', { year: p.y, month: p.m, day: p.d, weekday: wd ? t(wd) : '' })
 }
 
 const CUES_HEADING_RE = /^\s{0,3}#{1,6}\s*记忆线索\s*$/m
@@ -99,8 +108,15 @@ export function pickInitialDate(items: readonly DiaryListItem[], requested?: str
 }
 
 /** 生成于 14:32 · 128 条消息 · 6 个会话 */
-export function sourcesSummary(entry: Pick<DiaryEntry, 'sources' | 'generatedAt'>, clock: (ms: number) => string): string {
-  const parts = [`生成于 ${clock(entry.generatedAt)}`, `${entry.sources.messageCount} 条消息`, `${entry.sources.sessions.length} 个会话`]
-  if (entry.sources.agentTurns > 0) parts.push(`${entry.sources.agentTurns} 轮 Agent 对话`)
+export function sourcesSummary(
+  entry: Pick<DiaryEntry, 'sources' | 'generatedAt'>,
+  clock: (ms: number) => string,
+): string {
+  const parts = [
+    t('diary.sources.generatedAt', { time: clock(entry.generatedAt) }),
+    t('diary.sources.messages', { n: entry.sources.messageCount }),
+    t('diary.sources.sessions', { n: entry.sources.sessions.length }),
+  ]
+  if (entry.sources.agentTurns > 0) parts.push(t('diary.sources.agentTurns', { n: entry.sources.agentTurns }))
   return parts.join(' · ')
 }

@@ -1,11 +1,29 @@
-import { describe, expect, it } from 'vitest'
-import { diaryDateLabel, diaryTitle, groupByMonth, parseDateKey, pickInitialDate, sourcesSummary, splitCues, todayKey } from './diaryModel'
+import { afterEach, describe, expect, it } from 'vitest'
+import { __resetLanguageForTests, setLanguage } from '@/i18n'
+import {
+  diaryDateLabel,
+  diaryTitle,
+  groupByMonth,
+  parseDateKey,
+  pickInitialDate,
+  sourcesSummary,
+  splitCues,
+  todayKey,
+} from './diaryModel'
 
 const item = (date: string, degraded?: boolean) => ({ date, generatedAt: 0, degraded })
 
+afterEach(() => __resetLanguageForTests())
+
 describe('groupByMonth', () => {
   it('groups newest-first and drops malformed dates', () => {
-    const groups = groupByMonth([item('2026-08-30'), item('2026-09-05'), item('bad'), item('2026-09-01'), item('2025-12-31')])
+    const groups = groupByMonth([
+      item('2026-08-30'),
+      item('2026-09-05'),
+      item('bad'),
+      item('2026-09-01'),
+      item('2025-12-31'),
+    ])
     expect(groups.map((g) => g.key)).toEqual(['2026-09', '2026-08', '2025-12'])
     expect(groups[0]?.label).toBe('2026 年 9 月')
     expect(groups[0]?.items.map((i) => i.date)).toEqual(['2026-09-05', '2026-09-01'])
@@ -24,6 +42,15 @@ describe('dates', () => {
     expect(diaryDateLabel('nope')).toBe('nope')
     expect(todayKey(new Date(2026, 0, 3).getTime())).toBe('2026-01-03')
   })
+  it('labels dates in English when the UI language is English', () => {
+    setLanguage('en-US')
+    expect(diaryDateLabel('2026-09-05')).toBe('Sat, Sep 5')
+    expect(diaryTitle('2026-09-05')).toBe('Sat, Sep 5, 2026')
+    expect(groupByMonth([item('2026-09-05')])[0]?.label).toBe('September 2026')
+    expect(
+      sourcesSummary({ generatedAt: 1, sources: { sessions: ['a'], messageCount: 1, agentTurns: 2 } }, () => '14:32'),
+    ).toBe('Generated at 14:32 · 1 message · 1 chat · 2 Agent turns')
+  })
   it('pickInitialDate prefers the requested date, else the newest', () => {
     const items = [item('2026-09-01'), item('2026-09-05')]
     expect(pickInitialDate(items, '2026-09-01')).toBe('2026-09-01')
@@ -33,7 +60,20 @@ describe('dates', () => {
 })
 
 describe('splitCues', () => {
-  const md = ['# 2026-09-05 日记', '', '今天共 128 条消息。', '', '## 会话', '### 产品市场群（40 条）', '- 张明：路演纪要', '', '## 记忆线索', '- 产品市场群：路演纪要', '- 周报要标风险项', ''].join('\n')
+  const md = [
+    '# 2026-09-05 日记',
+    '',
+    '今天共 128 条消息。',
+    '',
+    '## 会话',
+    '### 产品市场群（40 条）',
+    '- 张明：路演纪要',
+    '',
+    '## 记忆线索',
+    '- 产品市场群：路演纪要',
+    '- 周报要标风险项',
+    '',
+  ].join('\n')
   it('strips the cues section and the leading date title', () => {
     const { body, cues } = splitCues(md)
     expect(body.startsWith('今天共 128 条消息。')).toBe(true)
@@ -49,8 +89,13 @@ describe('splitCues', () => {
 
 describe('sourcesSummary', () => {
   it('formats the meta line', () => {
-    const s = sourcesSummary({ generatedAt: 1, sources: { sessions: ['a', 'b'], messageCount: 128, agentTurns: 0 } }, () => '14:32')
+    const s = sourcesSummary(
+      { generatedAt: 1, sources: { sessions: ['a', 'b'], messageCount: 128, agentTurns: 0 } },
+      () => '14:32',
+    )
     expect(s).toBe('生成于 14:32 · 128 条消息 · 2 个会话')
-    expect(sourcesSummary({ generatedAt: 1, sources: { sessions: [], messageCount: 0, agentTurns: 3 } }, () => '02:00')).toContain('3 轮 Agent 对话')
+    expect(
+      sourcesSummary({ generatedAt: 1, sources: { sessions: [], messageCount: 0, agentTurns: 3 } }, () => '02:00'),
+    ).toContain('3 轮 Agent 对话')
   })
 })

@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ToolContext, ToolDefinition, ToolProfile } from '@aiwc/protocol'
+import type { AnyToolDefinition, ToolContext, ToolProfile } from '@aiwc/protocol'
 import { asCallId, asThreadId, asTurnId, newStepId } from '@aiwc/protocol'
 import { describe, expect, it } from 'vitest'
 import { createRelationshipStore } from '../relationship/relationshipStore'
@@ -28,8 +28,7 @@ function ctxFor<S extends Record<string, unknown>>(services: S, over: Partial<To
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const byName = (tools: ToolDefinition<any, any>[], name: string) => {
+const byName = (tools: AnyToolDefinition[], name: string) => {
   const t = tools.find((x) => x.name === name)
   if (!t) throw new Error(name)
   return t
@@ -39,7 +38,12 @@ describe('memoryTools', () => {
   const tools = memoryTools()
 
   it('declares risk / profiles per contract', () => {
-    const spec = Object.fromEntries(tools.map((t) => [t.name, { risk: t.risk, profiles: [...t.profiles] as ToolProfile[], parallelSafe: t.parallelSafe }]))
+    const spec = Object.fromEntries(
+      tools.map((t) => [
+        t.name,
+        { risk: t.risk, profiles: [...t.profiles] as ToolProfile[], parallelSafe: t.parallelSafe },
+      ]),
+    )
     expect(spec).toEqual({
       remember: { risk: 'write', profiles: ['desktop-chat', 'cron'], parallelSafe: false },
       recall: { risk: 'read', profiles: ['desktop-chat', 'cron', 'subagent'], parallelSafe: true },
@@ -57,8 +61,13 @@ describe('memoryTools', () => {
     const r1 = await remember.execute({ file: 'MEMORY', text: '用户常驻北京' }, ctx)
     expect(r1.isError).toBeUndefined()
     expect(String(r1.content)).toContain('已写入 MEMORY')
-    expect(String((await remember.execute({ file: 'MEMORY', text: '用户常驻北京。' }, ctx)).content)).toContain('无需重复')
-    const over = await remember.execute({ file: 'MEMORY', text: '这是一条肯定会超出四十字预算的很长很长很长很长很长很长很长很长很长很长的记忆内容' }, ctx)
+    expect(String((await remember.execute({ file: 'MEMORY', text: '用户常驻北京。' }, ctx)).content)).toContain(
+      '无需重复',
+    )
+    const over = await remember.execute(
+      { file: 'MEMORY', text: '这是一条肯定会超出四十字预算的很长很长很长很长很长很长很长很长很长很长的记忆内容' },
+      ctx,
+    )
     expect(over.isError).toBe(true)
     expect(String(over.content)).toContain('空间不足')
     expect(String(over.content)).toContain('[0] 用户常驻北京')
@@ -73,19 +82,48 @@ describe('memoryTools', () => {
     expect(String((await recall.execute({ query: '上海' }, ctx)).content)).toContain('没有与「上海」相关的记忆')
 
     const forget = byName(tools, 'forget')
-    const miss = await forget.execute({ file: 'MEMORY', index: 3 }, ctx)
+    const miss = await forget.execute({ file: 'MEMORY', index: 3, text: '用户常驻北京' }, ctx)
     expect(miss.isError).toBe(true)
-    expect(forget.summarize?.({ file: 'MEMORY', index: 0 })).toBe('删除 MEMORY 第 0 条记忆')
-    const gone = await forget.execute({ file: 'MEMORY', index: 0 }, ctx)
+    expect(forget.summarize?.({ file: 'MEMORY', index: 0, text: '用户常驻北京' })).toBe(
+      '删除 MEMORY 第 0 条记忆：「用户常驻北京」',
+    )
+    const gone = await forget.execute({ file: 'MEMORY', index: 0, text: '用户常驻北京' }, ctx)
     expect(String(gone.content)).toContain('已删除 MEMORY 第 0 条')
     expect(await memory.entries('MEMORY')).toEqual([])
+  })
+
+  it('forget removes only the entry that was approved, even when the file changed in between', async () => {
+    const memory = createMemoryStore({ dir: tmp('mem-forget') })
+    const ctx = ctxFor({ memory })
+    await memory.addEntry('MEMORY', '旧地址：北京')
+    await memory.addEntry('MEMORY', '女儿生日 5 月 3 日')
+    const forget = byName(tools, 'forget')
+    // the approval popover names the entry, not just its index
+    expect(forget.inputSchema.safeParse({ file: 'MEMORY', index: 0 }).success).toBe(false)
+    const approved = { file: 'MEMORY', index: 0, text: '旧地址：北京' } as const
+    expect(forget.summarize?.(approved)).toBe('删除 MEMORY 第 0 条记忆：「旧地址：北京」')
+    // the user reordered the file in 设置 › 记忆 after list_memories, before the call ran
+    await memory.write('MEMORY', '女儿生日 5 月 3 日\n§\n旧地址：北京')
+    const refused = await forget.execute(approved, ctx)
+    expect(refused.isError).toBe(true)
+    expect(String(refused.content)).toContain('[1] 旧地址：北京')
+    expect((await memory.entries('MEMORY')).map((e) => e.text)).toEqual(['女儿生日 5 月 3 日', '旧地址：北京'])
+    const done = await forget.execute({ ...approved, index: 1 }, ctx)
+    expect(done.isError).toBeUndefined()
+    expect((await memory.entries('MEMORY')).map((e) => e.text)).toEqual(['女儿生日 5 月 3 日'])
+    const long = { file: 'MEMORY', index: 0, text: '长'.repeat(300) } as const
+    expect(forget.summarize?.(long)).toMatch(/^删除 MEMORY 第 0 条记忆：「长+…」$/)
   })
 })
 
 describe('relationshipTools', () => {
   it('reads a profile, reports status when absent, and restricts the bot to its own chat', async () => {
     const relationships = createRelationshipStore({ dir: tmp('rel') })
-    const substrate = createFakeSubstrate({ sessions: [], messages: [], contacts: [{ username: 'wxid_x', nickname: '小明', kind: 'friend' }] })
+    const substrate = createFakeSubstrate({
+      sessions: [],
+      messages: [],
+      contacts: [{ username: 'wxid_x', nickname: '小明', kind: 'friend' }],
+    })
     const tool = byName(relationshipTools(), 'get_relationship_profile')
     expect(tool.risk).toBe('read')
     expect([...tool.profiles]).toEqual(['desktop-chat', 'wechat-bot', 'cron'])
@@ -96,9 +134,43 @@ describe('relationshipTools', () => {
     expect(text).toContain('「李娜」（wxid_test01）画像 v1，2 组样本')
     expect(text).toContain('边界：不聊前任')
     expect(text).toContain('共同经历：2024 夏 一起去青岛')
-    const bot = ctxFor({ relationships, substrate }, { profile: 'wechat-bot', channel: 'wechat-ilink', origin: { channel: 'wechat-ilink', chatId: 'someone_else' } })
+    const bot = ctxFor(
+      { relationships, substrate },
+      { profile: 'wechat-bot', channel: 'wechat-ilink', origin: { channel: 'wechat-ilink', chatId: 'someone_else' } },
+    )
     expect((await tool.execute({ contactId: 'wxid_test01' }, bot)).isError).toBe(true)
-    const botOwn = ctxFor({ relationships, substrate }, { profile: 'wechat-bot', channel: 'wechat-ilink', origin: { channel: 'wechat-ilink', chatId: 'wxid_test01' } })
-    expect((await tool.execute({ contactId: 'wxid_test01' }, botOwn)).isError).toBeUndefined()
+    const botOwn = ctxFor(
+      { relationships, substrate },
+      { profile: 'wechat-bot', channel: 'wechat-ilink', origin: { channel: 'wechat-ilink', chatId: 'wxid_test01' } },
+    )
+    const own = await tool.execute({ contactId: 'wxid_test01' }, botOwn)
+    expect(own.isError).toBeUndefined()
+    // the bot's reply goes to that very contact: it sees the conversation's tone, not the owner's dossier
+    expect(String(own.content)).toContain('<relationship_style audience="third_party">')
+    for (const secret of ['边界', '不聊前任', '在杭州做设计', '一起去青岛', '晚上吃啥'])
+      expect(String(own.content), secret).not.toContain(secret)
+  })
+
+  it('fails closed on the wechat-bot profile when the thread is not bound to a chat', async () => {
+    const relationships = createRelationshipStore({ dir: tmp('rel-closed') })
+    await relationships.upsert(sampleProfile())
+    const substrate = createFakeSubstrate({ sessions: [], messages: [] })
+    const tool = byName(relationshipTools(), 'get_relationship_profile')
+    const unbound = [
+      ctxFor({ relationships, substrate }, { profile: 'wechat-bot', channel: 'wechat-ilink' }),
+      ctxFor(
+        { relationships, substrate },
+        { profile: 'wechat-bot', channel: 'wechat-ilink', origin: { channel: 'wechat-ilink', chatId: '' } },
+      ),
+      ctxFor(
+        { relationships, substrate },
+        { profile: 'wechat-bot', channel: 'wechat-ui', origin: { channel: 'wechat-ui', chatId: '  ' } },
+      ),
+    ]
+    for (const ctx of unbound) {
+      const res = await tool.execute({ contactId: 'wxid_test01' }, ctx)
+      expect(res.isError).toBe(true)
+      expect(String(res.content)).not.toContain('李娜')
+    }
   })
 })

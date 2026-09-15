@@ -19,7 +19,11 @@ export function isRelevantDbFile(fileName: string | null | undefined): boolean {
 }
 
 /** Generic debouncer collecting changed names; exported for tests. */
-export function createDebouncedCollector(debounceMs: number, flush: (items: string[]) => void, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }) {
+export function createDebouncedCollector(
+  debounceMs: number,
+  flush: (items: string[]) => void,
+  timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout },
+) {
   const pending = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | undefined
   return {

@@ -1,5 +1,6 @@
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-react'
 import type { HTMLAttributes } from 'react'
+import { useT } from '@/i18n'
 import { cn } from '../cn'
 import { ICON_SIZE, ICON_STROKE } from '../icon'
 import { Spinner } from '../Spinner'
@@ -22,6 +23,7 @@ export interface ToastViewProps extends HTMLAttributes<HTMLDivElement> {
  * Figma 154:887. Pure presentational; <Toaster/> wires it to the store.
  */
 export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewProps) {
+  const t = useT()
   const meta = toast.kind === 'progress' ? null : ICON[toast.kind]
   return (
     <div
@@ -33,7 +35,12 @@ export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewPro
       {...rest}
     >
       {meta ? (
-        <meta.icon size={ICON_SIZE.toast} strokeWidth={ICON_STROKE} aria-hidden className={cn('shrink-0', meta.className)} />
+        <meta.icon
+          size={ICON_SIZE.toast}
+          strokeWidth={ICON_STROKE}
+          aria-hidden
+          className={cn('shrink-0', meta.className)}
+        />
       ) : (
         <Spinner size={13} />
       )}
@@ -45,7 +52,7 @@ export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewPro
         <button
           type="button"
           onClick={toast.action.onClick}
-          className="shrink-0 rounded-sm px-0.5 text-tab text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/70"
+          className="max-w-[120px] shrink-0 truncate rounded-sm px-0.5 text-tab text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/70"
         >
           {toast.action.label}
         </button>
@@ -53,7 +60,7 @@ export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewPro
       {onDismiss ? (
         <button
           type="button"
-          aria-label="关闭"
+          aria-label={t('kit.close')}
           onClick={onDismiss}
           className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-fg-3 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
         >

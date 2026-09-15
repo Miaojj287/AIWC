@@ -1,14 +1,16 @@
 import { ListFilter, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SyncStatus } from '@aiwc/protocol'
+import { useT } from '@/i18n'
 import {
-  Button,
+  cn,
   Chip,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItems,
   DropdownMenuTrigger,
   EmptyState,
+  ErrorBoundary,
   IconButton,
   SearchBox,
   Tooltip,
@@ -26,6 +28,10 @@ export interface ObjectListProps {
   mac: boolean
 }
 
+/** Square 32px tool next to the list search (更多筛选, 刷新); `shell-list-tool` lets 透明效果 make it translucent. */
+const HEADER_TOOL_CLASS =
+  'shell-list-tool size-8 rounded-item border border-line-8 bg-content text-fg-2 hover:bg-content hover:text-fg'
+
 /** The column is a singleton; remember which ⌘K request has already been honoured across remounts. */
 let handledFocusRequest = 0
 
@@ -39,9 +45,10 @@ interface HeaderState {
  * ObjectList — the 280px column (Figma 115:429): sticky header = SearchBox (⌘K) + refresh; a chip row
  * with live counts + 更多筛选 + 清除筛选; the body is whatever the current rail function registered
  * (DESIGN-SPEC §0.2). Empty / loading / error states inside the body come from the body itself; the
- * frame only covers "no list registered for this function".
+ * frame only covers "no list registered for this function" and a body that throws while rendering.
  */
 export function ObjectList({ mac }: ObjectListProps) {
+  const t = useT()
   const fn = useShellStore((s) => s.railFunction)
   const query = useShellStore((s) => s.listQuery)
   const segment = useShellStore((s) => s.listSegment)
@@ -64,11 +71,13 @@ export function ObjectList({ mac }: ObjectListProps) {
   // mount effects run before any parent effect, so an effect-based reset would wipe its first counts)
   const [header, setHeader] = useState<HeaderState>({ fn, counts: {}, filterOptions: [] })
   if (header.fn !== fn) setHeader({ fn, counts: {}, filterOptions: [] })
-  const { counts, filterOptions }: Pick<HeaderState, 'counts' | 'filterOptions'> = header.fn === fn ? header : { counts: {}, filterOptions: [] }
+  const { counts, filterOptions }: Pick<HeaderState, 'counts' | 'filterOptions'> =
+    header.fn === fn ? header : { counts: {}, filterOptions: [] }
   const headerApi = useMemo<ListHeaderApi>(
     () => ({
       setCounts: (next) => setHeader((prev) => (shallowEqual(prev.counts, next) ? prev : { ...prev, counts: next })),
-      setFilterOptions: (next) => setHeader((prev) => (prev.filterOptions === next ? prev : { ...prev, filterOptions: next })),
+      setFilterOptions: (next) =>
+        setHeader((prev) => (prev.filterOptions === next ? prev : { ...prev, filterOptions: next })),
     }),
     [],
   )
@@ -81,7 +90,9 @@ export function ObjectList({ mac }: ObjectListProps) {
 
   const filterMenu = useMemo<MenuSpec>(() => {
     const shell = useShellStore.getState()
-    const items: MenuSpec = [{ type: 'label', id: 'title', label: `筛选${registration?.title ?? ''}` }]
+    const items: MenuSpec = [
+      { type: 'label', id: 'title', label: t('shell.objectList.filterTitle', { title: registration?.title ?? '' }) },
+    ]
     for (const opt of filterOptions) {
       items.push({
         type: 'checkbox',
@@ -92,28 +103,58 @@ export function ObjectList({ mac }: ObjectListProps) {
         onCheckedChange: (on) => shell.setListFilter(opt.id, on),
       })
     }
-    items.push({ type: 'separator' }, { id: 'clear', label: '清除筛选', icon: X, disabled: !filtersActive, onSelect: () => shell.clearListFilters() })
+    items.push(
+      { type: 'separator' },
+      {
+        id: 'clear',
+        label: t('shell.objectList.clearFilters'),
+        icon: X,
+        disabled: !filtersActive,
+        onSelect: () => shell.clearListFilters(),
+      },
+    )
     return items
-  }, [filterOptions, filters, filtersActive, registration?.title])
+  }, [filterOptions, filters, filtersActive, registration?.title, t])
 
   const Body = registration?.component
 
   return (
-    <aside aria-label={registration?.title ?? '对象列表'} className="flex h-full w-full min-w-0 flex-col border-r border-line-6 bg-panel">
+    <aside
+      aria-label={registration?.title ?? t('shell.objectList.ariaLabel')}
+      className="shell-list @container/list flex h-full w-full min-w-0 flex-col border-r border-line-6 bg-panel"
+    >
       <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
         <SearchBox
           ref={searchRef}
           value={query}
           onValueChange={(v) => useShellStore.getState().setListQuery(v)}
-          placeholder={`搜索${registration?.title ?? ''}`}
+          placeholder={t('shell.objectList.search', { title: registration?.title ?? '' })}
           shortcut={mac ? '⌘K' : 'Ctrl+K'}
-          aria-label={`搜索${registration?.title ?? ''}`}
+          aria-label={t('shell.objectList.search', { title: registration?.title ?? '' })}
           wrapperClassName="h-8 min-w-0 flex-1 rounded-item"
         />
+        {/* 更多筛选 sits with the other header tools: three counted chips plus two icons do not fit one 280px row. */}
+        {filterOptions.length > 0 ? (
+          <DropdownMenu>
+            <Tooltip content={t('shell.objectList.moreFilters')}>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  icon={ListFilter}
+                  label={t('shell.objectList.moreFilters')}
+                  active={extraActive}
+                  className={cn(HEADER_TOOL_CLASS, extraActive && 'border-accent/30')}
+                />
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              <DropdownMenuItems items={filterMenu} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         <RefreshButton />
       </div>
-      {segments.length > 0 || filterOptions.length > 0 ? (
-        <div className="flex shrink-0 items-center gap-1.5 px-3 pb-2 pt-0.5">
+      {segments.length > 0 || filtersActive ? (
+        <div className="flex min-w-0 shrink-0 items-center gap-1 px-3 pb-2 pt-0.5">
           {segments.map((s) => (
             <Chip
               key={s.id}
@@ -121,34 +162,32 @@ export function ObjectList({ mac }: ObjectListProps) {
               count={counts[s.id]}
               selected={currentSegment === s.id}
               onClick={() => useShellStore.getState().setListSegment(s.id === firstSegment ? null : s.id)}
+              className="@max-[272px]/list:px-2"
             />
           ))}
-          <span className="flex-1" />
+          {/* Below 272px the menu's 清除筛选 and the first chip still clear everything; the icon would push the chips out. */}
           {filtersActive ? (
-            <Button variant="link" size="sm" icon={X} onClick={() => useShellStore.getState().clearListFilters()} className="h-6 px-1.5">
-              清除筛选
-            </Button>
-          ) : null}
-          {filterOptions.length > 0 ? (
-            <DropdownMenu>
-              <Tooltip content="更多筛选">
-                <DropdownMenuTrigger asChild>
-                  <IconButton icon={ListFilter} label="更多筛选" size="sm" active={extraActive} />
-                </DropdownMenuTrigger>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[200px]">
-                <DropdownMenuItems items={filterMenu} />
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Tooltip content={t('shell.objectList.clearFilters')}>
+              <IconButton
+                icon={X}
+                label={t('shell.objectList.clearFilters')}
+                size="sm"
+                onClick={() => useShellStore.getState().clearListFilters()}
+                className="ml-auto @max-[272px]/list:hidden"
+              />
+            </Tooltip>
           ) : null}
         </div>
       ) : null}
       <div className="min-h-0 flex-1">
         <ListHeaderContext.Provider value={headerApi}>
           {Body ? (
-            <Body key={fn} query={query} activeObjectId={activeObjectId} />
+            // Keyed by function: the body remounts on a rail switch, and a crashed list does not leave its error behind.
+            <ErrorBoundary key={fn} compact>
+              <Body query={query} activeObjectId={activeObjectId} />
+            </ErrorBoundary>
           ) : (
-            <EmptyState compact title="此功能暂无列表" description="对应功能尚未注册对象列表。" className="h-full" />
+            <EmptyState compact title={t('shell.objectList.noList')} className="h-full" />
           )}
         </ListHeaderContext.Provider>
       </div>
@@ -175,6 +214,7 @@ export function selectActiveObjectId(
  * the tooltip shows the last sync time. Also answers the `search.sessions` command by focusing the search.
  */
 function RefreshButton() {
+  const t = useT()
   const { data: status, reload } = useInvoke('substrate:status', undefined, [])
   const [sync, setSync] = useState<SyncStatus | undefined>(undefined)
   useEffect(() => {
@@ -196,31 +236,38 @@ function RefreshButton() {
     try {
       const result = await invoke('substrate:sync', {})
       setSync(result)
-      if (result.phase === 'error' && result.error) toast.error('同步失败', { detail: result.error, action: { label: '重试', onClick: () => void onRefresh() } })
-      else if (result.phase === 'idle') toast.success('同步完成')
+      if (result.phase === 'error' && result.error)
+        toast.error(t('shell.objectList.syncFailed'), {
+          detail: result.error,
+          action: { label: t('common.retry'), onClick: () => void onRefresh() },
+        })
+      else if (result.phase === 'idle') toast.success(t('shell.objectList.syncDone'))
     } catch (e) {
-      toast.error('同步失败', { detail: e instanceof Error ? e.message : String(e), action: { label: '重试', onClick: () => void onRefresh() } })
+      toast.error(t('shell.objectList.syncFailed'), {
+        detail: e instanceof Error ? e.message : String(e),
+        action: { label: t('common.retry'), onClick: () => void onRefresh() },
+      })
     } finally {
       pendingRef.current = false
       setPending(false)
     }
-  }, [])
+  }, [t])
 
   const tip = syncing
     ? sync?.progress
-      ? `正在同步… ${sync.progress.done} / ${sync.progress.total}`
-      : '正在同步…'
+      ? t('shell.objectList.syncingProgress', { done: sync.progress.done, total: sync.progress.total })
+      : t('shell.objectList.syncing')
     : sync?.lastSyncedAt
-      ? `上次同步 ${formatClock(sync.lastSyncedAt)} · 点击增量同步`
-      : '尚未同步 · 点击开始'
+      ? t('shell.objectList.syncedAt', { time: formatClock(sync.lastSyncedAt) })
+      : t('shell.objectList.neverSynced')
   return (
     <Tooltip content={tip}>
       <IconButton
         icon={RefreshCw}
-        label="刷新"
+        label={t('common.refresh')}
         loading={syncing}
         onClick={() => void onRefresh()}
-        className="size-8 rounded-item border border-line-8 bg-content text-fg-2 hover:bg-content hover:text-fg"
+        className={HEADER_TOOL_CLASS}
       />
     </Tooltip>
   )

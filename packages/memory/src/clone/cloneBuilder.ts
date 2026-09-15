@@ -8,10 +8,35 @@
  * Status flows through onStatus() and, when the store supports it, is persisted so the contact list
  * survives restarts. cancel() aborts the in-flight build and restores the previous status.
  */
-import type { CloneStatus, Millis, ModelClient, ModelSelection, PersonaCard, PersonaDeep, PersonaPair, PersonaSample, PersonaStats, RelationshipProfile, RelationshipStore, SubstrateService, WxMessage } from '@aiwc/protocol'
+import type {
+  CloneStatus,
+  Millis,
+  ModelClient,
+  ModelSelection,
+  PersonaCard,
+  PersonaDeep,
+  PersonaPair,
+  PersonaSample,
+  PersonaStats,
+  RelationshipProfile,
+  RelationshipStore,
+  SubstrateService,
+  WxMessage,
+} from '@aiwc/protocol'
 import { mapConcurrent } from '../internal/model'
 import { applyCorrections } from './corrections'
-import { MAX_MESSAGES, MIN_MESSAGES, PROFILE_MAX_CHUNKS, computeStats, extractPairs, loadContactMessages, mergeTurns, pickSamples, renderChunks, selectChunks } from './corpus'
+import {
+  MAX_MESSAGES,
+  MIN_MESSAGES,
+  PROFILE_MAX_CHUNKS,
+  computeStats,
+  extractPairs,
+  loadContactMessages,
+  mergeTurns,
+  pickSamples,
+  renderChunks,
+  selectChunks,
+} from './corpus'
 import { collectGroupCorpus, EMPTY_GROUP_CORPUS, type GroupCorpus } from './groupCorpus'
 import { extractChunk, mergeLocally, mergeParts, toCardAndDeep, type CloneNames, type PersonaPartial } from './llm'
 
@@ -126,7 +151,10 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
     const role = opts.role === 'self' ? 'self' : 'contact'
     const displayName = await resolveDisplayName(contactId, opts.displayName)
     const previous = await relationships.get(contactId)
-    const names: CloneNames = role === 'self' ? { subjectName: '我', otherName: displayName, role } : { subjectName: displayName, otherName: '我', role }
+    const names: CloneNames =
+      role === 'self'
+        ? { subjectName: '我', otherName: displayName, role }
+        : { subjectName: displayName, otherName: '我', role }
 
     let total = 5
     let done = 0
@@ -134,7 +162,10 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
       if (signal.aborted) throw new CancelledError()
       const elapsed = now() - startedAt
       const eta = done > 0 ? Math.round((elapsed / done) * (total - done)) : undefined
-      const status: CloneStatus = { state: 'building', progress: { done, total, step, startedAt, ...(eta !== undefined ? { etaMs: eta } : {}) } }
+      const status: CloneStatus = {
+        state: 'building',
+        progress: { done, total, step, startedAt, ...(eta !== undefined ? { etaMs: eta } : {}) },
+      }
       emit(contactId, status)
       if (persistIt) await persist(contactId, status, displayName)
     }
@@ -155,7 +186,11 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
         ...(opts.range?.to !== undefined ? { to: opts.range.to } : {}),
         signal,
         onPage: (n) => {
-          if (!signal.aborted) emit(contactId, { state: 'building', progress: { done, total, step: `${CLONE_STEPS.read}（${n} 条）`, startedAt } })
+          if (!signal.aborted)
+            emit(contactId, {
+              state: 'building',
+              progress: { done, total, step: `${CLONE_STEPS.read}（${n} 条）`, startedAt },
+            })
         },
       })
     } catch (e) {
@@ -172,7 +207,10 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
     })
 
     if (messages.length < MIN_MESSAGES && !opts.force) {
-      await fail(`与「${displayName}」的消息只有 ${messages.length} 条（至少需要 ${MIN_MESSAGES} 条），不足以克隆；可扩大范围或强制继续`, 'too_few_messages')
+      await fail(
+        `与「${displayName}」的消息只有 ${messages.length} 条（至少需要 ${MIN_MESSAGES} 条），不足以克隆；可扩大范围或强制继续`,
+        'too_few_messages',
+      )
       return
     }
     const turns = mergeTurns(messages, subjectIsSelf)
@@ -189,7 +227,11 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
         group = await collectGroupCorpus(deps.substrate, contactId, displayName, {
           signal,
           onProgress: (detail) => {
-            if (!signal.aborted) emit(contactId, { state: 'building', progress: { done, total, step: `${CLONE_STEPS.group}：${detail}`, startedAt } })
+            if (!signal.aborted)
+              emit(contactId, {
+                state: 'building',
+                progress: { done, total, step: `${CLONE_STEPS.group}：${detail}`, startedAt },
+              })
           },
         })
       } catch (e) {
@@ -209,7 +251,9 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
     done = 1
     total = 1 + chunks.length + (chunks.length > 1 ? 1 : 0) + 1 + 1
     const groupNote = group.messageCount > 0 ? `，另加 ${group.messageCount} 条群聊发言` : ''
-    await progress(`${CLONE_STEPS.read}：${stats.messageCount} 条消息，${stats.transcribedVoiceCount}/${stats.voiceCount} 段语音已转写${groupNote}`)
+    await progress(
+      `${CLONE_STEPS.read}：${stats.messageCount} 条消息，${stats.transcribedVoiceCount}/${stats.voiceCount} 段语音已转写${groupNote}`,
+    )
 
     // 2. model
     let model: ModelClient
@@ -222,10 +266,15 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
 
     // 3. extract per chunk
     await progress(`${CLONE_STEPS.extract}（0/${chunks.length}）`, true)
-    const parts = await mapConcurrent(chunks, EXTRACT_CONCURRENCY, (chunk) => extractChunk(model, chunk, names, signal), (n) => {
-      done = 1 + n
-      if (!signal.aborted) void progress(`${CLONE_STEPS.extract}（${n}/${chunks.length}）`)
-    })
+    const parts = await mapConcurrent(
+      chunks,
+      EXTRACT_CONCURRENCY,
+      (chunk) => extractChunk(model, chunk, names, signal),
+      (n) => {
+        done = 1 + n
+        if (!signal.aborted) void progress(`${CLONE_STEPS.extract}（${n}/${chunks.length}）`)
+      },
+    )
     if (signal.aborted) throw new CancelledError()
     const valid = parts.filter((p): p is PersonaPartial => p !== undefined)
     if (valid.length === 0) {
@@ -266,6 +315,9 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
       const applied = applyCorrections(card, deep, corrections)
       card = applied.card
       deep = applied.deep
+      // They stay in corrections.jsonl either way; the log is how an unappliable one gets noticed.
+      if (applied.skipped.length > 0)
+        log('warn', 'clone: corrections could not be re-applied', { contactId, skipped: applied.skipped })
       // hand-corrected samples are user work: carry them over (deduped by reply text)
       const kept = (previous?.samples ?? []).filter((x) => x.corrected)
       const seen = new Set(samples.map((x) => x.reply))
@@ -296,18 +348,38 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
       }
     }
     done = total
-    emit(contactId, { state: 'ready', version: profile.version, sampleCount: samples.length, builtAt: profile.updatedAt })
-    log('info', 'clone: built', { contactId, version: profile.version, chunks: chunks.length, samples: samples.length, pairs: pairs.length, messages: stats.messageCount, groupMessages: stats.groupMessageCount ?? 0 })
+    emit(contactId, {
+      state: 'ready',
+      version: profile.version,
+      sampleCount: samples.length,
+      builtAt: profile.updatedAt,
+    })
+    log('info', 'clone: built', {
+      contactId,
+      version: profile.version,
+      chunks: chunks.length,
+      samples: samples.length,
+      pairs: pairs.length,
+      messages: stats.messageCount,
+      groupMessages: stats.groupMessageCount ?? 0,
+    })
   }
 
   /**
    * Fill in missing voice transcripts in place (bounded, newest first, failures ignored). Already
    * transcribed messages are untouched, so re-cloning does not spend the STT budget twice.
    */
-  async function transcribeVoices(messages: WxMessage[], signal: AbortSignal, onProgress: (done: number, total: number) => Promise<void>): Promise<void> {
+  async function transcribeVoices(
+    messages: WxMessage[],
+    signal: AbortSignal,
+    onProgress: (done: number, total: number) => Promise<void>,
+  ): Promise<void> {
     const transcribe = deps.substrate.transcribeVoice
     if (!transcribe) return
-    const pending = messages.filter((m) => m.kind === 'voice' && !m.media?.transcript).sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_VOICE_TRANSCRIBE)
+    const pending = messages
+      .filter((m) => m.kind === 'voice' && !m.media?.transcript)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, MAX_VOICE_TRANSCRIBE)
     if (pending.length === 0) return
     let n = 0
     for (const m of pending) {
@@ -328,7 +400,10 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
       if (!contactId) throw new Error('contactId 不能为空')
       if (active.has(contactId)) throw new Error(`「${contactId}」正在克隆中`)
       const controller = new AbortController()
-      active.set(contactId, { controller, status: { state: 'building', progress: { done: 0, total: 5, step: CLONE_STEPS.read, startedAt: now() } } })
+      active.set(contactId, {
+        controller,
+        status: { state: 'building', progress: { done: 0, total: 5, step: CLONE_STEPS.read, startedAt: now() } },
+      })
       try {
         await build(contactId, opts, controller)
       } catch (e) {
@@ -336,7 +411,12 @@ export function createCloneBuilder(deps: CloneBuilderDeps): CloneBuilder {
           // restore the previous state
           const prev = await relationships.get(contactId)
           if (prev) {
-            const status: CloneStatus = { state: 'ready', version: prev.version, sampleCount: prev.samples.length, builtAt: prev.updatedAt }
+            const status: CloneStatus = {
+              state: 'ready',
+              version: prev.version,
+              sampleCount: prev.samples.length,
+              builtAt: prev.updatedAt,
+            }
             await persist(contactId, status, prev.displayName)
             emit(contactId, status)
           } else {

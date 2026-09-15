@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { defineTool, type ToolProfile, type ToolRisk } from '@aiwc/protocol'
 import { createToolRegistry } from './registry'
 
-const mk = (name: string, risk: ToolRisk, profiles: ToolProfile[] = ['desktop-chat', 'wechat-bot', 'cron', 'subagent']) =>
+const mk = (
+  name: string,
+  risk: ToolRisk,
+  profiles: ToolProfile[] = ['desktop-chat', 'wechat-bot', 'cron', 'subagent'],
+) =>
   defineTool({
     name,
     description: name,
@@ -32,7 +36,10 @@ describe('createToolRegistry', () => {
     reg.register(mk('write_file', 'write', ['desktop-chat']))
     reg.register(mk('secret', 'read'))
     expect(reg.forProfile('cron').map((t) => t.name)).toEqual(['search_messages', 'secret'])
-    expect(reg.forProfile('desktop-chat', { deny: ['secret'] }).map((t) => t.name)).toEqual(['search_messages', 'write_file'])
+    expect(reg.forProfile('desktop-chat', { deny: ['secret'] }).map((t) => t.name)).toEqual([
+      'search_messages',
+      'write_file',
+    ])
   })
 
   it('depth > 0 removes delegate_analysis', () => {
@@ -54,5 +61,17 @@ describe('createToolRegistry', () => {
     expect(reg.forProfile('wechat-bot').map((t) => t.name)).toEqual(['read_thing', 'send_media', 'send_message'])
     // other profiles are untouched by the rule
     expect(reg.forProfile('desktop-chat').map((t) => t.name)).toHaveLength(6)
+  })
+
+  it('subagent mounts only read tools and persona mounts nothing, whatever the definitions list', () => {
+    const everywhere: ToolProfile[] = ['desktop-chat', 'wechat-bot', 'cron', 'subagent', 'persona']
+    const reg = createToolRegistry()
+    reg.register(mk('read_thing', 'read', everywhere))
+    reg.register(mk('write_file', 'write', everywhere))
+    reg.register(mk('push_notify', 'send', everywhere))
+    reg.register(mk('delete_all', 'destructive', everywhere))
+    expect(reg.forProfile('subagent', { depth: 1 }).map((t) => t.name)).toEqual(['read_thing'])
+    expect(reg.forProfile('persona')).toEqual([])
+    expect(reg.forProfile('desktop-chat').map((t) => t.name)).toHaveLength(4)
   })
 })

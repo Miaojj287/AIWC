@@ -30,7 +30,12 @@ describe('window state persistence', () => {
 
   it('drops an off-screen position and fits the size to the display', () => {
     const displays = [{ x: 0, y: 0, width: 1920, height: 1080 }]
-    expect(fitToDisplays({ width: 1440, height: 900, x: 100, y: 50 }, displays)).toEqual({ width: 1440, height: 900, x: 100, y: 50 })
+    expect(fitToDisplays({ width: 1440, height: 900, x: 100, y: 50 }, displays)).toEqual({
+      width: 1440,
+      height: 900,
+      x: 100,
+      y: 50,
+    })
     expect(fitToDisplays({ width: 1440, height: 900, x: 5000, y: 50 }, displays)).toEqual({ width: 1440, height: 900 })
     expect(fitToDisplays({ width: 2600, height: 1400 }, displays)).toEqual({ width: 1920, height: 1080 })
     // second monitor to the right keeps the position

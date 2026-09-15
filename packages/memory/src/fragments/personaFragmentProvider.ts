@@ -14,9 +14,26 @@
  * Everything here degrades to silence: no pairs, no search backend, a failing store — the thread
  * still runs on the stable identity block.
  */
-import type { ContextFragment, FragmentProvider, FragmentProviderContext, PersonaNote, PersonaPair, RelationshipProfile, RelationshipStore, SubstrateService, ThreadId } from '@aiwc/protocol'
+import type {
+  ContextFragment,
+  FragmentProvider,
+  FragmentProviderContext,
+  PersonaNote,
+  PersonaPair,
+  RelationshipProfile,
+  RelationshipStore,
+  SubstrateService,
+  ThreadId,
+} from '@aiwc/protocol'
 import { createFragment } from '@aiwc/protocol'
-import { PERSONA_IDENTITY_MARKER, PERSONA_IDENTITY_TOKEN_CAP, PERSONA_TURN_MARKER, PERSONA_TURN_TOKEN_CAP, renderPersonaIdentity, renderPersonaTurn } from '../clone/personaPrompt'
+import {
+  PERSONA_IDENTITY_MARKER,
+  PERSONA_IDENTITY_TOKEN_CAP,
+  PERSONA_TURN_MARKER,
+  PERSONA_TURN_TOKEN_CAP,
+  renderPersonaIdentity,
+  renderPersonaTurn,
+} from '../clone/personaPrompt'
 import { PAIR_TOP_K, searchPairs } from '../clone/pairs'
 import { sha256 } from '../internal/fsx'
 
@@ -52,7 +69,10 @@ export interface PersonaIdentityProvider extends FragmentProvider {
 
 const isPersona = (ctx: FragmentProviderContext) => ctx.settings.profile === 'persona'
 
-async function loadProfile(store: RelationshipStore, ctx: FragmentProviderContext): Promise<RelationshipProfile | undefined> {
+async function loadProfile(
+  store: RelationshipStore,
+  ctx: FragmentProviderContext,
+): Promise<RelationshipProfile | undefined> {
   const peerId = ctx.origin.peerId
   if (!peerId) return undefined
   return store.get(peerId)
@@ -97,13 +117,19 @@ export function personaFragmentProvider(deps: PersonaFragmentDeps): PersonaFragm
     }
   }
 
-  const memoriesFor = async (contactId: string, query: string, role: RelationshipProfile['role']): Promise<string[]> => {
+  const memoriesFor = async (
+    contactId: string,
+    query: string,
+    role: RelationshipProfile['role'],
+  ): Promise<string[]> => {
     if (!deps.substrate || !query.trim()) return []
     // 'you' is the person being played: the contact normally, the user themself for a self-clone
     const speaker = (isSelf: boolean) => (isSelf === (role === 'self') ? '你' : '对方')
     try {
       const hits = await deps.substrate.search({ query, sessionIds: [contactId], limit: MEMORY_TOP_K, mode: 'hybrid' })
-      return hits.map((h) => `${speaker(h.message.isSelf)}: ${h.snippet || h.message.text}`.replace(/\s+/g, ' ').trim()).filter(Boolean)
+      return hits
+        .map((h) => `${speaker(h.message.isSelf)}: ${h.snippet || h.message.text}`.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
     } catch (e) {
       deps.logger?.('warn', 'persona: recall failed', e)
       return []
@@ -131,7 +157,11 @@ export function personaFragmentProvider(deps: PersonaFragmentDeps): PersonaFragm
 
       const query = ctx.userText.trim()
       const ctxQuery = contextQuery(ctx.threadId, query)
-      const [pairs, memories, notes] = await Promise.all([pairsFor(contactId, query, ctxQuery), memoriesFor(contactId, query, profile.role), notesFor(contactId)])
+      const [pairs, memories, notes] = await Promise.all([
+        pairsFor(contactId, query, ctxQuery),
+        memoriesFor(contactId, query, profile.role),
+        notesFor(contactId),
+      ])
 
       const out: ContextFragment[] = []
 
@@ -148,7 +178,8 @@ export function personaFragmentProvider(deps: PersonaFragmentDeps): PersonaFragm
 
       const knownPrompts = new Set(profile.samples.map((s) => s.prompt).filter(Boolean))
       const recallText = renderPersonaTurn({ pairs, memories, knownPrompts })
-      if (recallText) out.push(createFragment(PERSONA_RECALL_KIND, PERSONA_TURN_MARKER, PERSONA_TURN_TOKEN_CAP, () => recallText))
+      if (recallText)
+        out.push(createFragment(PERSONA_RECALL_KIND, PERSONA_TURN_MARKER, PERSONA_TURN_TOKEN_CAP, () => recallText))
       return out
     },
     reset(threadId) {

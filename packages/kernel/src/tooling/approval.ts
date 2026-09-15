@@ -2,7 +2,15 @@
  * Approval gate: the pure mode × risk × channel × allow-list decision (ARCHITECTURE §6) and the
  * pending-ask registry the Op handler resolves.
  */
-import { normalizePermissionMode, type ApprovalDecision, type ApprovalId, type ChannelKind, type PermissionMode, type ThreadId, type ToolRisk } from '@aiwc/protocol'
+import {
+  normalizePermissionMode,
+  type ApprovalDecision,
+  type ApprovalId,
+  type ChannelKind,
+  type PermissionMode,
+  type ThreadId,
+  type ToolRisk,
+} from '@aiwc/protocol'
 import type { ApprovalGate, ApprovalRequest, ApprovalVerdict } from '../ports'
 import { SEND_TO_ORIGIN_TOOLS } from './registry'
 
@@ -10,55 +18,94 @@ import { SEND_TO_ORIGIN_TOOLS } from './registry'
 export type MatrixCell = ApprovalVerdict | 'allow_list'
 
 /**
- * Only 高危 actions ever interrupt the user: outward-facing sends and destructive operations
- * (CLAUDE.md §4.4). Reads never ask in either mode; writes ask in Ask mode (allow-listable) and
- * run freely in Bypass.
+ * Reads never ask in any mode; writes ask in Ask mode (allow-listable) and run freely in Bypass;
+ * outward-facing sends (WeChat messages, pushes to office platforms) run without asking only in
+ * Autopilot. Destructive operations ask in every mode (CLAUDE.md §4.4).
  *
- * | mode \ risk | read     | write      | send | destructive |
- * | ask         | approved | allow_list | ask  | ask         |
- * | bypass      | approved | approved   | ask  | ask         |
+ * | mode \ risk | read     | write      | send     | destructive |
+ * | ask         | approved | allow_list | ask      | ask         |
+ * | bypass      | approved | approved   | ask      | ask         |
+ * | autopilot   | approved | approved   | approved | ask         |
  */
 export const APPROVAL_MATRIX: Readonly<Record<PermissionMode, Readonly<Record<ToolRisk, MatrixCell>>>> = {
   ask: { read: 'approved', write: 'allow_list', send: 'ask', destructive: 'ask' },
   bypass: { read: 'approved', write: 'approved', send: 'ask', destructive: 'ask' },
+  autopilot: { read: 'approved', write: 'approved', send: 'approved', destructive: 'ask' },
 }
 
 /** Channels that have no human at the keyboard and are bound to a single WeChat chat. */
 export const BOT_CHANNELS: readonly ChannelKind[] = ['wechat-ilink', 'wechat-ui', 'observed']
 
-/** Cron threads may only write memory; prefixes are the memory package's naming convention. */
+/** Cron threads may always write memory; prefixes are the memory package's naming convention. */
 export const CRON_WRITE_PREFIXES: readonly string[] = ['remember', 'memory_']
+
+/**
+ * Is this call covered by the thread's allow-list? A grant matches the call's own key (a command
+ * prefix such as `shell:git commit`) or the whole tool (`shell`). Destructive calls never match:
+ * nothing destructive can be pre-approved (CLAUDE.md §4.4).
+ */
+export function isAllowListed(
+  allowAlways: readonly string[],
+  toolName: string,
+  allowKey: string | undefined,
+  risk: ToolRisk,
+): boolean {
+  if (risk === 'destructive') return false
+  return allowAlways.includes(toolName) || (allowKey !== undefined && allowAlways.includes(allowKey))
+}
 
 /**
  * Channel overrides applied before the matrix.
  * Returns undefined when the channel has no opinion and the matrix decides.
+ *
+ * A scheduled (cron) thread has nobody to ask, so its mode decides outright: whatever the matrix would
+ * approve runs; whatever it would ask about is denied instead (reads and memory writes always run) —
+ * the denial is reported back to the model and listed on the run so the user can raise the mode.
+ * A thread allow-list still counts, as on the desktop.
  */
-export function channelVerdict(channel: ChannelKind, toolName: string, risk: ToolRisk): ApprovalVerdict | undefined {
+export function channelVerdict(
+  channel: ChannelKind,
+  toolName: string,
+  risk: ToolRisk,
+  allowAlways: readonly string[] = [],
+  allowKey?: string,
+  mode: PermissionMode = 'ask',
+): ApprovalVerdict | undefined {
   if (BOT_CHANNELS.includes(channel)) {
     if (risk === 'write' || risk === 'destructive') return 'denied'
     if (risk === 'send') return SEND_TO_ORIGIN_TOOLS.includes(toolName) ? 'approved' : 'denied'
     return undefined
   }
   if (channel === 'cron') {
-    if (risk === 'write') return CRON_WRITE_PREFIXES.some((p) => toolName.startsWith(p)) ? 'approved' : 'denied'
-    if (risk === 'send' || risk === 'destructive') return 'denied'
-    return undefined
+    if (risk === 'read') return 'approved'
+    if (risk === 'write' && CRON_WRITE_PREFIXES.some((p) => toolName.startsWith(p))) return 'approved'
+    if (isAllowListed(allowAlways, toolName, allowKey, risk)) return 'approved'
+    return APPROVAL_MATRIX[normalizePermissionMode(mode)][risk] === 'approved' ? 'approved' : 'denied'
   }
   return undefined
 }
 
 export function decideApproval(input: {
   toolName: string
+  allowKey?: string
   risk: ToolRisk
   mode: PermissionMode
   channel: ChannelKind
   allowAlways: readonly string[]
 }): ApprovalVerdict {
-  const fromChannel = channelVerdict(input.channel, input.toolName, input.risk)
+  const fromChannel = channelVerdict(
+    input.channel,
+    input.toolName,
+    input.risk,
+    input.allowAlways,
+    input.allowKey,
+    input.mode,
+  )
   if (fromChannel) return fromChannel
   // A thread persisted by an older build may carry a mode that no longer exists; ask rather than throw.
   const cell = (APPROVAL_MATRIX[input.mode] ?? APPROVAL_MATRIX[normalizePermissionMode(input.mode)])[input.risk]
-  if (cell === 'allow_list') return input.allowAlways.includes(input.toolName) ? 'approved' : 'ask'
+  if (cell === 'allow_list')
+    return isAllowListed(input.allowAlways, input.toolName, input.allowKey, input.risk) ? 'approved' : 'ask'
   return cell
 }
 

@@ -25,7 +25,8 @@ function unwrapIpcError(channel: string, e: unknown): Error {
   const prefix = `Error invoking remote method '${channel}': `
   let msg = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
   msg = msg.replace(/^(?:[A-Za-z]*Error): /, '')
-  const err = new Error(msg.trim() || '操作失败，请重试')
+  // main's handle() guarantees a non-empty, localized message; the raw text is only a last resort.
+  const err = new Error(msg.trim() || raw.trim() || channel)
   if (e instanceof Error && e.stack) err.stack = e.stack
   return err
 }

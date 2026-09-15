@@ -7,7 +7,15 @@
  */
 import { homedir } from 'node:os'
 import { nanoid } from 'nanoid'
-import { type CloneStatus, type MessageEvent, type ModelSelection, type ReplyDraft, type SessionSource, type ToastPayload, type ToolServices } from '@aiwc/protocol'
+import {
+  type CloneStatus,
+  type MessageEvent,
+  type ModelSelection,
+  type ReplyDraft,
+  type SessionSource,
+  type ToastPayload,
+  type ToolServices,
+} from '@aiwc/protocol'
 import {
   createApprovalGate,
   createDelegateTool,
@@ -43,13 +51,16 @@ import {
   buildSessionKey,
   createUiInjectSender,
   gatewayTools,
-  sourceFromOrigin,
   type DraftHandoff,
 } from '@aiwc/gateway'
+import { createOfficeService, officeTools } from '@aiwc/office'
+import { createShellTool } from '@aiwc/shell'
 import type { AppPaths } from './paths'
 import type { Logger } from './log'
+import { resolveLanguage } from '@aiwc/i18n'
 import { createConfigService } from './config/configService'
-import { createSecretStore, SECRET_REFS, type SafeStorageLike } from './config/secretStore'
+import { setMainLanguage, t } from './i18n'
+import { createSecretStore, type SafeStorageLike } from './config/secretStore'
 import { createAllowList } from './security/pathAllowList'
 import { customCacheDir, isDirectorySync, validateCacheDir } from './security/cacheDirPolicy'
 import { defaultAllowedRoots } from './paths'
@@ -59,10 +70,20 @@ import { STABLE_SYSTEM_PROMPT } from './prompts/stable'
 import { PERSONA_STABLE_PROMPT } from './prompts/persona'
 import { observedFragmentProvider, userInstructionsFragmentProvider, wireMemoryInvalidation } from './prompts/fragments'
 import { type InboundNames } from './prompts/inbound'
+import { composeTasks } from './composeTasks'
 import { createAutoReplyMonitor } from './services/autoReplyMonitor'
 import { createAutoReplyGenerator } from './services/autoReplyGenerate'
-import { dateHook, memoryToastHook } from './hooks'
-import type { AppContext, Broadcast, CloneBuilderLike, CloneStartOptions, SubstrateHostInit, SubstrateMode } from './contracts'
+import { createPetService } from './services/petService'
+import { citationAuditHook, dateHook, memoryToastHook } from './hooks'
+import type {
+  AppContext,
+  Broadcast,
+  CloneBuilderLike,
+  CloneStartOptions,
+  SubstrateHostInit,
+  SubstrateMode,
+} from './contracts'
+import { localizeText } from './localizePayloads'
 
 export interface CreateAppDeps {
   paths: AppPaths
@@ -72,9 +93,11 @@ export interface CreateAppDeps {
   /** dist-electron/substrateHost.js */
   substrateHostEntry: string
   env?: NodeJS.ProcessEnv
+  /** OS locale (`app.getLocale()`); picks the UI language on first launch only. */
+  systemLocale?: string
+  /** `shell.openExternal`: office authorization links are opened by main, never taken from the renderer. */
+  openExternal?: (url: string) => Promise<void>
 }
-
-const DESKTOP_SOURCE: SessionSource = { channel: 'desktop', peerId: 'me', chatId: 'me', chatType: 'dm' }
 
 type PkgLogger = (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
 
@@ -92,7 +115,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const config = createConfigService({
     file: paths.configFile,
     logger,
+    initial: () => ({ general: { language: resolveLanguage(deps.systemLocale) } }),
   })
+  // Main-process copy (menu, toasts, dialog titles, errors shown in the UI) follows the setting live.
+  setMainLanguage(config.get().general.language)
+  unsubscribers.push(config.subscribe((next) => setMainLanguage(next.general.language)))
   const secrets = createSecretStore({
     file: paths.secretsFile,
     safeStorage: deps.safeStorage,
@@ -119,7 +146,8 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     const dir = cacheDirOverride()
     if (!dir) return undefined
     const verdict = validateCacheDir(dir, { home, isDirectory: isDirectorySync })
-    if (!verdict.ok) log.warn('account.cacheDir not added to file allow-list', { cacheDir: dir, reason: verdict.reason })
+    if (!verdict.ok)
+      log.warn('account.cacheDir not added to file allow-list', { cacheDir: dir, reason: verdict.reason })
     return verdict.ok ? verdict.dir : undefined
   })()
   const allowList = createAllowList(defaultAllowedRoots(paths, { cacheDir: startupCacheDir }), { home })
@@ -143,16 +171,22 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     if (!a.dbRoot || !a.wxid || !a.dbKeyRef) return undefined
     const dbKeyHex = secrets.reveal(a.dbKeyRef)
     if (!dbKeyHex) return undefined
-    const xorHex = a.imageXorKeyRef ? secrets.reveal(a.imageXorKeyRef) ?? undefined : undefined
-    const aesHex = a.imageAesKeyRef ? secrets.reveal(a.imageAesKeyRef) ?? undefined : undefined
-    return { dbRoot: a.dbRoot, wxid: a.wxid, dbKeyHex, cacheDir, imageKeys: xorHex || aesHex ? { xorHex, aesHex } : undefined }
+    const xorHex = a.imageXorKeyRef ? (secrets.reveal(a.imageXorKeyRef) ?? undefined) : undefined
+    const aesHex = a.imageAesKeyRef ? (secrets.reveal(a.imageAesKeyRef) ?? undefined) : undefined
+    return {
+      dbRoot: a.dbRoot,
+      wxid: a.wxid,
+      dbKeyHex,
+      cacheDir,
+      imageKeys: xorHex || aesHex ? { xorHex, aesHex } : undefined,
+    }
   }
   const substrate = createSubstrateHost({ entry: deps.substrateHostEntry, logger, broadcast, resolveInit, resolveOpen })
   try {
     await substrate.start()
   } catch (e) {
     log.error('substrate host failed to start; continuing without data substrate', e)
-    toast({ kind: 'error', text: '数据基座启动失败，聊天数据暂不可用', sticky: true })
+    toast({ kind: 'error', text: t('main.substrate.startFailed'), sticky: true })
   }
 
   // ---- memory -----------------------------------------------------------------------------------
@@ -162,26 +196,33 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   // Stable-tier memory snapshot: frozen per thread, refreshed process-wide whenever a memory file
   // changes (remember/forget tools, 设置 › 记忆 edits, diary backfill) so new threads see the update.
   const memoryFragments = memoryFragmentProvider(memory)
-  const personaFragments = personaFragmentProvider({ relationships, substrate, logger: (level, msg, meta) => pkgLogger('persona')(level, msg, meta) })
+  const personaFragments = personaFragmentProvider({
+    relationships,
+    substrate,
+    logger: (level, msg, meta) => pkgLogger('persona')(level, msg, meta),
+  })
   unsubscribers.push(wireMemoryInvalidation(memory, memoryFragments))
 
   // ---- models -----------------------------------------------------------------------------------
   const models = createModelResolver({ config: cfg, secrets, logger })
   let lastAiJson = JSON.stringify(cfg().ai)
-  config.subscribe((next) => {
-    const aiJson = JSON.stringify(next.ai)
-    if (aiJson !== lastAiJson) {
-      lastAiJson = aiJson
-      models.invalidate()
-    }
-  })
+  unsubscribers.push(
+    config.subscribe((next) => {
+      const aiJson = JSON.stringify(next.ai)
+      if (aiJson !== lastAiJson) {
+        lastAiJson = aiJson
+        models.invalidate()
+      }
+    }),
+  )
 
   // ---- gateway ----------------------------------------------------------------------------------
   // records.db holds rules + audit records + drafts; the gateway reads rules through the callback.
   const records = createAutoReplyRecordStore({ dbPath: paths.recordsDb })
   const gateway = createGateway({
     rules: async () => records.listRules(),
-    isAllowed: (source) => source.channel === 'desktop' || source.channel === 'wechat-ilink' || source.channel === 'wechat-ui',
+    isAllowed: (source) =>
+      source.channel === 'desktop' || source.channel === 'wechat-ilink' || source.channel === 'wechat-ui',
     logger: pkgLogger('gateway'),
   })
   gateway.registerAdapter(
@@ -195,14 +236,17 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   // 'wechat-ui' = keyboard injection into the WeChat client, verified by reading the message back from the
   // local DB; a failed verification halts the whole outbound path until the user resumes it.
   const uiSender = createUiInjectSender({
-    substrate, platform: process.platform, logger: pkgLogger('ui-inject'),
+    substrate,
+    platform: process.platform,
+    logger: pkgLogger('ui-inject'),
     canSend: async (req) => {
-      if (substrate.mode() === 'demo') return '演示模式不能向真实微信发送消息'
+      if (substrate.mode() === 'demo') return t('main.autoReply.demoCannotSend')
       const state = substrate.status()
-      if (req.expectedAccountId && state.account?.wxid !== req.expectedAccountId) return '微信账户已切换，已取消发送'
+      if (req.expectedAccountId && state.account?.wxid !== req.expectedAccountId)
+        return t('main.autoReply.accountSwitchedCancelled')
       if (req.ruleId) {
         const rule = records.getRule(req.to.chatId)
-        if (!rule?.enabled || rule.id !== req.ruleId) return '该会话的自动回复已关闭，已取消发送'
+        if (!rule?.enabled || rule.id !== req.ruleId) return t('main.autoReply.ruleClosedCancelled')
       }
       return undefined
     },
@@ -210,10 +254,16 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   gateway.registerAdapter(uiSender.asAdapter())
   unsubscribers.push(uiSender.events.on((e) => gateway.emit(e)))
 
-  /** draft_reply tool → reply desk (suggest mode, never auto-sent). */
-  const handoffDraft = (d: DraftHandoff) => {
-    const origin = d.origin
-    const source = origin?.chatId ? sourceFromOrigin({ ...origin, chatId: origin.chatId }) : DESKTOP_SOURCE
+  /** draft_reply tool → reply desk: parked until the user presses 发送, never auto-sent. */
+  const handoffDraft = async (d: DraftHandoff) => {
+    const source: SessionSource = { ...d.to }
+    if (!source.displayName) {
+      try {
+        source.displayName = (await substrate.getSession(source.chatId))?.title
+      } catch {
+        /* the id is still a usable label */
+      }
+    }
     const draft: ReplyDraft = {
       id: `drf_${nanoid(10)}`,
       source,
@@ -222,7 +272,7 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       draft: d.text,
       state: 'pending',
       createdAt: Date.now(),
-      mode: 'suggest',
+      mode: 'confirm',
     }
     try {
       autoReply.enqueueDraft(draft)
@@ -230,7 +280,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       log.warn('persist handoff draft failed', e)
     }
     broadcast('autoreply:draft', draft)
-    toast({ kind: 'info', text: 'Agent 起草了一条回复，已放入回复台', action: { label: '打开回复台', command: 'tab.openReplyDesk' } })
+    toast({
+      kind: 'info',
+      text: t('main.autoReply.agentDraftReady', { name: source.displayName ?? source.chatId }),
+      action: { label: t('main.autoReply.openReplyDesk'), command: 'tab.openReplyDesk' },
+    })
   }
 
   // ---- kernel -----------------------------------------------------------------------------------
@@ -247,6 +301,35 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     log.warn('skill index refresh failed', e)
   }
 
+  // ---- office platforms -------------------------------------------------------------------------
+  // 飞书 / 钉钉 / 企业微信 through their official CLIs. The package host-checks every link before main
+  // opens it; npm JS shims run on Electron-as-node when the user has no node on PATH.
+  const office = createOfficeService({
+    dataDir: `${paths.dataRoot}/office`,
+    openExternal:
+      deps.openExternal ??
+      (async () => {
+        throw new Error('openExternal is not available in this host')
+      }),
+    env: deps.env,
+    fallbackNode: process.versions.electron
+      ? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }
+      : undefined,
+    logger: pkgLogger('office'),
+  })
+
+  // The general shell (ARCHITECTURE §6.1): classified per command, sandboxed to the workspace, never
+  // mounted on WeChat bot threads. The office connectors contribute their CLI verbs and state dirs.
+  const shell = createShellTool({
+    workspaceDir: paths.workspaceDir,
+    extraWritableRoots: () => office.writableRoots(),
+    protectedPaths: [paths.secretsFile, paths.mirrorDb, paths.indexDb, paths.recordsDb],
+    classifiers: [office.commandClassifier()],
+    sandboxMode: () => cfg().agent.shellSandbox,
+    env: deps.env,
+    logger: pkgLogger('shell'),
+  })
+
   const registry = createToolRegistry()
   const toolDefs = [
     ...substrateTools(),
@@ -255,6 +338,8 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     ...gatewayTools(gateway.outbound, { onDraft: handoffDraft }),
     ...skillTools(skills),
     ...planTools(),
+    ...officeTools(office),
+    shell,
   ]
   for (const tool of toolDefs) registry.register(tool)
 
@@ -262,7 +347,14 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const hooks = createHookRunner({ logger: (level, msg, meta) => logger.child('hooks')[level](msg, meta) })
   hooks.add(dateHook())
   hooks.add(memoryToastHook(toast))
-  const rollout = createRolloutStore({ dir: paths.rolloutsDir, indexDbPath: paths.indexDb })
+  hooks.add(
+    citationAuditHook({ substrate, logger: (level, msg, meta) => logger.child('citation-audit')[level](msg, meta) }),
+  )
+  const rollout = createRolloutStore({
+    dir: paths.rolloutsDir,
+    indexDbPath: paths.indexDb,
+    logger: pkgLogger('rollout'),
+  })
 
   const toolServices: ToolServices = {
     substrate,
@@ -303,7 +395,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     },
     // A persona thread swaps the whole stable tier: the agent identity forbids exactly what a clone
     // has to do. It also gets no skills index (no tools, so nothing to index).
-    systemPrompt: { stable: STABLE_SYSTEM_PROMPT, byProfile: { persona: PERSONA_STABLE_PROMPT }, skillsExcludedProfiles: ['persona'] },
+    systemPrompt: {
+      stable: STABLE_SYSTEM_PROMPT,
+      byProfile: { persona: PERSONA_STABLE_PROMPT },
+      skillsExcludedProfiles: ['persona'],
+    },
     logger: pkgLogger('kernel'),
   })
   // delegate_analysis needs the kernel to spawn read-only children; the registry is consulted per step,
@@ -323,7 +419,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   }
   // The peer's text is third-party data, never the instruction: prompts/inbound wraps it in a bounded
   // fragment and the turn's request is "reply appropriately". Group origins carry peerId (thread per member).
-  const generate = createAutoReplyGenerator({ substrate, model: () => models.resolve(cfg().ai.defaultModel), logger: pkgLogger('autoreply-generate') })
+  const generate = createAutoReplyGenerator({
+    substrate,
+    model: () => models.resolve(cfg().ai.defaultModel),
+    logger: pkgLogger('autoreply-generate'),
+  })
   const autoReply = createAutoReplyService({
     gateway,
     records,
@@ -335,17 +435,18 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     canSend: async (draft) => {
       if (draft.source.channel === 'wechat-ui') {
         const state = substrate.status()
-        if (state.connection !== 'ready' || !state.account) return '微信数据未连接'
-        if (draft.accountId && state.account.wxid !== draft.accountId) return '微信账户已切换，不能发送旧账户的回复'
-        if (uiSender.halted) return uiSender.haltReason ?? '自动发送已暂停'
+        if (state.connection !== 'ready' || !state.account) return t('main.autoReply.notConnected')
+        if (draft.accountId && state.account.wxid !== draft.accountId)
+          return t('main.autoReply.accountSwitchedOldDraft')
+        if (uiSender.halted) return uiSender.haltReason ?? t('main.autoReply.autoSendPaused')
         if (draft.ruleId) {
           const latest = (await substrate.listMessages({ sessionId: draft.source.chatId, limit: 1 })).items.at(-1)
-          if (latest?.isSelf || (latest && latest.createdAt > draft.createdAt)) return '会话已有新消息或你已经回复，请重新生成'
+          if (latest?.isSelf || (latest && latest.createdAt > draft.createdAt)) return t('main.autoReply.staleDraft')
         }
       }
       if (draft.ruleId) {
         const rule = records.getRule(draft.source.chatId)
-        if (!rule?.enabled || rule.id !== draft.ruleId || rule.pausedReason) return '该会话的自动回复已暂停、删除或变更'
+        if (!rule?.enabled || rule.id !== draft.ruleId || rule.pausedReason) return t('main.autoReply.ruleChanged')
       }
       return undefined
     },
@@ -353,33 +454,76 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     logger: pkgLogger('autoreply'),
   })
   autoReply.start()
+  // 自动回复 (sendMode 'confirm') parks the reply and tells the user where the button is; the toast
+  // is keyed per chat so a newer draft for the same chat replaces it instead of stacking.
+  unsubscribers.push(
+    autoReply.events.on((e) => {
+      if (e.type !== 'autoreply.queued') return
+      const draft = records.getDraft(e.draftId)
+      if (
+        !draft ||
+        draft.state !== 'pending' ||
+        draft.mode !== 'confirm' ||
+        !draft.ruleId ||
+        draft.triggerMessageId.startsWith('retry_')
+      )
+        return
+      const name = draft.source.displayName ?? draft.source.chatId
+      toast({
+        id: `autoreply.confirm.${draft.source.chatId}`,
+        kind: 'info',
+        text: t('main.autoReply.draftReady', { name }),
+        action: {
+          label: t('main.autoReply.goConfirm'),
+          command: 'tab.openAutoReply',
+          payload: { sessionId: draft.source.chatId, title: name },
+        },
+      })
+    }),
+  )
   const autoReplyMonitor = createAutoReplyMonitor({
-    substrate, rules: () => records.listRules(),
-    bindRule: (rule, accountId) => { records.saveRule({ ...rule, accountId }) },
+    substrate,
+    rules: () => records.listRules(),
+    bindRule: (rule, accountId) => {
+      records.saveRule({ ...rule, accountId })
+    },
     // A forced trigger goes straight to the service: the gate would only re-check what triggerNow
     // already checked, and the whole point is to re-attempt a message the service has seen.
-    ingest: (event, opts) => (opts?.force
-      ? autoReply.handle(event, { reply: true, reason: 'ok' }, buildSessionKey(event.source), { force: true })
-      : gateway.ingest(event)),
+    ingest: (event, opts) =>
+      opts?.force
+        ? autoReply.handle(event, { reply: true, reason: 'ok' }, buildSessionKey(event.source), { force: true })
+        : gateway.ingest(event),
     invalidate: (id, reason) => autoReply.invalidate(id, reason),
-    accountChanged: () => autoReply.halt('微信账户已切换，请检查规则后恢复'),
+    accountChanged: () => autoReply.halt(t('main.autoReply.haltAccountSwitched')),
     onError: (error) => log.warn('local auto-reply monitor failed', error),
   })
   // Demo fixtures must never drive real keyboard injection.
   if (substrate.mode() !== 'demo') autoReplyMonitor.start()
   let lastReplyConfig = JSON.stringify(cfg().autoReply)
-  unsubscribers.push(config.subscribe(() => {
-    const current = JSON.stringify(cfg().autoReply)
-    if (current !== lastReplyConfig) {
-      lastReplyConfig = current
-      for (const rule of records.listRules()) autoReply.invalidate(rule.sessionId, '自动回复设置已更改')
-    }
-    void autoReplyMonitor.refresh()
-  }))
+  unsubscribers.push(
+    config.subscribe(() => {
+      const current = JSON.stringify(cfg().autoReply)
+      if (current !== lastReplyConfig) {
+        lastReplyConfig = current
+        for (const rule of records.listRules())
+          autoReply.invalidate(rule.sessionId, t('main.autoReply.settingsChanged'))
+      }
+      void autoReplyMonitor.refresh()
+    }),
+  )
   try {
     await gateway.connect('desktop')
   } catch (e) {
     log.warn('desktop adapter connect failed', e)
+  }
+
+  // ---- pets -------------------------------------------------------------------------------------
+  // Bundled pets are copied into <dataRoot>/pets so every pet is served from the same allow-listed root.
+  const pets = createPetService({ petsDir: paths.petsDir, builtinDir: paths.petsBuiltinDir, logger })
+  try {
+    await pets.seedBuiltin()
+  } catch (e) {
+    log.warn('bundled pets not seeded', e)
   }
 
   // ---- diary & clone ----------------------------------------------------------------------------
@@ -394,10 +538,19 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   })
   diary.start()
 
+  // ---- 定时任务 (composeTasks.ts) -------------------------------------------------------------------
+  const tasks = composeTasks({ dir: paths.tasksDir, kernel, broadcast, toast, logger: pkgLogger('tasks') })
+  tasks.start()
+
   // The builder takes one model getter; the IPC request may name a model per build. Last start wins
   // for concurrent builds with different models (rare: the UI clones one contact at a time).
   let cloneModel: ModelSelection | undefined
-  const builder = createCloneBuilder({ substrate, relationships, model: () => models.resolve(cloneModel), logger: pkgLogger('clone') })
+  const builder = createCloneBuilder({
+    substrate,
+    relationships,
+    model: () => models.resolve(cloneModel),
+    logger: pkgLogger('clone'),
+  })
   const clone: CloneBuilderLike = {
     start(contactId, opts?: CloneStartOptions) {
       cloneModel = opts?.model
@@ -415,11 +568,17 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       broadcast('gateway:event', e)
       if (e.type === 'autoreply.halted') {
         autoReply.halt(e.reason)
-        toast({ kind: 'error', text: `自动回复已熔断：${e.reason}`, sticky: true, action: { label: '查看回复台', command: 'tab.openReplyDesk' } })
+        toast({
+          kind: 'error',
+          text: t('main.autoReply.halted', { reason: localizeText(e.reason) }),
+          sticky: true,
+          action: { label: t('main.autoReply.viewReplyDesk'), command: 'tab.openReplyDesk' },
+        })
       }
     }),
   )
   unsubscribers.push(memory.subscribe((e) => broadcast('memory:changed', e)))
+  unsubscribers.push(office.onSession((session) => broadcast('office:session', session)))
 
   const lastCloneStatus = new Map<string, string>()
   const pushCloneStatus = (e: { contactId: string; status: CloneStatus }) => {
@@ -427,8 +586,14 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     if (lastCloneStatus.get(e.contactId) === key) return
     lastCloneStatus.set(e.contactId, key)
     broadcast('clone:status', e)
-    if (e.status.state === 'ready') toast({ kind: 'success', text: '克隆完成', action: { label: '查看', command: 'tab.openClone' } })
-    if (e.status.state === 'failed') toast({ kind: 'error', text: `克隆失败：${e.status.error}`, sticky: true })
+    if (e.status.state === 'ready')
+      toast({
+        kind: 'success',
+        text: t('main.clone.done'),
+        action: { label: t('main.clone.view'), command: 'tab.openClone' },
+      })
+    if (e.status.state === 'failed')
+      toast({ kind: 'error', text: t('main.clone.failed', { error: localizeText(e.status.error) }), sticky: true })
   }
   unsubscribers.push(relationships.subscribe(pushCloneStatus))
   unsubscribers.push(clone.onStatus(pushCloneStatus))
@@ -454,6 +619,9 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     records,
     uiSender,
     clone,
+    pets,
+    office,
+    tasks,
     allowList,
     broadcast,
     toast,
@@ -466,6 +634,9 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
           // ignore
         }
       }
+      // Waiting device-flow pollers are detached process groups: stop them before anything else.
+      office.shutdown()
+      tasks.stop()
       diary.stop()
       autoReplyMonitor.stop()
       await autoReply.stop()
@@ -489,5 +660,3 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     },
   }
 }
-
-export { SECRET_REFS }

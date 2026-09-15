@@ -7,10 +7,25 @@
  * (ARCHITECTURE §11). On top of the profile, the file must sit inside the configured media roots.
  */
 import { z } from 'zod'
-import type { GatewayOutbound, OutboundPart, SendRequest, SessionSource, ToolContext, ToolDefinition, ToolResult } from '@aiwc/protocol'
+import type {
+  GatewayOutbound,
+  OutboundPart,
+  SendRequest,
+  SessionSource,
+  ToolContext,
+  AnyToolDefinition,
+  ToolResult,
+} from '@aiwc/protocol'
 import { defineTool } from '@aiwc/protocol'
 import { checkOutboundMedia, resolveMediaRoots, type MediaRoots } from '../core/mediaPolicy'
-import { inferChatType, isBotChannel, sendChannelForOrigin, sourceFromOrigin, withOriginGuard, type Origin } from '../core/originGuard'
+import {
+  inferChatType,
+  isBotChannel,
+  sendChannelForOrigin,
+  sourceFromOrigin,
+  withOriginGuard,
+  type Origin,
+} from '../core/originGuard'
 
 export interface GatewayToolServices {
   gateway?: GatewayOutbound
@@ -23,11 +38,13 @@ export interface DraftHandoff {
   text: string
   origin?: Origin
   threadId: string
+  /** Resolved target chat: the origin chat on a bot channel, the `to` the user named on desktop. */
+  to: SessionSource
 }
 
 export interface GatewayToolsOptions {
   /** Where draft_reply hands its text (the reply desk). */
-  onDraft?: (draft: DraftHandoff) => void
+  onDraft?: (draft: DraftHandoff) => void | Promise<void>
   /** Channel used for desktop-initiated sends. Default 'wechat-ui' (keyboard injection). */
   desktopSendChannel?: SessionSource['channel']
   /** Fallback for ctx.services.mediaRoots when the composition root passes the roots at construction. */
@@ -36,7 +53,11 @@ export interface GatewayToolsOptions {
 
 const SendMessageInput = z.object({
   text: z.string().min(1, '内容不能为空').max(20_000),
-  to: z.string().min(1).optional().describe('目标微信会话 id（wxid / xxx@chatroom）。在微信机器人对话里会被忽略，只能回到来源会话。'),
+  to: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('目标微信会话 id（wxid / xxx@chatroom）。在微信机器人对话里会被忽略，只能回到来源会话。'),
 })
 type SendMessageInput = z.infer<typeof SendMessageInput>
 
@@ -50,15 +71,25 @@ type SendMediaInput = z.infer<typeof SendMediaInput>
 
 const DraftReplyInput = z.object({
   text: z.string().min(1, '内容不能为空').max(20_000),
+  to: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('要回复的微信会话 id（wxid / xxx@chatroom），桌面端必填；在微信机器人对话里会被忽略，只能回到来源会话。'),
 })
 type DraftReplyInput = z.infer<typeof DraftReplyInput>
 
 type Target = { ok: true; to: SessionSource } | { ok: false; error: string }
 
 /** Bot context = the turn runs on, or the thread came from, a channel with nobody at the keyboard (wechat-* / observed). */
-export const isBotContext = (ctx: Pick<ToolContext, 'channel' | 'origin'>): boolean => isBotChannel(ctx.channel) || isBotChannel(ctx.origin?.channel)
+export const isBotContext = (ctx: Pick<ToolContext, 'channel' | 'origin'>): boolean =>
+  isBotChannel(ctx.channel) || isBotChannel(ctx.origin?.channel)
 
-export function resolveTarget(ctx: Pick<ToolContext, 'channel' | 'origin'>, to: string | undefined, desktopChannel: SessionSource['channel']): Target {
+export function resolveTarget(
+  ctx: Pick<ToolContext, 'channel' | 'origin'>,
+  to: string | undefined,
+  desktopChannel: SessionSource['channel'],
+): Target {
   if (isBotContext(ctx)) {
     // `to` is never consulted here: the only legal target is the origin chat.
     const origin = ctx.origin
@@ -81,27 +112,42 @@ type MediaPathVerdict = { ok: true; path: string } | { ok: false; error: string 
  * absence of roots is a refusal. Desktop context: enforced whenever roots are configured; without
  * them the approval popover (which shows the path) is the safeguard.
  */
-export function checkMediaPath(ctx: Pick<ToolContext<GatewayToolServices>, 'channel' | 'origin' | 'services'>, filePath: string, fallbackRoots: MediaRoots | undefined): MediaPathVerdict {
+export function checkMediaPath(
+  ctx: Pick<ToolContext<GatewayToolServices>, 'channel' | 'origin' | 'services'>,
+  filePath: string,
+  fallbackRoots: MediaRoots | undefined,
+): MediaPathVerdict {
   const roots = ctx.services.mediaRoots ?? fallbackRoots
   if (!isBotContext(ctx) && resolveMediaRoots(roots).length === 0) return { ok: true, path: filePath }
   return checkOutboundMedia(filePath, roots)
 }
 
-async function deliver(ctx: ToolContext<GatewayToolServices>, fallback: GatewayOutbound, to: SessionSource, parts: OutboundPart[]): Promise<ToolResult> {
+async function deliver(
+  ctx: ToolContext<GatewayToolServices>,
+  fallback: GatewayOutbound,
+  to: SessionSource,
+  parts: OutboundPart[],
+): Promise<ToolResult> {
   const req: SendRequest = { to, parts, reason: 'agent_tool' }
   const result = await pickOutbound(ctx, fallback).send(req)
-  const payload = { ok: result.ok, to: to.chatId, channel: to.channel, messageId: result.messageId ?? null, verified: result.verified ?? null, error: result.error ?? null }
+  const payload = {
+    ok: result.ok,
+    to: to.chatId,
+    channel: to.channel,
+    messageId: result.messageId ?? null,
+    verified: result.verified ?? null,
+    error: result.error ?? null,
+  }
   return { content: payload, isError: !result.ok }
 }
 
-// `any` mirrors the frozen PACKAGE-API signature: the registry accepts heterogeneous input types.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function gatewayTools(outbound: GatewayOutbound, opts: GatewayToolsOptions = {}): ToolDefinition<any, GatewayToolServices>[] {
+export function gatewayTools(outbound: GatewayOutbound, opts: GatewayToolsOptions = {}): AnyToolDefinition[] {
   const desktopChannel = opts.desktopSendChannel ?? 'wechat-ui'
 
   const sendMessage = defineTool<SendMessageInput, GatewayToolServices>({
     name: 'send_message',
-    description: '向微信会话发送一段文字。在微信机器人对话里只能回到当前来源会话；桌面端需指定 to。用 ---wx-next--- 单独成行可拆成多条气泡。',
+    description:
+      '向微信会话发送一段文字。在微信机器人对话里只能回到当前来源会话；桌面端需指定 to。用 ---wx-next--- 单独成行可拆成多条气泡。',
     inputSchema: SendMessageInput,
     profiles: ['desktop-chat', 'wechat-bot'],
     risk: 'send',
@@ -117,7 +163,8 @@ export function gatewayTools(outbound: GatewayOutbound, opts: GatewayToolsOption
 
   const sendMedia = defineTool<SendMediaInput, GatewayToolServices>({
     name: 'send_media',
-    description: '向微信会话发送本机图片 / 文件 / 语音（仅限允许目录内的文件）。规则与 send_message 相同：机器人对话只能回到来源会话。',
+    description:
+      '向微信会话发送本机图片 / 文件 / 语音（仅限允许目录内的文件）。规则与 send_message 相同：机器人对话只能回到来源会话。',
     inputSchema: SendMediaInput,
     // Never 'wechat-bot': see the file header.
     profiles: ['desktop-chat'],
@@ -131,24 +178,43 @@ export function gatewayTools(outbound: GatewayOutbound, opts: GatewayToolsOption
       const checked = checkMediaPath(ctx, input.path, opts.mediaRoots)
       if (!checked.ok) return { content: { ok: false, error: checked.error }, isError: true }
       const path = checked.path
-      const media: OutboundPart = input.kind === 'image' ? { type: 'image', path } : input.kind === 'voice' ? { type: 'voice', path } : { type: 'file', path }
-      const parts: OutboundPart[] = input.caption?.trim() ? [media, { type: 'text', text: input.caption.trim() }] : [media]
+      const media: OutboundPart =
+        input.kind === 'image'
+          ? { type: 'image', path }
+          : input.kind === 'voice'
+            ? { type: 'voice', path }
+            : { type: 'file', path }
+      const parts: OutboundPart[] = input.caption?.trim()
+        ? [media, { type: 'text', text: input.caption.trim() }]
+        : [media]
       return deliver(ctx, outbound, target.to, parts)
     },
   })
 
   const draftReply = defineTool<DraftReplyInput, GatewayToolServices>({
     name: 'draft_reply',
-    description: '把一条回复草稿交给回复台，由用户确认后再发送；不会直接发出任何消息。',
+    description:
+      '替用户起草一条微信回复并放进回复台，由用户看过、点「发送」后才发出；本工具自己不会发出任何消息。用户要你「帮我回一下 / 起草回复」时用它，除非用户明确要求直接发送。桌面端要指定 to（会话 id）；机器人对话里只能回到来源会话。用 ---wx-next--- 单独成行可拆成多条气泡。',
     inputSchema: DraftReplyInput,
-    profiles: ['wechat-bot', 'cron'],
+    profiles: ['desktop-chat', 'wechat-bot', 'cron'],
     risk: 'read',
     parallelSafe: true,
-    summarize: (i) => `起草回复：${i.text.slice(0, 40)}${i.text.length > 40 ? '…' : ''}`,
-    async execute(input, ctx) {
-      const origin: Origin | undefined = ctx.origin ? { channel: ctx.origin.channel, chatId: ctx.origin.chatId } : undefined
-      opts.onDraft?.({ text: input.text, origin, threadId: String(ctx.threadId) })
-      return { content: { drafted: true, text: input.text, to: origin?.chatId ?? null } }
+    summarize: (i) => `起草回复${i.to ? `给 ${i.to}` : ''}：${i.text.slice(0, 40)}${i.text.length > 40 ? '…' : ''}`,
+    async execute(input, ctx): Promise<ToolResult> {
+      const target = resolveTarget(ctx, input.to, desktopChannel)
+      if (!target.ok) return { content: { ok: false, error: target.error }, isError: true }
+      const origin: Origin | undefined = ctx.origin
+        ? { channel: ctx.origin.channel, chatId: ctx.origin.chatId }
+        : undefined
+      await opts.onDraft?.({ text: input.text, origin, threadId: String(ctx.threadId), to: target.to })
+      return {
+        content: {
+          drafted: true,
+          text: input.text,
+          to: target.to.chatId,
+          note: '草稿已放入回复台，等用户确认后才会发送；不要再自己发送同一条。',
+        },
+      }
     },
   })
 

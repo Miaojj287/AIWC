@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiwcBridge } from '@aiwc/protocol'
 import { __setBridgeForTests } from '@/platform/bridge'
 import { registerObjectList, type ObjectListProps as BodyProps } from '@/shell/objectListRegistry'
@@ -31,13 +31,21 @@ registerObjectList({
   ],
 })
 
+let bodyBroken = false
+function FragileBody() {
+  if (bodyBroken) throw new Error('list failed')
+  return <div data-testid="fragile-body">规则</div>
+}
+registerObjectList({ fn: 'autoreply', title: '自动回复', component: FragileBody })
+
 function fakeBridge(): AiwcBridge {
   return {
     runtime: 'web',
     platform: 'darwin',
     on: () => () => {},
     invoke: (async (channel: string) => {
-      if (channel === 'substrate:status') return { connection: 'ready', sync: { phase: 'idle', lastSyncedAt: new Date(2026, 8, 6, 14, 32).getTime() } }
+      if (channel === 'substrate:status')
+        return { connection: 'ready', sync: { phase: 'idle', lastSyncedAt: new Date(2026, 8, 6, 14, 32).getTime() } }
       if (channel === 'substrate:sync') return { phase: 'idle', lastSyncedAt: Date.now() }
       throw new Error(`unexpected ${channel}`)
     }) as AiwcBridge['invoke'],
@@ -46,6 +54,7 @@ function fakeBridge(): AiwcBridge {
 
 beforeEach(() => {
   seen = []
+  bodyBroken = false
   __resetShellStoreForTests()
   useTabsStore.setState({ tabs: [], activeId: null, recentlyClosed: [], lastActiveByFunction: {} })
   __setBridgeForTests(fakeBridge())
@@ -53,6 +62,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   __setBridgeForTests(undefined)
+  vi.restoreAllMocks()
 })
 
 describe('ObjectList frame', () => {
@@ -91,6 +101,31 @@ describe('ObjectList frame', () => {
     expect(seen.at(-1)?.activeObjectId).toBe('s7')
     act(() => useShellStore.getState().requestSearchFocus())
     expect(document.activeElement).toBe(screen.getByRole('searchbox'))
+  })
+
+  it('keeps the header usable when the list body fails to render, and retries the body', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    bodyBroken = true
+    act(() => useShellStore.getState().setRail('autoreply'))
+    render(<ObjectList mac />)
+    expect(screen.getByRole('alert').textContent).toContain('无法显示此内容')
+    expect(screen.getByRole('searchbox')).toBeTruthy()
+
+    bodyBroken = false
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(screen.getByTestId('fragile-body')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not carry a body error over to the next rail function', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    bodyBroken = true
+    act(() => useShellStore.getState().setRail('autoreply'))
+    render(<ObjectList mac />)
+    expect(screen.getByRole('alert')).toBeTruthy()
+    act(() => useShellStore.getState().setRail('chat'))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('body')).toBeTruthy()
   })
 
   it('falls back to a frame-level empty state when no list is registered for the function', () => {

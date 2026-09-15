@@ -11,7 +11,13 @@ import { findWeChatPidSync } from '../discovery/processDetect'
 import { verifyDbKey } from './sqlcipherPage'
 import { validateKeyHexDetailed } from './validateKeyHex'
 import { resolveImageKeys } from './imageKeys'
-import { captureMacDbKeyViaHook, isSipEnabled, scanMacDbKey, scanMacDbKeyFromDumps, scanMacImageAesKey } from './macosMemoryScanner'
+import {
+  captureMacDbKeyViaHook,
+  isSipEnabled,
+  scanMacDbKey,
+  scanMacDbKeyFromDumps,
+  scanMacImageAesKey,
+} from './macosMemoryScanner'
 import { scanWindowsDbKey, scanWindowsImageAesKey } from './windowsMemoryScanner'
 
 export interface AcquireKeysOptions {
@@ -73,7 +79,11 @@ class StepTracker {
   }
 }
 
-async function acquireDbKey(opts: AcquireKeysOptions, dbStoragePath: string, tracker: StepTracker): Promise<string | undefined> {
+async function acquireDbKey(
+  opts: AcquireKeysOptions,
+  dbStoragePath: string,
+  tracker: StepTracker,
+): Promise<string | undefined> {
   tracker.start('db_key', '正在从微信进程内存中读取密钥')
   const pid = findWeChatPidSync()
   const timeout = opts.dbKeyTimeoutMs ?? 30_000
@@ -158,7 +168,10 @@ async function acquireDbKey(opts: AcquireKeysOptions, dbStoragePath: string, tra
       tracker.done('db_key', '已从微信进程内存获取密钥')
       return scan.key
     }
-    tracker.fail('db_key', scan.opened ? '内存中未找到匹配的数据库密钥，请在登录后重试' : '无法读取微信进程内存（可能需要管理员权限）')
+    tracker.fail(
+      'db_key',
+      scan.opened ? '内存中未找到匹配的数据库密钥，请在登录后重试' : '无法读取微信进程内存（可能需要管理员权限）',
+    )
     return undefined
   }
 
@@ -166,9 +179,15 @@ async function acquireDbKey(opts: AcquireKeysOptions, dbStoragePath: string, tra
   return undefined
 }
 
-async function acquireImageKeys(opts: AcquireKeysOptions, accountDir: string, tracker: StepTracker): Promise<{ xorHex?: string; aesHex?: string }> {
+async function acquireImageKeys(
+  opts: AcquireKeysOptions,
+  accountDir: string,
+  tracker: StepTracker,
+): Promise<{ xorHex?: string; aesHex?: string }> {
   tracker.start('image_xor', '正在从模板文件计算 XOR 密钥')
-  const wxidCandidates = Array.from(new Set([basenameOf(accountDir), opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean)))
+  const wxidCandidates = Array.from(
+    new Set([basenameOf(accountDir), opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean)),
+  )
   const timeout = opts.imageKeyTimeoutMs ?? 30_000
   const pid = findWeChatPidSync()
   const memoryScan = pid
@@ -191,7 +210,12 @@ async function acquireImageKeys(opts: AcquireKeysOptions, accountDir: string, tr
 }
 
 function basenameOf(dir: string): string {
-  return dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+  return (
+    dir
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ?? ''
+  )
 }
 
 export async function acquireKeys(opts: AcquireKeysOptions): Promise<AcquireKeysResult> {

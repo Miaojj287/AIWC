@@ -35,7 +35,8 @@ export function isAccountDir(entryPath: string): boolean {
 export function resolveDbStoragePath(dbRoot: string, wxid: string): string | null {
   if (!dbRoot) return null
   const normalized = dbRoot.replace(/[\\/]+$/, '')
-  const matches = (name: string) => !wxid || name.toLowerCase() === wxid.toLowerCase() || name.toLowerCase().startsWith(`${wxid.toLowerCase()}_`)
+  const matches = (name: string) =>
+    !wxid || name.toLowerCase() === wxid.toLowerCase() || name.toLowerCase().startsWith(`${wxid.toLowerCase()}_`)
   if (basename(normalized).toLowerCase() === 'db_storage' && existsSync(normalized)) {
     return matches(basename(dirname(normalized))) ? normalized : null
   }
@@ -140,7 +141,9 @@ export function findMessageShards(dbStoragePath: string): MessageShard[] {
     for (const found of collectFiles(dbStoragePath, (name) => shardKind(name) !== null)) push(found)
   }
   const num = (p: string) => Number.parseInt(/_(\d+)\.db$/i.exec(basename(p))?.[1] ?? '0', 10)
-  return shards.sort((a, b) => a.kind.localeCompare(b.kind) || num(a.dbPath) - num(b.dbPath) || a.dbPath.localeCompare(b.dbPath))
+  return shards.sort(
+    (a, b) => a.kind.localeCompare(b.kind) || num(a.dbPath) - num(b.dbPath) || a.dbPath.localeCompare(b.dbPath),
+  )
 }
 
 /** `media_N.db` shards holding voice blobs. */

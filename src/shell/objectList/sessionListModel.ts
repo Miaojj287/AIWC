@@ -5,21 +5,23 @@
  * sessionListModel.test.ts.
  */
 import { AtSign, BellOff, Bell, Bot, CheckCheck, EyeOff, Pin, PinOff, Reply } from 'lucide-react'
-import type { SessionKind, WxSession } from '@aiwc/protocol'
+import type { ConnectionState, SessionKind, WxSession } from '@aiwc/protocol'
+import { t, type MessageKey, type Translator } from '@/i18n'
 import type { MenuSpec } from '@/kit'
 import { shortcutLabel } from '@/app/shortcuts'
 import type { ListFilterOption } from './listHeaderContext'
 
-export const SESSION_SEGMENTS: ReadonlyArray<{ id: 'all' | 'dm' | 'group'; label: string }> = [
-  { id: 'all', label: '全部' },
-  { id: 'dm', label: '单聊' },
-  { id: 'group', label: '群聊' },
+export const SESSION_SEGMENTS: ReadonlyArray<{ id: 'all' | 'dm' | 'group'; labelKey: MessageKey }> = [
+  { id: 'all', labelKey: 'shell.sessions.segments.all' },
+  { id: 'dm', labelKey: 'shell.sessions.segments.dm' },
+  { id: 'group', labelKey: 'shell.sessions.segments.group' },
 ]
 
-export const SESSION_FILTER_OPTIONS: readonly ListFilterOption[] = [
-  { id: 'unreadOnly', label: '仅未读', description: '只显示有未读消息的会话' },
-  { id: 'mutedOnly', label: '已静音', description: '只显示已静音的会话' },
-  { id: 'hidden', label: '已隐藏', description: '显示从列表隐藏的会话，便于恢复' },
+/** Resolved with t() by the list body before it is published to the header. */
+export const SESSION_FILTER_OPTIONS: ReadonlyArray<Omit<ListFilterOption, 'label'> & { labelKey: MessageKey }> = [
+  { id: 'unreadOnly', labelKey: 'shell.sessions.filters.unreadOnly' },
+  { id: 'mutedOnly', labelKey: 'shell.sessions.filters.mutedOnly' },
+  { id: 'hidden', labelKey: 'shell.sessions.filters.hidden' },
 ]
 
 /** Page size for substrate:listSessions. */
@@ -34,12 +36,15 @@ export function segmentKind(segment: string | null): SessionKind | 'all' {
 export function sessionSubtitle(session: Pick<WxSession, 'kind' | 'lastPreview' | 'lastSender'>): string {
   const preview = session.lastPreview?.trim() ?? ''
   const sender = session.lastSender?.trim()
-  if (session.kind === 'group' && sender && preview) return `${sender}：${preview}`
+  if (session.kind === 'group' && sender && preview) return t('shell.sessions.namedPreview', { name: sender, preview })
   return preview
 }
 
 /** Filters the substrate query cannot express (muted) are applied to the loaded page. */
-export function applyClientFilters<T extends Pick<WxSession, 'muted'>>(items: readonly T[], filters: Record<string, boolean>): T[] {
+export function applyClientFilters<T extends Pick<WxSession, 'muted'>>(
+  items: readonly T[],
+  filters: Record<string, boolean>,
+): T[] {
   let out = [...items]
   if (filters.mutedOnly) out = out.filter((s) => s.muted)
   return out
@@ -59,37 +64,78 @@ export interface SessionMenuActions {
  * The session menu (Figma 156:964): regular → separator → cross-feature → separator → danger last
  * (CLAUDE.md §4.2). Cloning is a per-contact feature, so it is disabled for groups.
  */
-export function sessionMenuSpec(session: Pick<WxSession, 'kind' | 'pinned' | 'muted' | 'unread'>, actions: SessionMenuActions, opts: { mac: boolean; hidden?: boolean }): MenuSpec {
+export function sessionMenuSpec(
+  session: Pick<WxSession, 'kind' | 'pinned' | 'muted' | 'unread'>,
+  actions: SessionMenuActions,
+  opts: { mac: boolean; hidden?: boolean },
+): MenuSpec {
   const items: MenuSpec = [
     {
       id: 'pin',
-      label: session.pinned ? '取消置顶' : '置顶会话',
+      label: session.pinned ? t('shell.sessions.menu.unpin') : t('shell.sessions.menu.pin'),
       icon: session.pinned ? PinOff : Pin,
       onSelect: () => actions.setFlags({ pinned: !session.pinned }),
     },
-    { id: 'read', label: '标为已读', icon: CheckCheck, disabled: session.unread <= 0, onSelect: () => actions.setFlags({ read: true }) },
+    {
+      id: 'read',
+      label: t('shell.sessions.menu.markRead'),
+      icon: CheckCheck,
+      disabled: session.unread <= 0,
+      onSelect: () => actions.setFlags({ read: true }),
+    },
     {
       id: 'mute',
-      label: session.muted ? '取消静音' : '静音通知',
+      label: session.muted ? t('shell.sessions.menu.unmute') : t('shell.sessions.menu.mute'),
       icon: session.muted ? Bell : BellOff,
       onSelect: () => actions.setFlags({ muted: !session.muted }),
     },
     { type: 'separator' },
-    { id: 'autoreply', label: '设置自动回复', icon: Reply, onSelect: actions.openAutoReply },
+    { id: 'autoreply', label: t('shell.sessions.menu.autoReply'), icon: Reply, onSelect: actions.openAutoReply },
     {
       id: 'clone',
-      label: '克隆此联系人',
+      label: t('shell.sessions.menu.clone'),
       icon: Bot,
       disabled: session.kind !== 'dm',
-      description: session.kind !== 'dm' ? '仅支持单聊联系人' : undefined,
+      description: session.kind !== 'dm' ? t('shell.sessions.menu.cloneDmOnly') : undefined,
       onSelect: actions.openClone,
     },
-    { id: 'quote', label: '引用到 Agent', icon: AtSign, shortcut: shortcutLabel('agent.quoteActiveTab', opts.mac), onSelect: actions.quoteToAgent },
+    {
+      id: 'quote',
+      label: t('shell.sessions.menu.quote'),
+      icon: AtSign,
+      shortcut: shortcutLabel('agent.quoteActiveTab', opts.mac),
+      onSelect: actions.quoteToAgent,
+    },
     { type: 'separator' },
   ]
-  if (opts.hidden) items.push({ id: 'unhide', label: '恢复到列表', icon: EyeOff, onSelect: actions.unhide })
-  else items.push({ id: 'hide', label: '从列表隐藏', icon: EyeOff, danger: true, onSelect: actions.hide })
+  if (opts.hidden)
+    items.push({ id: 'unhide', label: t('shell.sessions.menu.unhide'), icon: EyeOff, onSelect: actions.unhide })
+  else
+    items.push({ id: 'hide', label: t('shell.sessions.menu.hide'), icon: EyeOff, danger: true, onSelect: actions.hide })
   return items
+}
+
+/** What the list shows after a page failed to load: keep loading, offer to connect WeChat, or a retryable error. */
+export type ListFailureView = 'waiting' | 'not_connected' | 'failed'
+
+/**
+ * Classifies a failed session page by the substrate's connection state, never by the error text: the substrate's
+ * not_open error reaches the renderer as a translated message only (AGENTS.md §2.5). `statusPending` = the
+ * `substrate:status` answer has not arrived yet.
+ */
+export function listFailureView(connection: ConnectionState | undefined, statusPending: boolean): ListFailureView {
+  switch (connection) {
+    case undefined:
+      return statusPending ? 'waiting' : 'failed'
+    case 'connecting':
+      return 'waiting'
+    case 'no_config':
+    case 'locked':
+    case 'error':
+      return 'not_connected'
+    case 'ready':
+      return 'failed'
+  }
 }
 
 /** `avatarPath` from the substrate is a file path unless the host mapped it to a servable URL. */
@@ -100,7 +146,6 @@ export function servableAvatar(path: string | undefined): string | undefined {
   return `aiwc-media://${normalised.startsWith('/') ? '' : '/'}${encodeURI(normalised)}`
 }
 
-
 export type SessionFolder = 'official' | 'collapsed' | 'pinned'
 export interface SessionDisplayRow extends WxSession {
   folder?: SessionFolder
@@ -108,10 +153,19 @@ export interface SessionDisplayRow extends WxSession {
   count?: number
 }
 
-/** Derived UI groups only: no invented sessions are stored or passed to message APIs. */
-export function buildSessionRows(sessions: readonly WxSession[], expanded: ReadonlySet<SessionFolder>, searching = false): SessionDisplayRow[] {
-  const real = sessions.filter((s) => !['brandsessionholder', '@brandsessionholder', 'placeholder_foldgroup', '@placeholder_foldgroup'].includes(s.id))
-  const recent = (a: WxSession, b: WxSession) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) || a.id.localeCompare(b.id)
+/** Derived UI groups only: no invented sessions are stored or passed to message APIs. Components pass their `useT()` translator so a language switch rebuilds the folder rows. */
+export function buildSessionRows(
+  sessions: readonly WxSession[],
+  expanded: ReadonlySet<SessionFolder>,
+  searching = false,
+  translate: Translator = t,
+): SessionDisplayRow[] {
+  const real = sessions.filter(
+    (s) =>
+      !['brandsessionholder', '@brandsessionholder', 'placeholder_foldgroup', '@placeholder_foldgroup'].includes(s.id),
+  )
+  const recent = (a: WxSession, b: WxSession) =>
+    (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0) || a.id.localeCompare(b.id)
   if (searching) return [...real].sort((a, b) => Number(b.pinned) - Number(a.pinned) || recent(a, b))
   const officials = real.filter((s) => s.kind === 'official' || s.id.startsWith('gh_')).sort(recent)
   const collapsed = real.filter((s) => s.kind === 'group' && s.collapsed).sort(recent)
@@ -121,16 +175,26 @@ export function buildSessionRows(sessions: readonly WxSession[], expanded: Reado
   const normal: SessionDisplayRow[] = regular.filter((s) => !s.pinned)
   const groups: Partial<Record<SessionFolder, WxSession[]>> = { official: officials, collapsed, pinned }
   const folder = (key: SessionFolder, title: string, children: WxSession[]): SessionDisplayRow => ({
-    id: `ui-folder:${key}`, folder: key, kind: 'system', title, count: children.length,
-    pinned: key === 'pinned', muted: false, unread: children.reduce((sum, s) => sum + s.unread, 0),
+    id: `ui-folder:${key}`,
+    folder: key,
+    kind: 'system',
+    title,
+    count: children.length,
+    pinned: key === 'pinned',
+    muted: false,
+    unread: children.reduce((sum, s) => sum + s.unread, 0),
     lastMessageAt: children[0]?.lastMessageAt,
-    lastPreview: children[0]?.lastPreview ? `${children[0].title}：${sessionSubtitle(children[0])}` : undefined,
+    lastPreview: children[0]?.lastPreview
+      ? translate('shell.sessions.namedPreview', { name: children[0].title, preview: sessionSubtitle(children[0]) })
+      : undefined,
   })
-  if (officials.length) normal.push(folder('official', '公众号', officials))
-  if (collapsed.length) normal.push(folder('collapsed', '折叠的聊天', collapsed))
+  if (officials.length) normal.push(folder('official', translate('shell.sessions.folders.official'), officials))
+  if (collapsed.length) normal.push(folder('collapsed', translate('shell.sessions.folders.collapsed'), collapsed))
   normal.sort(recent)
-  const top = pinned.length ? [folder('pinned', '置顶聊天', pinned)] : []
-  return [...top, ...normal].flatMap((s) => s.folder && expanded.has(s.folder)
-    ? [s, ...(groups[s.folder] ?? []).map((child) => ({ ...child, child: true }))]
-    : [s])
+  const top = pinned.length ? [folder('pinned', translate('shell.sessions.folders.pinned'), pinned)] : []
+  return [...top, ...normal].flatMap((s) =>
+    s.folder && expanded.has(s.folder)
+      ? [s, ...(groups[s.folder] ?? []).map((child) => ({ ...child, child: true }))]
+      : [s],
+  )
 }

@@ -4,7 +4,7 @@ import { getTimeline } from './getTimeline'
 import { searchMessages, semanticSearch } from './search'
 import { searchMedia } from './searchMedia'
 import { body, runTool } from './testing/ctx'
-import { T0, sampleWorld } from './testing/fakeSubstrate'
+import { T0, msg, sampleWorld } from './testing/fakeSubstrate'
 
 describe('search_messages', () => {
   it('returns anchored hits, coverage and UI anchors meta', async () => {
@@ -20,12 +20,29 @@ describe('search_messages', () => {
     expect(out.coverage.scope).toBe('all_indexed')
     expect(out.coverage.bounded).toBe(true)
     expect(res.meta?.anchors).toHaveLength(2)
-    expect(sub.calls[0]).toEqual({ method: 'search', args: [{ query: '火锅', limit: 10, mode: 'keyword' }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'search',
+      args: [{ query: '火锅', limit: 20, mode: 'keyword', match: 'relaxed' }],
+    })
   })
   it('scopes to sessionIds and time range', async () => {
     const sub = sampleWorld()
-    const out = body(await runTool(searchMessages, { query: '周报', sessionIds: ['grp_1@chatroom'], from: T0, to: T0 + 60_000, limit: 5 }, sub))
-    expect(sub.calls[0]?.args[0]).toEqual({ query: '周报', sessionIds: ['grp_1@chatroom'], from: T0, to: T0 + 60_000, limit: 5, mode: 'keyword' })
+    const out = body(
+      await runTool(
+        searchMessages,
+        { query: '周报', sessionIds: ['grp_1@chatroom'], from: T0, to: T0 + 60_000, limit: 5 },
+        sub,
+      ),
+    )
+    expect(sub.calls[0]?.args[0]).toEqual({
+      query: '周报',
+      sessionIds: ['grp_1@chatroom'],
+      from: T0,
+      to: T0 + 60_000,
+      limit: 5,
+      mode: 'keyword',
+      match: 'relaxed',
+    })
     expect(out.hits.map((h: { anchor: { messageId: string } }) => h.anchor.messageId)).toEqual(['g1'])
     expect(out.coverage).toMatchObject({ scope: 'sessions', sessionCount: 1, bounded: false })
     expect(body(await runTool(searchMessages, { query: 'nothing-here' }, sub)).note).toBeDefined()
@@ -34,10 +51,10 @@ describe('search_messages', () => {
     const s = searchMessages.inputSchema
     expect(s.safeParse({}).success).toBe(false)
     expect(s.safeParse({ query: ' ' }).success).toBe(false)
-    expect(s.safeParse({ query: 'a', limit: 51 }).success).toBe(false)
+    expect(s.safeParse({ query: 'a', limit: 81 }).success).toBe(false)
     expect(s.safeParse({ query: 'a', from: 10, to: 1 }).success).toBe(false)
     expect(s.safeParse({ query: 'a', sessionIds: [] }).success).toBe(false)
-    expect(s.safeParse({ query: 'a', sessionIds: ['x'], limit: 50 }).success).toBe(true)
+    expect(s.safeParse({ query: 'a', sessionIds: ['x'], limit: 80 }).success).toBe(true)
   })
   it('surfaces substrate failures as isError', async () => {
     const sub = sampleWorld()
@@ -51,16 +68,19 @@ describe('search_messages', () => {
 })
 
 describe('semantic_search', () => {
-  it('always asks the substrate for hybrid mode and caps at 20', async () => {
+  it('always asks the substrate for hybrid mode and caps at 40', async () => {
     const sub = sampleWorld()
     const out = body(await runTool(semanticSearch, { query: '吃饭 火锅', sessionIds: ['user_a'] }, sub))
-    expect(sub.calls[0]).toEqual({ method: 'search', args: [{ query: '吃饭 火锅', sessionIds: ['user_a'], limit: 8, mode: 'hybrid' }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'search',
+      args: [{ query: '吃饭 火锅', sessionIds: ['user_a'], limit: 15, mode: 'hybrid', match: 'relaxed' }],
+    })
     expect(out.mode).toBe('hybrid')
     expect(out.hits[0].source).toBe('fused')
     expect(out.matchedBy).toEqual(['fused'])
     expect(out.hits[0].anchor.sessionId).toBe('user_a')
-    expect(semanticSearch.inputSchema.safeParse({ query: 'a', limit: 21 }).success).toBe(false)
-    expect(semanticSearch.inputSchema.safeParse({ query: 'a', limit: 20 }).success).toBe(true)
+    expect(semanticSearch.inputSchema.safeParse({ query: 'a', limit: 41 }).success).toBe(false)
+    expect(semanticSearch.inputSchema.safeParse({ query: 'a', limit: 40 }).success).toBe(true)
   })
 })
 
@@ -71,7 +91,13 @@ describe('get_context', () => {
     const res = await runTool(getContext, { anchor, radius: 2 }, sub)
     const out = body(res)
     expect(sub.calls[0]).toEqual({ method: 'getContext', args: [anchor, 2] })
-    expect(out.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5'])
+    expect(out.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+      'm5',
+    ])
     expect(out.messages[2]).toMatchObject({ isAnchor: true, kind: 'voice', text: '[语音 4s]', senderName: '阿明' })
     expect(out.messages[1]).toMatchObject({ senderName: '我', isSelf: true })
     expect(out.messages[0].isAnchor).toBeUndefined()
@@ -79,14 +105,21 @@ describe('get_context', () => {
   })
   it('errors when the anchor cannot be resolved', async () => {
     const sub = sampleWorld()
-    const res = await runTool(getContext, { anchor: { sessionId: 'user_a', messageId: 'nope', seq: 99, createdAt: 1 } }, sub)
+    const res = await runTool(
+      getContext,
+      { anchor: { sessionId: 'user_a', messageId: 'nope', seq: 99, createdAt: 1 } },
+      sub,
+    )
     expect(res.isError).toBe(true)
     expect(body(res).error).toContain('锚点')
   })
-  it('requires a full anchor and radius <= 30', () => {
+  it('requires a full anchor and radius <= 60', () => {
     const s = getContext.inputSchema
     expect(s.safeParse({ anchor: { sessionId: 'a', messageId: 'b' } }).success).toBe(false)
-    expect(s.safeParse({ anchor: { sessionId: 'a', messageId: 'b', seq: 1, createdAt: 1 }, radius: 31 }).success).toBe(false)
+    expect(s.safeParse({ anchor: { sessionId: 'a', messageId: 'b', seq: 1, createdAt: 1 }, radius: 61 }).success).toBe(
+      false,
+    )
+    expect(s.parse({ anchor: { sessionId: 'a', messageId: 'b', seq: 1, createdAt: 1 } }).radius).toBe(10)
     expect(s.safeParse({ anchor: { sessionId: 'a', messageId: 'b', seq: 1, createdAt: 1 } }).success).toBe(true)
   })
 })
@@ -94,9 +127,19 @@ describe('get_context', () => {
 describe('get_timeline', () => {
   it('reads a window oldest-first regardless of substrate order', async () => {
     const sub = sampleWorld()
-    const out = body(await runTool(getTimeline, { sessionId: 'user_a', from: T0 + 2 * 60_000, to: T0 + 5 * 60_000, limit: 10 }, sub))
-    expect(sub.calls[0]).toEqual({ method: 'listMessages', args: [{ sessionId: 'user_a', limit: 10, from: T0 + 2 * 60_000, to: T0 + 5 * 60_000 }] })
-    expect(out.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual(['m2', 'm3', 'm4', 'm5'])
+    const out = body(
+      await runTool(getTimeline, { sessionId: 'user_a', from: T0 + 2 * 60_000, to: T0 + 5 * 60_000, limit: 10 }, sub),
+    )
+    expect(sub.calls[0]).toEqual({
+      method: 'listMessages',
+      args: [{ sessionId: 'user_a', limit: 10, from: T0 + 2 * 60_000, to: T0 + 5 * 60_000 }],
+    })
+    expect(out.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual([
+      'm2',
+      'm3',
+      'm4',
+      'm5',
+    ])
     expect(out.count).toBe(4)
     expect(out.hasMore).toBe(false)
     expect(out.covered.from).toMatch(/^\d{4}-/)
@@ -126,7 +169,13 @@ describe('search_media', () => {
     expect(sub.calls[0]?.method).toBe('listMessages')
     expect(sub.calls[0]?.args[0]).toMatchObject({ sessionId: 'user_a', kinds: ['file'] })
     expect(out.hits).toHaveLength(1)
-    expect(out.hits[0]).toMatchObject({ kind: 'file', fileName: '预算.xlsx', sizeBytes: 40960, sender: '我', isSelf: true })
+    expect(out.hits[0]).toMatchObject({
+      kind: 'file',
+      fileName: '预算.xlsx',
+      sizeBytes: 40960,
+      sender: '我',
+      isSelf: true,
+    })
     expect(out.hits[0].anchor).toEqual({ sessionId: 'user_a', messageId: 'm5', seq: 5, createdAt: T0 + 5 * 60_000 })
     expect(JSON.stringify(out)).not.toContain('path')
     expect(out.coverage.scope).toBe('sessions')
@@ -135,7 +184,9 @@ describe('search_media', () => {
   it('scans recent dm/group sessions (not official) when no sessionId is given, newest first', async () => {
     const sub = sampleWorld()
     const out = body(await runTool(searchMedia, { kind: 'image' }, sub))
-    const scanned = sub.calls.filter((c) => c.method === 'listMessages').map((c) => (c.args[0] as { sessionId: string }).sessionId)
+    const scanned = sub.calls
+      .filter((c) => c.method === 'listMessages')
+      .map((c) => (c.args[0] as { sessionId: string }).sessionId)
     expect(scanned.sort()).toEqual(['grp_1@chatroom', 'user_a'])
     expect(out.hits.map((h: { fileName: string }) => h.fileName)).toEqual(['menu.jpg', 'chart.png'])
     expect(out.coverage).toMatchObject({ scope: 'recent_sessions', sessionCount: 2, bounded: true })
@@ -152,5 +203,77 @@ describe('search_media', () => {
     expect(s.safeParse({ kind: 'audio' }).success).toBe(false)
     expect(s.safeParse({ kind: 'image', limit: 31 }).success).toBe(false)
     expect(s.safeParse({ kind: 'sticker', limit: 30 }).success).toBe(true)
+  })
+})
+
+describe('search output the model can cite and read without extra calls', () => {
+  it('every hit carries a paste-ready cite link and the chat title', async () => {
+    const sub = sampleWorld()
+    const out = body(await runTool(searchMessages, { query: '火锅' }, sub))
+    const hit = out.hits[0]
+    expect(hit.cite).toMatch(/^\[\d{2}-\d{2} \d{2}:\d{2}\]\(wx:\/\/user_a\/m6\)$/)
+    expect(hit.chat).toBe('阿明')
+  })
+
+  it('fills a sender left as a raw wxid by the index from the contact book', async () => {
+    const sub = sampleWorld({
+      messages: [
+        msg({
+          id: 'x1',
+          sessionId: 'grp_1@chatroom',
+          seq: 90,
+          senderId: 'user_b',
+          senderName: 'user_b',
+          text: '周末去爬山吗',
+        }),
+      ],
+    })
+    const out = body(await runTool(searchMessages, { query: '爬山' }, sub))
+    expect(out.hits[0]).toMatchObject({ sender: '小红', chat: '项目组' })
+    const ctx = body(await runTool(getContext, { anchor: out.hits[0].anchor, radius: 1 }, sub))
+    expect(ctx.messages.find((m: { anchor: { messageId: string } }) => m.anchor.messageId === 'x1').senderName).toBe(
+      '小红',
+    )
+  })
+
+  it('semantic_search admits it fell back to keywords when there is no vector index', async () => {
+    const sub = sampleWorld()
+    const search = sub.search.bind(sub)
+    sub.search = async (q) => (await search({ ...q, mode: 'keyword' })).map((h) => ({ ...h, source: 'fts' as const }))
+    const out = body(await runTool(semanticSearch, { query: '火锅', from: T0, to: T0 + 60 * 60_000 }, sub))
+    expect(out.mode).toBe('keyword')
+    expect(out.note).toContain('关键词')
+    expect(sub.calls.find((c) => c.method === 'search')?.args[0]).toMatchObject({ from: T0, to: T0 + 60 * 60_000 })
+    expect(out.coverage.from).toBeDefined()
+  })
+})
+
+describe('get_timeline reads a long conversation completely', () => {
+  it('accepts date strings and forwards them as an inclusive millisecond window', async () => {
+    const sub = sampleWorld()
+    await runTool(getTimeline, { sessionId: 'user_a', from: '2026-01-10', to: '2026-01-10' }, sub)
+    const q = sub.calls[0]?.args[0] as { from: number; to: number }
+    expect(q.from).toBe(new Date(2026, 0, 10).getTime())
+    expect(q.to).toBe(new Date(2026, 0, 11).getTime() - 1)
+  })
+
+  it('pages backwards with olderCursor and forwards with newerCursor', async () => {
+    const sub = sampleWorld()
+    const latest = body(await runTool(getTimeline, { sessionId: 'user_a', limit: 2 }, sub))
+    expect(latest.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual(['m5', 'm6'])
+    expect(latest).toMatchObject({ hasMore: true, olderCursor: 5 })
+    const older = body(
+      await runTool(getTimeline, { sessionId: 'user_a', limit: 2, beforeSeq: latest.olderCursor }, sub),
+    )
+    expect(older.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual(['m3', 'm4'])
+    const fromStart = body(await runTool(getTimeline, { sessionId: 'user_a', limit: 4, afterSeq: 0 }, sub))
+    expect(fromStart.messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+    ])
+    expect(fromStart).toMatchObject({ hasMore: true, newerCursor: 4 })
+    expect(getTimeline.inputSchema.safeParse({ sessionId: 'a', beforeSeq: 1, afterSeq: 2 }).success).toBe(false)
   })
 })

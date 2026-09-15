@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeKeyHex, validateAesKeyHex, validateKeyHex, validateKeyHexDetailed, validateXorKeyHex } from './validateKeyHex'
+import {
+  normalizeKeyHex,
+  validateAesKeyHex,
+  validateKeyHex,
+  validateKeyHexDetailed,
+  validateXorKeyHex,
+} from './validateKeyHex'
 
 const KEY64 = 'a'.repeat(64)
 
@@ -25,7 +31,9 @@ describe('image key validation', () => {
     expect(validateXorKeyHex('7').ok).toBe(false)
   })
   it('accepts 16-char ascii or 32-hex aes key', () => {
-    expect(validateAesKeyHex('0123456789abcdef').normalized).toBe(Buffer.from('0123456789abcdef', 'ascii').toString('hex'))
+    expect(validateAesKeyHex('0123456789abcdef').normalized).toBe(
+      Buffer.from('0123456789abcdef', 'ascii').toString('hex'),
+    )
     expect(validateAesKeyHex('ab'.repeat(16)).normalized).toBe('ab'.repeat(16))
     expect(validateAesKeyHex('short').ok).toBe(false)
   })

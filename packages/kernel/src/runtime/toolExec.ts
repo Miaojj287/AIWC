@@ -31,7 +31,12 @@ export function interruptedOutcome(call: ToolCallRequest, durationMs: number): T
   }
 }
 
-async function raceWithGrace<T>(work: Promise<T>, signal: AbortSignal, graceMs: number, onInterrupted: () => T): Promise<T> {
+async function raceWithGrace<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+  graceMs: number,
+  onInterrupted: () => T,
+): Promise<T> {
   if (signal.aborted) {
     const winner = await Promise.race([work.then((v) => ({ v })), sleep(graceMs).then(() => undefined)])
     return winner ? winner.v : onInterrupted()
@@ -117,7 +122,11 @@ export async function executeToolCalls(input: ToolExecInput): Promise<ToolDispat
   return Promise.all(calls.map(runOne))
 }
 
-export function outcomeToResultItem(outcome: ToolDispatchOutcome, ids: { turnId: TurnId; stepId: StepId }, at: number): ToolResultItem {
+export function outcomeToResultItem(
+  outcome: ToolDispatchOutcome,
+  ids: { turnId: TurnId; stepId: StepId },
+  at: number,
+): ToolResultItem {
   const content = outcome.result.content
   return {
     type: 'tool_result',
@@ -125,7 +134,7 @@ export function outcomeToResultItem(outcome: ToolDispatchOutcome, ids: { turnId:
     turnId: ids.turnId,
     stepId: ids.stepId,
     createdAt: at,
-    callId: asCallId(outcome.callId as string) as CallId,
+    callId: asCallId(outcome.callId),
     toolName: outcome.toolName,
     output: typeof content === 'string' ? { type: 'text', text: content } : { type: 'json', value: content },
     isError: outcome.isError,

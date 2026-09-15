@@ -38,7 +38,9 @@ function createFakeFetch(routes: Record<string, (call: Call, n: number) => Respo
 
 const hang = (signal?: AbortSignal | null): Promise<Response> =>
   new Promise((_, reject) => {
-    signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+    signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), {
+      once: true,
+    })
   })
 
 const waitFor = async (pred: () => boolean, ms = 2000): Promise<void> => {
@@ -52,7 +54,10 @@ const waitFor = async (pred: () => boolean, ms = 2000): Promise<void> => {
 describe('iLink client', () => {
   it('pins the sendmessage body shape including context_token and auth headers', async () => {
     const fake = createFakeFetch({ 'ilink/bot/sendmessage': () => jsonResponse({ ret: 0 }) })
-    const client = createIlinkClient({ fetch: fake.fetchImpl, random: { bytes: (n) => Buffer.alloc(n, 1), uuid: () => 'uuid-1' } })
+    const client = createIlinkClient({
+      fetch: fake.fetchImpl,
+      random: { bytes: (n) => Buffer.alloc(n, 1), uuid: () => 'uuid-1' },
+    })
     const session = { token: 'tok', baseUrl: 'https://api.test', botId: 'b', userId: 'u' }
     const res = await client.sendText(session, 'peer_1', '你好', 'ctx-77')
     expect(res.clientId).toBe('aiwc-uuid-1')
@@ -71,7 +76,8 @@ describe('iLink client', () => {
 
   it('surfaces non-zero ret as an error and HTTP failures as thrown errors', async () => {
     const fake = createFakeFetch({
-      'ilink/bot/sendmessage': (_c, n) => (n === 1 ? jsonResponse({ ret: -14, errmsg: 'session timeout' }) : new Response('boom', { status: 500 })),
+      'ilink/bot/sendmessage': (_c, n) =>
+        n === 1 ? jsonResponse({ ret: -14, errmsg: 'session timeout' }) : new Response('boom', { status: 500 }),
     })
     const client = createIlinkClient({ fetch: fake.fetchImpl })
     const session = { token: 'tok', baseUrl: 'https://api.test', botId: 'b', userId: 'u' }
@@ -101,18 +107,38 @@ describe('iLink client', () => {
         'ilink/bot/sendmessage': () => jsonResponse({ ret: 0 }),
       })
       const key = Buffer.alloc(16, 7)
-      const client = createIlinkClient({ fetch: fake.fetchImpl, random: { bytes: (n) => Buffer.alloc(n, 7), uuid: () => 'u2' } })
+      const client = createIlinkClient({
+        fetch: fake.fetchImpl,
+        random: { bytes: (n) => Buffer.alloc(n, 7), uuid: () => 'u2' },
+      })
       const session = { token: 'tok', baseUrl: 'https://api.test', botId: 'b', userId: 'u' }
       await client.sendImage(session, 'peer', file, 'ctx')
       const up = fake.of('getuploadurl')[0]!.body as Record<string, unknown>
-      expect(up).toMatchObject({ media_type: 1, to_user_id: 'peer', rawsize: jpeg.length, filesize: 16, no_need_thumb: true, aeskey: key.toString('hex') })
+      expect(up).toMatchObject({
+        media_type: 1,
+        to_user_id: 'peer',
+        rawsize: jpeg.length,
+        filesize: 16,
+        no_need_thumb: true,
+        aeskey: key.toString('hex'),
+      })
       expect(up.filekey).toBe(`${key.toString('hex')}.jpg`)
       const cdn = fake.of('/upload?')[0]!
       expect(cdn.url).toBe(`https://api.test/upload?encrypted_query_param=UP&filekey=${key.toString('hex')}.jpg`)
       expect(Buffer.from(cdn.body as Uint8Array).equals(encryptAesEcb(jpeg, key))).toBe(true)
       const sent = fake.of('sendmessage')[0]!.body as { msg: { item_list: unknown[]; context_token: string } }
       expect(sent.msg.context_token).toBe('ctx')
-      expect(sent.msg.item_list[0]).toEqual({ type: 2, image_item: { media: { encrypt_query_param: 'DL-PARAM', aes_key: Buffer.from(key.toString('hex')).toString('base64'), encrypt_type: 1 }, mid_size: 16 } })
+      expect(sent.msg.item_list[0]).toEqual({
+        type: 2,
+        image_item: {
+          media: {
+            encrypt_query_param: 'DL-PARAM',
+            aes_key: Buffer.from(key.toString('hex')).toString('base64'),
+            encrypt_type: 1,
+          },
+          mid_size: 16,
+        },
+      })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -131,7 +157,10 @@ describe('iLink adapter', () => {
     rmSync(stateDir, { recursive: true, force: true })
   })
 
-  function makeAdapter(fake: ReturnType<typeof createFakeFetch>, extra: Partial<Parameters<typeof createIlinkAdapter>[0]> = {}) {
+  function makeAdapter(
+    fake: ReturnType<typeof createFakeFetch>,
+    extra: Partial<Parameters<typeof createIlinkAdapter>[0]> = {},
+  ) {
     const qrs: string[] = []
     const states: Array<{ state: string; detail?: string }> = []
     const received: MessageEvent[] = []
@@ -145,14 +174,17 @@ describe('iLink adapter', () => {
       ...extra,
     })
     adapter.onStateChange((state, detail) => states.push({ state, detail }))
-    adapter.onMessage((e) => received.push(e))
+    adapter.onMessage((e) => {
+      received.push(e)
+    })
     return { adapter, qrs, states, received }
   }
 
   it('starts in needs_login without a stored session, polls the QR until confirmed, persists the session and starts receiving', async () => {
     const fake = createFakeFetch({
       get_bot_qrcode: () => jsonResponse(qr.qrcode),
-      get_qrcode_status: (_c, n) => jsonResponse(n === 1 ? qr.status_wait : n === 2 ? qr.status_scaned : qr.status_confirmed),
+      get_qrcode_status: (_c, n) =>
+        jsonResponse(n === 1 ? qr.status_wait : n === 2 ? qr.status_scaned : qr.status_confirmed),
       notifystart: () => jsonResponse({ ret: 0 }),
       notifystop: () => jsonResponse({ ret: 0 }),
       'ilink/bot/getupdates': (c) => hang(c.signal),
@@ -164,7 +196,12 @@ describe('iLink adapter', () => {
     expect(qrs).toEqual([`data:qr,${qr.qrcode.qrcode_img_content}`])
     expect(states.map((s) => s.state)).toEqual(['connecting', 'connecting', 'connected'])
     expect(states[1]?.detail).toContain('已扫码')
-    expect(a.session).toEqual({ token: 'bot-token-xyz', baseUrl: 'https://ilinkai.weixin.qq.com', botId: 'bot_1', userId: 'owner_user_1' })
+    expect(a.session).toEqual({
+      token: 'bot-token-xyz',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      botId: 'bot_1',
+      userId: 'owner_user_1',
+    })
     const stored = JSON.parse(readFileSync(join(stateDir, 'ilink-session.json'), 'utf8'))
     expect(stored).toMatchObject({ token: 'bot-token-xyz', botId: 'bot_1', userId: 'owner_user_1' })
     expect(fake.of('get_qrcode_status')[0]!.url).toContain('qrcode=qr-token-1')
@@ -217,7 +254,8 @@ describe('iLink adapter', () => {
       notifystart: () => jsonResponse({ ret: 0 }),
       notifystop: () => jsonResponse({ ret: 0 }),
       'cdn.example/img1': () => new Response(new Uint8Array(encryptAesEcb(jpeg, key)), { status: 200 }),
-      'cdn.example/voice1': () => new Response(new Uint8Array(encryptAesEcb(Buffer.from('#!SILK_V3voice'), key)), { status: 200 }),
+      'cdn.example/voice1': () =>
+        new Response(new Uint8Array(encryptAesEcb(Buffer.from('#!SILK_V3voice'), key)), { status: 200 }),
       'cdn.example/file1': () => new Response('not found', { status: 404 }),
       // first two polls redeliver the same batch; afterwards hang until abort
       'ilink/bot/getupdates': (c, n) => (n <= 2 ? jsonResponse(updates) : hang(c.signal)),
@@ -225,7 +263,17 @@ describe('iLink adapter', () => {
     const polls = () => fake.of('getupdates').length
     // pre-seed a session so connect() skips the QR flow
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(stateDir, 'ilink-session.json'), JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x', getUpdatesBuf: 'CURSOR_1' }))
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({
+        token: 't',
+        baseUrl: 'https://api.test',
+        botId: 'b',
+        userId: 'u',
+        savedAt: 'x',
+        getUpdatesBuf: 'CURSOR_1',
+      }),
+    )
 
     const { adapter: a, received } = makeAdapter(fake)
     expect(a.state).toBe('disconnected')
@@ -238,8 +286,20 @@ describe('iLink adapter', () => {
     expect(JSON.parse(readFileSync(join(stateDir, 'ilink-session.json'), 'utf8')).getUpdatesBuf).toBe('CURSOR_2')
 
     const [text, voice, image, file] = received
-    expect(text).toMatchObject({ id: 'id:1001', kind: 'text', text: '你好，报价单能发一下吗', addressed: true, timestamp: 1757100000_000 })
-    expect(text!.source).toEqual({ channel: 'wechat-ilink', peerId: 'ilink_user_a', chatId: 'ilink_user_a', chatType: 'dm', displayName: undefined })
+    expect(text).toMatchObject({
+      id: 'id:1001',
+      kind: 'text',
+      text: '你好，报价单能发一下吗',
+      addressed: true,
+      timestamp: 1757100000_000,
+    })
+    expect(text!.source).toEqual({
+      channel: 'wechat-ilink',
+      peerId: 'ilink_user_a',
+      chatId: 'ilink_user_a',
+      chatType: 'dm',
+      displayName: undefined,
+    })
     expect(voice).toMatchObject({ kind: 'voice', text: '[语音] 下午三点开会' })
     expect(voice!.mediaPaths).toHaveLength(1)
     expect(readFileSync(voice!.mediaPaths![0]!).toString()).toBe('#!SILK_V3voice')
@@ -256,18 +316,31 @@ describe('iLink adapter', () => {
       notifystart: () => jsonResponse({ ret: 0 }),
       notifystop: () => jsonResponse({ ret: 0 }),
       'ilink/bot/sendmessage': () => jsonResponse({ ret: 0 }),
-      'ilink/bot/getupdates': (c, n) => (n === 1 ? jsonResponse({ ret: 0, get_updates_buf: 'c', msgs: [updates.msgs[0]] }) : hang(c.signal)),
+      'ilink/bot/getupdates': (c, n) =>
+        n === 1 ? jsonResponse({ ret: 0, get_updates_buf: 'c', msgs: [updates.msgs[0]] }) : hang(c.signal),
     })
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(stateDir, 'ilink-session.json'), JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }))
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
     const { adapter: a, received } = makeAdapter(fake)
     await a.connect()
     await waitFor(() => received.length === 1)
 
     const to = received[0]!.source
-    const res = await a.send({ to, parts: [{ type: 'text', text: `第一条\n---wx-next---\n${'长'.repeat(4500)}` }], reason: 'agent_tool' })
+    const res = await a.send({
+      to,
+      parts: [{ type: 'text', text: `第一条\n---wx-next---\n${'长'.repeat(4500)}` }],
+      reason: 'agent_tool',
+    })
     expect(res.ok).toBe(true)
-    const bodies = fake.of('sendmessage').map((c) => c.body as { msg: { to_user_id: string; context_token?: string; item_list: Array<{ text_item: { text: string } }> } })
+    const bodies = fake.of('sendmessage').map(
+      (c) =>
+        c.body as {
+          msg: { to_user_id: string; context_token?: string; item_list: Array<{ text_item: { text: string } }> }
+        },
+    )
     expect(bodies).toHaveLength(3)
     expect(bodies.map((b) => b.msg.context_token)).toEqual(['ctx-a-1', 'ctx-a-1', 'ctx-a-1'])
     expect(bodies.map((b) => b.msg.to_user_id)).toEqual(['ilink_user_a', 'ilink_user_a', 'ilink_user_a'])
@@ -279,8 +352,13 @@ describe('iLink adapter', () => {
     await a.send({ to, parts: [{ type: 'text', text: 'ok' }], contextToken: 'explicit', reason: 'auto_reply' })
     expect((fake.of('sendmessage')[3]!.body as { msg: { context_token: string } }).msg.context_token).toBe('explicit')
 
-    expect(await a.send({ to: { ...to, channel: 'desktop' }, parts: [{ type: 'text', text: 'x' }], reason: 'agent_tool' })).toMatchObject({ ok: false })
-    expect(await a.send({ to, parts: [{ type: 'sticker', id: 's' }], reason: 'agent_tool' })).toMatchObject({ ok: false, error: expect.stringContaining('表情') })
+    expect(
+      await a.send({ to: { ...to, channel: 'desktop' }, parts: [{ type: 'text', text: 'x' }], reason: 'agent_tool' }),
+    ).toMatchObject({ ok: false })
+    expect(await a.send({ to, parts: [{ type: 'sticker', id: 's' }], reason: 'agent_tool' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('表情'),
+    })
   })
 
   it('drops the session and moves to needs_login when the server reports expiry during polling', async () => {
@@ -289,7 +367,10 @@ describe('iLink adapter', () => {
       'ilink/bot/getupdates': () => new Response('{"ret":-14,"errmsg":"session timeout"}', { status: 401 }),
     })
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(stateDir, 'ilink-session.json'), JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }))
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
     const { adapter: a, states } = makeAdapter(fake)
     await a.connect()
     await waitFor(() => a.state === 'needs_login')
@@ -306,7 +387,10 @@ describe('iLink adapter', () => {
       'ilink/bot/getupdates': (c, n) => (n <= 3 ? Promise.reject(new Error('ECONNRESET')) : hang(c.signal)),
     })
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(stateDir, 'ilink-session.json'), JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }))
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
     const { adapter: a } = makeAdapter(fake, {
       sleep: async (ms) => {
         delays.push(ms)
@@ -318,10 +402,87 @@ describe('iLink adapter', () => {
     expect(a.state).toBe('connected')
   })
 
+  it('treats a body-level ret -14 on an HTTP 200 poll as an expired session', async () => {
+    const fake = createFakeFetch({
+      notifystart: () => jsonResponse({ ret: 0 }),
+      'ilink/bot/getupdates': (c, n) =>
+        n <= 3 ? jsonResponse({ ret: -14, errmsg: 'session timeout' }) : hang(c.signal),
+    })
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
+    const { adapter: a, states } = makeAdapter(fake)
+    await a.connect()
+    await waitFor(() => a.state === 'needs_login')
+    expect(fake.of('getupdates')).toHaveLength(1)
+    expect(a.session).toBeUndefined()
+    expect(existsSync(join(stateDir, 'ilink-session.json'))).toBe(false)
+    expect(states.at(-1)).toMatchObject({ state: 'needs_login', detail: expect.stringContaining('重新扫码') })
+  })
+
+  it('backs off on any other non-zero ret and trusts nothing in that response', async () => {
+    const delays: number[] = []
+    const fake = createFakeFetch({
+      notifystart: () => jsonResponse({ ret: 0 }),
+      notifystop: () => jsonResponse({ ret: 0 }),
+      'ilink/bot/getupdates': (c, n) =>
+        n <= 2 ? jsonResponse({ ...updates, ret: -1, errmsg: 'system busy', get_updates_buf: 'BAD' }) : hang(c.signal),
+    })
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({
+        token: 't',
+        baseUrl: 'https://api.test',
+        botId: 'b',
+        userId: 'u',
+        savedAt: 'x',
+        getUpdatesBuf: 'CURSOR_1',
+      }),
+    )
+    const { adapter: a, received } = makeAdapter(fake, {
+      sleep: async (ms) => {
+        delays.push(ms)
+      },
+    })
+    await a.connect()
+    await waitFor(() => fake.of('getupdates').length === 3)
+    expect(delays).toEqual([3000, 6000])
+    expect(a.state).toBe('connected')
+    expect(received).toEqual([])
+    expect(fake.of('getupdates')[2]!.body).toMatchObject({ get_updates_buf: 'CURSOR_1' })
+    expect(JSON.parse(readFileSync(join(stateDir, 'ilink-session.json'), 'utf8')).getUpdatesBuf).toBe('CURSOR_1')
+  })
+
+  it('waits a minimum idle time after an empty poll, even when told not to, so an instant server cannot spin it', async () => {
+    const delays: number[] = []
+    const fake = createFakeFetch({
+      notifystart: () => jsonResponse({ ret: 0 }),
+      notifystop: () => jsonResponse({ ret: 0 }),
+      'ilink/bot/getupdates': (c, n) => (n <= 3 ? jsonResponse({ ret: 0, msgs: [] }) : hang(c.signal)),
+    })
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
+    const { adapter: a } = makeAdapter(fake, {
+      pollIdleMs: 0,
+      sleep: async (ms) => {
+        delays.push(ms)
+      },
+    })
+    await a.connect()
+    await waitFor(() => fake.of('getupdates').length === 4)
+    expect(delays).toEqual([1_000, 1_000, 1_000])
+  })
+
   it('logout forgets the session so the next connect shows a QR again', async () => {
     const fake = createFakeFetch({ notifystop: () => jsonResponse({ ret: 0 }) })
     const { writeFileSync } = await import('node:fs')
-    writeFileSync(join(stateDir, 'ilink-session.json'), JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }))
+    writeFileSync(
+      join(stateDir, 'ilink-session.json'),
+      JSON.stringify({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }),
+    )
     const { adapter: a } = makeAdapter(fake)
     await a.logout()
     expect(a.state).toBe('needs_login')
@@ -330,7 +491,12 @@ describe('iLink adapter', () => {
 
   describe('outbound media allow-list', () => {
     const session = { token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'u', savedAt: 'x' }
-    const to = { channel: 'wechat-ilink' as const, chatId: 'ilink_user_a', peerId: 'ilink_user_a', chatType: 'dm' as const }
+    const to = {
+      channel: 'wechat-ilink' as const,
+      chatId: 'ilink_user_a',
+      peerId: 'ilink_user_a',
+      chatType: 'dm' as const,
+    }
     const routes = () =>
       createFakeFetch({
         notifystart: () => jsonResponse({ ret: 0 }),
@@ -375,7 +541,14 @@ describe('iLink adapter', () => {
       expect(fake.of('/upload?')).toHaveLength(0)
       expect(fake.of('sendmessage')).toHaveLength(0)
 
-      const res = await a.send({ to, parts: [{ type: 'file', path: ok }, { type: 'text', text: '见附件' }], reason: 'agent_tool' })
+      const res = await a.send({
+        to,
+        parts: [
+          { type: 'file', path: ok },
+          { type: 'text', text: '见附件' },
+        ],
+        reason: 'agent_tool',
+      })
       expect(res.ok).toBe(true)
       expect(fake.of('getuploadurl')).toHaveLength(1)
       expect(fake.of('sendmessage')).toHaveLength(2)
@@ -390,11 +563,18 @@ describe('iLink adapter', () => {
       mkdirSync(join(stateDir, 'media'), { recursive: true })
       writeFileSync(inMedia, 'x')
       // no roots at all → fail closed, even for the adapter's own media dir
-      expect(await a.send({ to, parts: [{ type: 'file', path: inMedia }], reason: 'agent_tool' })).toMatchObject({ ok: false, error: expect.stringContaining('未配置') })
+      expect(await a.send({ to, parts: [{ type: 'file', path: inMedia }], reason: 'agent_tool' })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('未配置'),
+      })
       roots.push(secretDir)
-      expect(await a.send({ to, parts: [{ type: 'file', path: inMedia }], reason: 'agent_tool' })).toMatchObject({ ok: false })
+      expect(await a.send({ to, parts: [{ type: 'file', path: inMedia }], reason: 'agent_tool' })).toMatchObject({
+        ok: false,
+      })
       expect(fake.of('getuploadurl')).toHaveLength(0)
-      expect(await a.send({ to, parts: [{ type: 'file', path: secret }], reason: 'user_action' })).toMatchObject({ ok: true })
+      expect(await a.send({ to, parts: [{ type: 'file', path: secret }], reason: 'user_action' })).toMatchObject({
+        ok: true,
+      })
       expect(fake.of('getuploadurl')).toHaveLength(1)
     })
   })

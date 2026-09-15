@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseEmojiInfo,
+  parseImageDatNameFromRow,
   parseFileInfo,
   parseImageInfo,
   parseLinkInfo,
@@ -40,12 +41,18 @@ describe('parseMessageContent', () => {
     expect(parseMessageContent('<sysmsg>你已添加了对方</sysmsg>', 10000)).toBe('你已添加了对方')
   })
   it('is resistant to nested escaped title xml', () => {
-    const xml = '<appmsg><title>真实标题</title><type>5</type><des>正文里粘贴了 &lt;title&gt;假的&lt;/title&gt;</des></appmsg>'
+    const xml =
+      '<appmsg><title>真实标题</title><type>5</type><des>正文里粘贴了 &lt;title&gt;假的&lt;/title&gt;</des></appmsg>'
     expect(parseMessageContent(xml, 49)).toBe('[链接] 真实标题')
   })
 })
 
 describe('media parsers', () => {
+  it('extracts the filename instead of an earlier packed hash for Mac thumbnails', () => {
+    expect(
+      parseImageDatNameFromRow({ packed_info_data: Buffer.from('1111111111111111 path/abcdef0123456789_t_M.dat') }),
+    ).toBe('abcdef0123456789')
+  })
   it('parses image md5', () => {
     expect(parseImageInfo('<img aeskey="k" md5="ABCDEF"/>').md5).toBe('abcdef')
   })
@@ -64,11 +71,17 @@ describe('media parsers', () => {
     expect(parseVoiceDurationMs('<voicemsg voicelength="3200"/>')).toBe(3200)
   })
   it('parses file info', () => {
-    const info = parseFileInfo('<appmsg><type>6</type><title>a.txt</title><totallen>99</totallen><fileext>txt</fileext></appmsg>')
+    const info = parseFileInfo(
+      '<appmsg><type>6</type><title>a.txt</title><totallen>99</totallen><fileext>txt</fileext></appmsg>',
+    )
     expect(info).toMatchObject({ fileName: 'a.txt', fileSize: 99, fileExt: 'txt' })
   })
   it('parses link info', () => {
-    expect(parseLinkInfo('<appmsg><title>T</title><url>https://u</url><des>D</des></appmsg>')).toEqual({ title: 'T', url: 'https://u', description: 'D' })
+    expect(parseLinkInfo('<appmsg><title>T</title><url>https://u</url><des>D</des></appmsg>')).toEqual({
+      title: 'T',
+      url: 'https://u',
+      description: 'D',
+    })
   })
 })
 
@@ -81,7 +94,8 @@ describe('parseQuoteMessage', () => {
     expect(quote.content).toBe('原始消息')
   })
   it('labels a quoted image', () => {
-    const xml = '<refermsg><type>3</type><displayname>Bob</displayname><content>&lt;img md5="ff"/&gt;</content></refermsg>'
+    const xml =
+      '<refermsg><type>3</type><displayname>Bob</displayname><content>&lt;img md5="ff"/&gt;</content></refermsg>'
     const quote = parseQuoteMessage(xml)
     expect(quote.content).toBe('[图片]')
   })

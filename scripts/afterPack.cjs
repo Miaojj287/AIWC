@@ -17,7 +17,11 @@ exports.default = async function afterPack(context) {
     const helper = join(resources, 'resources', 'native', 'darwin-arm64', name)
     if (!existsSync(helper)) continue
     try {
-      execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', '--entitlements', ents, '--options', 'runtime', helper], { stdio: 'inherit' })
+      execFileSync(
+        '/usr/bin/codesign',
+        ['--force', '--sign', '-', '--entitlements', ents, '--options', 'runtime', helper],
+        { stdio: 'inherit' },
+      )
       console.log('[afterPack] signed', helper)
     } catch (e) {
       console.warn(`[afterPack] ${name} sign failed (non-fatal):`, e.message)

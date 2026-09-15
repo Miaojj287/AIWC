@@ -1,19 +1,19 @@
 /**
  * Username / account-directory conventions of WeChat 4.x:
  *  - account dirs are `wxid_xxx_ab12` (wxid + 4-char suffix) or `<alias>_ab12`
- *  - `xxx@chatroom` = group, `gh_xxx` = official account, a fixed set of system usernames
+ *  - group / official / system usernames follow normalize/kinds.ts, shared with the mirror
  */
-import type { SessionKind, WxContact } from '@aiwc/protocol'
+import type { WxContact } from '@aiwc/protocol'
+import { isGroupUsername, isOfficialUsername, isSystemUsername } from '../normalize/kinds'
 import type { Row } from './rowDecoders'
 
-const SYSTEM_USERNAMES = new Set([
-  'filehelper', 'fmessage', 'floatbottle', 'medianote', 'newsapp', 'qmessage', 'qqmail', 'weixin',
-  'brandsessionholder', 'brandservicesessionholder', 'notifymessage', 'opencustomerservicemsg',
-  'notification_messages', 'userexperience_alarm', 'placeholder_foldgroup',
-])
-
 /** Virtual folder sessions that aggregate other sessions (not real chats). */
-const VIRTUAL_FOLDER_USERNAMES = new Set(['brandsessionholder', '@brandsessionholder', '@placeholder_foldgroup', 'placeholder_foldgroup'])
+const VIRTUAL_FOLDER_USERNAMES = new Set([
+  'brandsessionholder',
+  '@brandsessionholder',
+  '@placeholder_foldgroup',
+  'placeholder_foldgroup',
+])
 
 /** `wxid_abcd_efgh` → `wxid_abcd`; `alias_1a2b` → `alias`. */
 export function cleanAccountDirName(dirName: string): string {
@@ -40,60 +40,42 @@ export function identityMatches(a: readonly string[], b: readonly string[]): boo
   return a.some((x) => b.some((y) => x === y || x.startsWith(`${y}_`) || y.startsWith(`${x}_`)))
 }
 
-export function isGroupUsername(username: string): boolean {
-  return username.toLowerCase().includes('@chatroom')
-}
-
-export function isOfficialAccountUsername(username: string): boolean {
-  return username.startsWith('gh_')
-}
-
 export function isVirtualFolderUsername(username: string): boolean {
   return VIRTUAL_FOLDER_USERNAMES.has(username.toLowerCase())
 }
 
-export function isSystemUsername(username: string): boolean {
-  const lower = username.trim().toLowerCase()
-  if (!lower) return true
-  const normalized = lower.replace(/^@+/, '')
-  if (SYSTEM_USERNAMES.has(lower) || SYSTEM_USERNAMES.has(normalized)) return true
-  return lower.startsWith('fake_') || lower.includes('@kefu.openim') || lower.includes('service_')
-}
-
-/** WeCom (企业微信) external contacts keep the `@openim` suffix; customer-service bots are excluded. */
-export function isWeComUsername(username: string): boolean {
-  const lower = username.toLowerCase()
-  return lower.includes('@openim') && !lower.includes('@kefu.openim')
-}
-
-/** Sessions we surface at all: drop virtual folders, customer-service and notification channels. */
+/**
+ * Sessions we surface at all: drop virtual folders, customer-service and notification channels. This is
+ * a visibility list, not a classification: surfaced sessions get their kind from sessionKindFromUsername.
+ */
 export function shouldKeepSession(username: string): boolean {
   if (!username) return false
   if (isVirtualFolderUsername(username)) return false
-  if (isOfficialAccountUsername(username) || isGroupUsername(username)) return true
+  if (isOfficialUsername(username) || isGroupUsername(username)) return true
   const lower = username.toLowerCase()
   const excludePrefixes = [
-    'weixin', 'qqmail', 'fmessage', 'medianote', 'floatbottle', 'newsapp', 'brandservicesessionholder',
-    'notifymessage', 'opencustomerservicemsg', 'notification_messages', 'userexperience_alarm',
+    'weixin',
+    'qqmail',
+    'fmessage',
+    'medianote',
+    'floatbottle',
+    'newsapp',
+    'brandservicesessionholder',
+    'notifymessage',
+    'opencustomerservicemsg',
+    'notification_messages',
+    'userexperience_alarm',
   ]
   if (excludePrefixes.some((p) => lower === p || lower.startsWith(p))) return false
   if (lower.includes('@kefu.openim') || lower.includes('service_')) return false
   return true
 }
 
-export function classifySessionKind(username: string): SessionKind {
-  if (isGroupUsername(username)) return 'group'
-  if (isOfficialAccountUsername(username)) return 'official'
-  if (isSystemUsername(username)) return 'system'
-  return 'dm'
-}
-
 /** contact.db row → kind; null means "not a contact we list" (system / service accounts). */
 export function classifyContactKind(username: string, row: Row): WxContact['kind'] | null {
-  const lower = username.trim().toLowerCase()
-  if (isSystemUsername(lower)) return null
-  if (isGroupUsername(lower)) return 'group'
-  if (isOfficialAccountUsername(lower)) return 'official'
+  if (isSystemUsername(username)) return null
+  if (isGroupUsername(username)) return 'group'
+  if (isOfficialUsername(username)) return 'official'
   const rawType = row['local_type'] ?? row['type']
   const numericType = rawType === null || rawType === undefined || rawType === '' ? Number.NaN : Number(rawType)
   if (Number.isFinite(numericType) && numericType === 3) return 'official'

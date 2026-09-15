@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { forwardRef, type HTMLAttributes, type KeyboardEvent, type MouseEvent } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE, type IconComponent } from './icon'
 
@@ -22,9 +23,23 @@ export interface TabProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title' |
  * inactive = weak text; × appears on hover / active; middle-click closes. Wrap in ContextMenuTrigger for the tab menu.
  */
 export const Tab = forwardRef<HTMLDivElement, TabProps>(function Tab(
-  { icon: Icon, label, active = false, pinned = false, dirty = false, onSelect, onClose, activeBg = 'content', className, onKeyDown, onAuxClick, ...rest },
+  {
+    icon: Icon,
+    label,
+    active = false,
+    pinned = false,
+    dirty = false,
+    onSelect,
+    onClose,
+    activeBg = 'content',
+    className,
+    onKeyDown,
+    onAuxClick,
+    ...rest
+  },
   ref,
 ) {
+  const t = useT()
   const closable = Boolean(onClose) && !pinned
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(e)
@@ -68,17 +83,27 @@ export const Tab = forwardRef<HTMLDivElement, TabProps>(function Tab(
       )}
       {...rest}
     >
-      {Icon ? <Icon size={ICON_SIZE.tab} strokeWidth={ICON_STROKE} aria-hidden className={cn('shrink-0', active && 'text-accent')} /> : null}
+      {Icon ? (
+        <Icon
+          size={ICON_SIZE.tab}
+          strokeWidth={ICON_STROKE}
+          aria-hidden
+          className={cn('shrink-0', active && 'text-accent')}
+        />
+      ) : null}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {closable || dirty ? (
         <span className="relative flex size-5 shrink-0 items-center justify-center">
           {dirty ? (
-            <span aria-label="未保存" className={cn('size-1.5 rounded-chip bg-accent', closable && 'group-hover:hidden')} />
+            <span
+              aria-label={t('kit.tab.unsaved')}
+              className={cn('size-1.5 rounded-chip bg-accent', closable && 'group-hover:hidden')}
+            />
           ) : null}
           {closable ? (
             <button
               type="button"
-              aria-label={`关闭 ${label}`}
+              aria-label={t('kit.tab.close', { label })}
               tabIndex={-1}
               onClick={(e) => {
                 e.stopPropagation()

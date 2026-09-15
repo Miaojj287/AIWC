@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  PATH_DENIED_MESSAGE,
-  PATH_NOT_FOUND_MESSAGE,
-  PATH_SYMLINK_MESSAGE,
+  pathDeniedMessage,
+  pathNotFoundMessage,
+  pathSymlinkMessage,
   createAllowList,
   isForbiddenRoot,
   isWithinRoot,
@@ -107,30 +107,40 @@ describe('symlink-aware resolution (app:openPath / file:*)', () => {
   it('openPath / read: follows symlinks and refuses when the real path leaves the allow-list', async () => {
     await expect(resolveAllowedExisting(al(), join(root, 'inside.txt'))).resolves.toBe(join(root, 'inside.txt'))
     await expect(resolveAllowedExisting(al(), join(root, 'link-inside'))).resolves.toBe(join(root, 'inside.txt'))
-    await expect(resolveAllowedExisting(al(), join(root, 'link-file'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedExisting(al(), join(root, 'link-dir', 'secret.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedExisting(al(), join(outside, 'secret.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedExisting(al(), join(root, 'missing.txt'))).rejects.toThrow(PATH_NOT_FOUND_MESSAGE)
+    await expect(resolveAllowedExisting(al(), join(root, 'link-file'))).rejects.toThrow(pathDeniedMessage())
+    await expect(resolveAllowedExisting(al(), join(root, 'link-dir', 'secret.txt'))).rejects.toThrow(
+      pathDeniedMessage(),
+    )
+    await expect(resolveAllowedExisting(al(), join(outside, 'secret.txt'))).rejects.toThrow(pathDeniedMessage())
+    await expect(resolveAllowedExisting(al(), join(root, 'missing.txt'))).rejects.toThrow(pathNotFoundMessage())
   })
 
   it('write: refuses a symlink target outright, even one pointing inside the allow-list', async () => {
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-file'))).rejects.toThrow(PATH_SYMLINK_MESSAGE)
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-inside'))).rejects.toThrow(PATH_SYMLINK_MESSAGE)
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir'))).rejects.toThrow(PATH_SYMLINK_MESSAGE)
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-file'))).rejects.toThrow(pathSymlinkMessage())
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-inside'))).rejects.toThrow(pathSymlinkMessage())
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir'))).rejects.toThrow(pathSymlinkMessage())
   })
 
   it('write: refuses when the real parent (deepest existing ancestor) leaves the allow-list', async () => {
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir', 'new.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir', 'deep', 'er', 'new.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedWriteTarget(al(), join(outside, 'new.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
-    await expect(resolveAllowedWriteTarget(al(), join(root, '..', 'x.txt'))).rejects.toThrow(PATH_DENIED_MESSAGE)
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir', 'new.txt'))).rejects.toThrow(
+      pathDeniedMessage(),
+    )
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-dir', 'deep', 'er', 'new.txt'))).rejects.toThrow(
+      pathDeniedMessage(),
+    )
+    await expect(resolveAllowedWriteTarget(al(), join(outside, 'new.txt'))).rejects.toThrow(pathDeniedMessage())
+    await expect(resolveAllowedWriteTarget(al(), join(root, '..', 'x.txt'))).rejects.toThrow(pathDeniedMessage())
   })
 
   it('write: allows regular files, new files and new nested directories under the allow-list', async () => {
     await expect(resolveAllowedWriteTarget(al(), join(root, 'inside.txt'))).resolves.toBe(join(root, 'inside.txt'))
     await expect(resolveAllowedWriteTarget(al(), join(root, 'new.txt'))).resolves.toBe(join(root, 'new.txt'))
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'sub', 'a', 'b', 'new.txt'))).resolves.toBe(join(root, 'sub', 'a', 'b', 'new.txt'))
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'sub', 'a', 'b', 'new.txt'))).resolves.toBe(
+      join(root, 'sub', 'a', 'b', 'new.txt'),
+    )
     // a symlinked directory that resolves inside the allow-list is fine; the write lands on the real path
-    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-sub', 'new.txt'))).resolves.toBe(join(root, 'sub', 'new.txt'))
+    await expect(resolveAllowedWriteTarget(al(), join(root, 'link-sub', 'new.txt'))).resolves.toBe(
+      join(root, 'sub', 'new.txt'),
+    )
   })
 })

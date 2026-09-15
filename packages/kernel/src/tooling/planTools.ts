@@ -4,7 +4,7 @@
  * (services.emit = (event: Event) => void). Without it the tool still succeeds silently.
  */
 import { z } from 'zod'
-import { defineTool, type Event, type ToolDefinition } from '@aiwc/protocol'
+import { defineTool, type AnyToolDefinition, type Event } from '@aiwc/protocol'
 
 export const PlanStepSchema = z.object({
   title: z.string().min(1).max(200),
@@ -21,7 +21,7 @@ export interface PlanToolServices {
   [key: string]: unknown
 }
 
-export function planTools(): ToolDefinition<any, any>[] { // eslint-disable-line @typescript-eslint/no-explicit-any
+export function planTools(): AnyToolDefinition[] {
   const updatePlan = defineTool<UpdatePlanInputT, PlanToolServices>({
     name: 'update_plan',
     description: '更新当前任务的步骤计划。多步任务开始前先列出步骤，每完成一步就把对应状态改为 done。',

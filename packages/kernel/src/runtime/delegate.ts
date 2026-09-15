@@ -48,7 +48,10 @@ export function createDelegateTool(getKernel: () => KernelInternal): ToolDefinit
             const r = await kernel.runChild({
               parentThreadId: ctx.threadId,
               origin: ctx.origin ?? { channel: ctx.channel },
-              input: { content: [{ type: 'text', text: `${CHILD_PREAMBLE}\n\n任务：${task.title}\n${task.prompt}` }], mentions: [] },
+              input: {
+                content: [{ type: 'text', text: `${CHILD_PREAMBLE}\n\n任务：${task.title}\n${task.prompt}` }],
+                mentions: [],
+              },
               depth: 1,
               maxSteps: DELEGATE_CHILD_STEP_CAP,
               signal: ctx.signal,

@@ -25,7 +25,8 @@ const draft = (patch: Partial<ReplyDraft> = {}): ReplyDraft => ({
   ...patch,
 })
 
-const renderCard = (d: ReplyDraft, primary?: boolean) => render(<DraftCard draft={d} primary={primary} remainingMs={undefined} countdownTotalMs={5000} onDismiss={() => {}} />)
+const renderCard = (d: ReplyDraft, primary?: boolean) =>
+  render(<DraftCard draft={d} primary={primary} remainingMs={undefined} countdownTotalMs={5000} onDismiss={() => {}} />)
 
 beforeEach(() => {
   invokeMock.mockReset()

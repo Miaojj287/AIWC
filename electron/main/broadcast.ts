@@ -5,9 +5,12 @@
 import { BrowserWindow } from 'electron'
 import type { EventChannel, EventMap } from '@aiwc/protocol'
 import type { Broadcast } from './contracts'
+import { localizeEvent } from './localizePayloads'
 
 export function createBroadcast(): Broadcast {
-  return <K extends EventChannel>(channel: K, payload: EventMap[K]) => {
+  return <K extends EventChannel>(channel: K, raw: EventMap[K]) => {
+    // System text emitted by the business packages follows the UI language (CLAUDE.md §11.3).
+    const payload = localizeEvent(channel, raw)
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed() || win.webContents.isDestroyed()) continue
       try {

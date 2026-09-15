@@ -8,7 +8,12 @@ const ProviderContext = createContext(false)
 export type TooltipProviderProps = ComponentPropsWithoutRef<typeof RadixTooltip.Provider>
 
 /** Mount once at the app root so tooltips share the skip-delay window. */
-export function TooltipProvider({ delayDuration = 400, skipDelayDuration = 200, children, ...rest }: TooltipProviderProps) {
+export function TooltipProvider({
+  delayDuration = 400,
+  skipDelayDuration = 200,
+  children,
+  ...rest
+}: TooltipProviderProps) {
   return (
     <ProviderContext.Provider value>
       <RadixTooltip.Provider delayDuration={delayDuration} skipDelayDuration={skipDelayDuration} {...rest}>
@@ -30,6 +35,8 @@ export interface TooltipProps {
   sideOffset?: number
   /** Skip rendering the tooltip entirely (e.g. when the label is already visible). */
   disabled?: boolean
+  /** Explanatory text that may wrap (HelpTip): 240px max, normal white-space. Single-line otherwise. */
+  multiline?: boolean
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -51,6 +58,7 @@ export function Tooltip({
   align = 'center',
   sideOffset = 6,
   disabled = false,
+  multiline = false,
   open,
   defaultOpen,
   onOpenChange,
@@ -72,7 +80,11 @@ export function Tooltip({
           collisionPadding={8}
           className={cn(
             'kit-menu z-50 select-none rounded-control bg-raised text-note text-fg shadow-toast',
-            description ? 'flex w-[200px] flex-col gap-0.5 px-2 py-1.5' : 'flex items-center gap-1.5 px-2 py-1',
+            description
+              ? 'flex w-[200px] flex-col gap-0.5 px-2 py-1.5'
+              : multiline
+                ? 'block max-w-[240px] px-2.5 py-1.5'
+                : 'flex max-w-[280px] items-center gap-1.5 px-2 py-1',
             className,
           )}
         >
@@ -81,6 +93,8 @@ export function Tooltip({
               <span className="font-medium leading-4">{content}</span>
               <span className="text-micro leading-4 text-fg-2">{description}</span>
             </>
+          ) : multiline ? (
+            <span className="block whitespace-normal leading-4">{content}</span>
           ) : (
             <>
               <span className="leading-4">{content}</span>
@@ -93,5 +107,11 @@ export function Tooltip({
   )
 
   // Tooltip works standalone (gallery, tests) but shares timing when the app mounts <TooltipProvider>.
-  return hasProvider ? tooltip : <RadixTooltip.Provider delayDuration={400} skipDelayDuration={200}>{tooltip}</RadixTooltip.Provider>
+  return hasProvider ? (
+    tooltip
+  ) : (
+    <RadixTooltip.Provider delayDuration={400} skipDelayDuration={200}>
+      {tooltip}
+    </RadixTooltip.Provider>
+  )
 }

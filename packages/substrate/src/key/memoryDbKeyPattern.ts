@@ -30,8 +30,14 @@ export function extractMemoryDbKeyCandidates(data: Buffer, onMarker?: () => void
     let valid = data[hexEnd] === 0x27
     for (let index = hexStart; valid && index < hexEnd; index += 1) valid = isAsciiHex(data[index] ?? 0)
     if (valid) {
-      const key = data.subarray(hexStart, hexStart + 64).toString('ascii').toLowerCase()
-      const salt = data.subarray(hexStart + 64, hexEnd).toString('ascii').toLowerCase()
+      const key = data
+        .subarray(hexStart, hexStart + 64)
+        .toString('ascii')
+        .toLowerCase()
+      const salt = data
+        .subarray(hexStart + 64, hexEnd)
+        .toString('ascii')
+        .toLowerCase()
       const identity = `${key}:${salt}`
       if (!seen.has(identity)) {
         seen.add(identity)
@@ -65,6 +71,9 @@ export function extractRawV4KeyCandidates(data: Buffer, baseAddress = 0n): Buffe
 }
 
 /** Pick the record whose salt matches one of the account's databases. */
-export function matchCandidateToSalts(candidates: MemoryDbKeyCandidate[], salts: ReadonlySet<string>): MemoryDbKeyCandidate | undefined {
+export function matchCandidateToSalts(
+  candidates: MemoryDbKeyCandidate[],
+  salts: ReadonlySet<string>,
+): MemoryDbKeyCandidate | undefined {
   return candidates.find((c) => salts.has(c.salt))
 }

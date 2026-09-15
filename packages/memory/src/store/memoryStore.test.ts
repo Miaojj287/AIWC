@@ -2,8 +2,9 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { MemoryFile } from '@aiwc/protocol'
 import { parseEntries, roundTrips, serializeEntries } from './format'
-import { MemoryDriftError, createMemoryStore } from './memoryStore'
+import { MemoryDriftError, MemoryEntryMismatchError, createMemoryStore } from './memoryStore'
 import { rankEntries } from './search'
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'aiwc-mem-'))
@@ -23,11 +24,24 @@ describe('memory file format', () => {
 })
 
 describe('createMemoryStore', () => {
+  it('refuses any file name outside the four memory files (IPC input is untrusted)', async () => {
+    const store = createMemoryStore({ dir: tmp() })
+    const hostile = '../skills/user/x/SKILL' as MemoryFile
+    await expect(store.read(hostile)).rejects.toThrow(/unknown memory file/)
+    await expect(store.write(hostile, 'x', { source: 'user' })).rejects.toThrow(/unknown memory file/)
+    expect(() => store.pathFor(hostile)).toThrow(/unknown memory file/)
+  })
+
   it('adds entries, rejects duplicates (normalised) and over-budget adds', async () => {
     const store = createMemoryStore({ dir: tmp(), limits: { MEMORY: 40 } })
     expect(await store.addEntry('MEMORY', '用户住在杭州。')).toEqual({ ok: true })
     expect(await store.addEntry('MEMORY', ' 用户住在杭州 ')).toEqual({ ok: false, reason: 'duplicate' })
-    expect(await store.addEntry('MEMORY', '这是一条非常非常长的记忆，长到一定会超过四十个字符的预算限制，所以必须被拒绝掉才对')).toEqual({
+    expect(
+      await store.addEntry(
+        'MEMORY',
+        '这是一条非常非常长的记忆，长到一定会超过四十个字符的预算限制，所以必须被拒绝掉才对',
+      ),
+    ).toEqual({
       ok: false,
       reason: 'over_budget',
     })
@@ -47,9 +61,30 @@ describe('createMemoryStore', () => {
     await store.replaceEntry('USER', 1, '偶尔喝茶')
     expect((await store.entries('USER')).map((e) => e.text)).toEqual(['喜欢咖啡', '偶尔喝茶'])
     await expect(store.replaceEntry('USER', 5, 'x')).rejects.toThrow(RangeError)
-    await expect(store.replaceEntry('USER', 0, '一条长到肯定超过三十个字符预算上限的替换内容，应当抛出错误')).rejects.toThrow(/上限/)
+    await expect(
+      store.replaceEntry('USER', 0, '一条长到肯定超过三十个字符预算上限的替换内容，应当抛出错误'),
+    ).rejects.toThrow(/上限/)
     await store.removeEntry('USER', 0)
     expect((await store.entries('USER')).map((e) => e.text)).toEqual(['偶尔喝茶'])
+  })
+
+  it('removeEntry with an expected text refuses when the index now points at another entry', async () => {
+    const store = createMemoryStore({ dir: tmp() })
+    await store.addEntry('MEMORY', '第一条')
+    await store.addEntry('MEMORY', '第二条')
+    // reordered between reading the index and removing it
+    await store.write('MEMORY', '第二条\n§\n第一条')
+    await expect(store.removeEntry('MEMORY', 0, '第一条')).rejects.toMatchObject({
+      name: 'MemoryEntryMismatchError',
+      file: 'MEMORY',
+      index: 0,
+    })
+    await expect(store.removeEntry('MEMORY', 0, '')).rejects.toBeInstanceOf(MemoryEntryMismatchError)
+    expect((await store.entries('MEMORY')).map((e) => e.text)).toEqual(['第二条', '第一条'])
+    // the comparison tolerates what a copy of the text typically loses or gains (spacing, a final 。)
+    await store.removeEntry('MEMORY', 1, ' 第一条。')
+    expect((await store.entries('MEMORY')).map((e) => e.text)).toEqual(['第二条'])
+    await expect(store.removeEntry('MEMORY', 3, '第二条')).rejects.toThrow(RangeError)
   })
 
   it('renders a stable snapshot with usage headers for all four files', async () => {
@@ -109,7 +144,11 @@ describe('createMemoryStore', () => {
     expect(err.message).toContain(err.bakPath)
     // the drifted file itself is untouched and removeEntry reports the same way
     expect(readFileSync(join(dir, 'USER.md'), 'utf8')).toBe(drifted)
-    await expect(store.removeEntry('USER', 0)).rejects.toMatchObject({ name: 'MemoryDriftError', file: 'USER', bakPath: join(dir, 'USER.md.bak.4242') })
+    await expect(store.removeEntry('USER', 0)).rejects.toMatchObject({
+      name: 'MemoryDriftError',
+      file: 'USER',
+      bakPath: join(dir, 'USER.md.bak.4242'),
+    })
     // no other error shape escapes for drift: not a bare Error / RangeError
     await expect(store.removeEntry('USER', 99)).rejects.toBeInstanceOf(MemoryDriftError)
   })

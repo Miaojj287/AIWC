@@ -10,7 +10,17 @@
 import { execFile } from 'node:child_process'
 import { InjectorError, type WeChatInjector } from './types'
 import { sleep } from '../../../core/emitter'
-import { VK_F, VK_RETURN, VK_V, findMainWindow, forceForeground, isForeground, loadWin32Native, tap, type Win32Window } from './win32Native'
+import {
+  VK_F,
+  VK_RETURN,
+  VK_V,
+  findMainWindow,
+  forceForeground,
+  isForeground,
+  loadWin32Native,
+  tap,
+  type Win32Window,
+} from './win32Native'
 
 const WINDOW_TITLES = ['微信', 'WeChat', 'Weixin']
 /** Scales with the text length for the same reason as the macOS injector (see darwin.ts). */
@@ -33,10 +43,15 @@ export interface Win32InjectorDeps {
 
 function runPowerShell(script: string, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 10_000, windowsHide: true }, (error, stdout, stderr) => {
-      if (error) return reject(new Error(`${stderr || error.message}`))
-      resolve(String(stdout).trim())
-    })
+    const child = execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { timeout: 10_000, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (error) return reject(new Error(`${stderr || error.message}`))
+        resolve(String(stdout).trim())
+      },
+    )
     if (stdin !== undefined && child.stdin) child.stdin.end(stdin, 'utf8')
     else child.stdin?.end()
   })

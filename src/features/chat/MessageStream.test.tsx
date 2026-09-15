@@ -48,8 +48,36 @@ afterEach(() => {
 })
 
 const rows: StreamRow[] = [
-  { kind: 'message', id: 'm1', message: { id: 'm1', sessionId: 's', seq: 1, createdAt: 1, senderId: 'a', isSelf: false, kind: 'text', text: 'old', anchor: { sessionId: 's', messageId: 'm1', seq: 1, createdAt: 1 } } },
-  { kind: 'message', id: 'm2', message: { id: 'm2', sessionId: 's', seq: 2, createdAt: 2, senderId: 'a', isSelf: false, kind: 'text', text: 'latest', anchor: { sessionId: 's', messageId: 'm2', seq: 2, createdAt: 2 } } },
+  {
+    kind: 'message',
+    id: 'm1',
+    message: {
+      id: 'm1',
+      sessionId: 's',
+      seq: 1,
+      createdAt: 1,
+      senderId: 'a',
+      isSelf: false,
+      kind: 'text',
+      text: 'old',
+      anchor: { sessionId: 's', messageId: 'm1', seq: 1, createdAt: 1 },
+    },
+  },
+  {
+    kind: 'message',
+    id: 'm2',
+    message: {
+      id: 'm2',
+      sessionId: 's',
+      seq: 2,
+      createdAt: 2,
+      senderId: 'a',
+      isSelf: false,
+      kind: 'text',
+      text: 'latest',
+      anchor: { sessionId: 's', messageId: 'm2', seq: 2, createdAt: 2 },
+    },
+  },
 ]
 
 it('waits for measurement and corrects the initial scroll to the latest row', () => {

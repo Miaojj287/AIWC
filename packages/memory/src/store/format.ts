@@ -5,8 +5,6 @@
  */
 import type { MemoryFile } from '@aiwc/protocol'
 
-export const MEMORY_FILES: readonly MemoryFile[] = ['MEMORY', 'USER', 'SOUL', 'AGENTS']
-
 export const DEFAULT_MEMORY_LIMITS: Readonly<Record<MemoryFile, number>> = {
   MEMORY: 4000,
   USER: 2500,
@@ -23,12 +21,11 @@ export const MEMORY_FILE_LABELS: Readonly<Record<MemoryFile, string>> = {
   AGENTS: '用户规则',
 }
 
-export function isMemoryFile(v: unknown): v is MemoryFile {
-  return typeof v === 'string' && (MEMORY_FILES as readonly string[]).includes(v)
-}
-
 function normaliseLines(raw: string): string[] {
-  return raw.replace(/\r\n/g, '\n').split('\n').map((l) => l.trimEnd())
+  return raw
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trimEnd())
 }
 
 function trimBlankEdges(lines: string[]): string[] {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runCommand } from '@/app/commands'
 import { __resetShellStoreForTests, useShellStore } from '@/shell/shellStore'
 import { registerTab, type TabRendererProps } from './tabRegistry'
@@ -8,8 +8,11 @@ import { useTabsStore } from './tabsStore'
 import { KEEP_MOUNTED, Workspace } from './Workspace'
 
 let mounts = 0
+/** Object ids whose tab renderer throws while rendering. */
+const crashing = new Set<string>()
 function Probe({ tab, active, update }: TabRendererProps) {
   mounts++
+  if (crashing.has(tab.objectId)) throw new Error(`render failed: ${tab.objectId}`)
   return (
     <div data-testid={`probe-${tab.objectId}`} data-active={active}>
       <span>{tab.title}</span>
@@ -27,10 +30,14 @@ const tabs = () => useTabsStore.getState()
 
 beforeEach(() => {
   mounts = 0
+  crashing.clear()
   __resetShellStoreForTests()
   useTabsStore.setState({ tabs: [], activeId: null, recentlyClosed: [], lastActiveByFunction: {} })
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe('Workspace', () => {
   it('shows the per-function empty state and the ⌘K hint when nothing is open', () => {
@@ -89,6 +96,26 @@ describe('Workspace', () => {
     await settle()
     expect(tabs().tabs).toHaveLength(0)
     expect(screen.getByTestId('workspace-empty')).toBeTruthy()
+  })
+
+  it('keeps a tab that fails to render inside its own panel and remounts it on retry', () => {
+    // React reports caught render errors on console.error.
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    crashing.add('s2')
+    render(<Workspace mac />)
+    act(() => runCommand('tab.openChat', { sessionId: 's1', title: 'A' }))
+    act(() => runCommand('tab.openChat', { sessionId: 's2', title: 'B' }))
+
+    const panel = screen.getByRole('tabpanel', { name: 'B' })
+    expect(within(panel).getByRole('alert').textContent).toContain('无法显示此内容')
+    // the tab strip and the other mounted tab are unaffected
+    expect(screen.getByRole('tablist')).toBeTruthy()
+    expect(screen.getByTestId('probe-s1')).toBeTruthy()
+
+    crashing.delete('s2')
+    fireEvent.click(within(panel).getByRole('button', { name: '重试' }))
+    expect(screen.getByTestId('probe-s2').getAttribute('data-active')).toBe('true')
+    expect(within(panel).queryByRole('alert')).toBeNull()
   })
 
   it('closes clean tabs immediately and shows an error state for unregistered kinds', () => {

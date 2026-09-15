@@ -33,7 +33,15 @@ export function createStatsOps(db: Db): StatsOps {
 
   const overview = (q: StatsQuery): StatsResult => {
     const w = where(q)
-    const base = db.get<{ total: number; self_count: number; sessions: number; active_days: number; first_at: number | null; last_at: number | null; media: number }>(
+    const base = db.get<{
+      total: number
+      self_count: number
+      sessions: number
+      active_days: number
+      first_at: number | null
+      last_at: number | null
+      media: number
+    }>(
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(m.is_self), 0) AS self_count,
               COUNT(DISTINCT m.session_id) AS sessions,
@@ -55,7 +63,10 @@ export function createStatsOps(db: Db): StatsOps {
       { key: 'first_at', value: num(base?.first_at) },
       { key: 'last_at', value: num(base?.last_at) },
     ]
-    const kinds = db.all<{ kind: string; c: number }>(`SELECT m.kind AS kind, COUNT(*) AS c FROM messages m ${w.where} GROUP BY m.kind ORDER BY c DESC`, ...w.params)
+    const kinds = db.all<{ kind: string; c: number }>(
+      `SELECT m.kind AS kind, COUNT(*) AS c FROM messages m ${w.where} GROUP BY m.kind ORDER BY c DESC`,
+      ...w.params,
+    )
     for (const k of kinds) rows.push({ key: `kind:${k.kind}`, value: num(k.c) })
     return { metric: 'overview', rows, total }
   }
@@ -74,7 +85,13 @@ export function createStatsOps(db: Db): StatsOps {
       return {
         metric: 'ranking',
         total,
-        rows: rows.map((r) => ({ id: r.id, name: r.name || r.id, count: num(r.c), isSelf: num(r.self_count), share: total ? Math.round((num(r.c) / total) * 1000) / 10 : 0 })),
+        rows: rows.map((r) => ({
+          id: r.id,
+          name: r.name || r.id,
+          count: num(r.c),
+          isSelf: num(r.self_count),
+          share: total ? Math.round((num(r.c) / total) * 1000) / 10 : 0,
+        })),
       }
     }
     const rows = db.all<{ id: string; name: string | null; kind: string | null; c: number }>(
@@ -86,7 +103,13 @@ export function createStatsOps(db: Db): StatsOps {
     return {
       metric: 'ranking',
       total,
-      rows: rows.map((r) => ({ id: r.id, name: r.name || r.id, kind: r.kind ?? '', count: num(r.c), share: total ? Math.round((num(r.c) / total) * 1000) / 10 : 0 })),
+      rows: rows.map((r) => ({
+        id: r.id,
+        name: r.name || r.id,
+        kind: r.kind ?? '',
+        count: num(r.c),
+        share: total ? Math.round((num(r.c) / total) * 1000) / 10 : 0,
+      })),
     }
   }
 

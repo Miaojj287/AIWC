@@ -14,7 +14,8 @@ function createFakeSubstrate({ mirrorBehind = false }: { mirrorBehind?: boolean 
   const mirrored = new Set<string>()
   const sessions: WxSession[] = []
   let seq = 0
-  const addSession = (id: string, title: string, lastMessageAt = 0) => sessions.push({ id, kind: 'dm', title, unread: 0, pinned: false, muted: false, lastMessageAt })
+  const addSession = (id: string, title: string, lastMessageAt = 0) =>
+    sessions.push({ id, kind: 'dm', title, unread: 0, pinned: false, muted: false, lastMessageAt })
   const addMine = (sessionId: string, text: string, createdAt: number) => {
     const list = messages.get(sessionId) ?? []
     const m: WxMessage = {
@@ -55,7 +56,9 @@ function createFakeSubstrate({ mirrorBehind = false }: { mirrorBehind?: boolean 
 
 type Step = { op: string; arg?: string }
 
-function createFakeInjector(script: { onCommit?: (n: number) => void; failFill?: InjectorError; failFocus?: Error } = {}) {
+function createFakeInjector(
+  script: { onCommit?: (n: number) => void; failFill?: InjectorError; failFocus?: Error } = {},
+) {
   const steps: Step[] = []
   let commits = 0
   const injector: WeChatInjector = {
@@ -131,7 +134,8 @@ describe('createUiInjectSender', () => {
   })
 
   it('does not mistake an identical earlier message for proof of a new send', async () => {
-    const db = createFakeSubstrate(); db.addSession('wxid_alice', 'Alice')
+    const db = createFakeSubstrate()
+    db.addSession('wxid_alice', 'Alice')
     db.addMine('wxid_alice', '收到', 999_999)
     const inj = createFakeInjector()
     const { sender } = harness({ injector: inj.injector, substrate: db.substrate })
@@ -151,7 +155,10 @@ describe('createUiInjectSender', () => {
       },
     })
     const { sender } = harness({ injector: inj.injector, substrate: db.substrate })
-    const res = await sender.send({ ...req('第一句\n---wx-next---\n第二句', 'g1@chatroom', '产品市场群'), reason: 'agent_tool' })
+    const res = await sender.send({
+      ...req('第一句\n---wx-next---\n第二句', 'g1@chatroom', '产品市场群'),
+      reason: 'agent_tool',
+    })
     expect(res.ok).toBe(true)
     expect(clockRef).toBe(2)
     expect(inj.steps.filter((s) => s.op === 'focus')).toEqual([{ op: 'focus', arg: '产品市场群' }])
@@ -253,7 +260,10 @@ describe('createUiInjectSender', () => {
     const db = createFakeSubstrate()
     const inj = createFakeInjector()
     const { sender } = harness({ injector: inj.injector, substrate: db.substrate })
-    expect(await sender.send({ ...req('x'), parts: [{ type: 'image', path: '/tmp/a.png' }] })).toMatchObject({ ok: false, error: expect.stringContaining('只支持文本') })
+    expect(await sender.send({ ...req('x'), parts: [{ type: 'image', path: '/tmp/a.png' }] })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('只支持文本'),
+    })
     expect(await sender.send({ ...req('x'), parts: [{ type: 'text', text: '   ' }] })).toMatchObject({ ok: false })
     expect(sender.halted).toBe(false)
     expect(inj.steps).toEqual([])

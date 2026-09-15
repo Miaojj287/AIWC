@@ -10,13 +10,7 @@ import type { AutoReplyRule, MessageEvent, ReplyDecision } from '@aiwc/protocol'
 
 /** Stable reason codes carried in ReplyDecision.reason. */
 export type ReplyReason =
-  | 'ok'
-  | 'self_sent'
-  | 'kind_not_replyable'
-  | 'internal'
-  | 'no_rule'
-  | 'rule_disabled'
-  | 'rule_paused'
+  'ok' | 'self_sent' | 'kind_not_replyable' | 'internal' | 'no_rule' | 'rule_disabled' | 'rule_paused'
 
 export interface ReplyGateDeps {
   /** Optional synchronous rule lookup used when decide() is called without an explicit rule. */

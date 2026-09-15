@@ -26,11 +26,22 @@ describe('fragments', () => {
   })
 
   it('empty renders produce no item', () => {
-    expect(fragmentToItem(createFragment('e', '<e>', 100, () => '   '), null, 1)).toBeUndefined()
+    expect(
+      fragmentToItem(
+        createFragment('e', '<e>', 100, () => '   '),
+        null,
+        1,
+      ),
+    ).toBeUndefined()
   })
 
   it('environment fragment renders the day only', () => {
-    const f = environmentFragment({ platform: 'darwin', date: new Date(2026, 8, 6, 15, 42, 7), channel: 'desktop', permissionMode: 'ask' })
+    const f = environmentFragment({
+      platform: 'darwin',
+      date: new Date(2026, 8, 6, 15, 42, 7),
+      channel: 'desktop',
+      permissionMode: 'ask',
+    })
     const text = f.render()
     expect(text).toContain('日期：2026-09-06')
     expect(text).not.toContain('15:42')
@@ -47,7 +58,12 @@ describe('fragments', () => {
 
   it('(10) world-state diff emits nothing when unchanged and one fragment on permission change', () => {
     const tracker = new WorldStateTracker()
-    const base = { permissionMode: 'ask' as const, modelId: 'm', toolNames: ['b', 'a'], profile: 'desktop-chat' as const }
+    const base = {
+      permissionMode: 'ask' as const,
+      modelId: 'm',
+      toolNames: ['b', 'a'],
+      profile: 'desktop-chat' as const,
+    }
     const first = tracker.diff(snapshotWorldState(base))
     expect(first?.changed).toEqual(['permissions', 'model', 'tools', 'userInstructions', 'profile'])
     expect(tracker.diff(snapshotWorldState({ ...base, toolNames: ['a', 'b'] }))).toBeUndefined()

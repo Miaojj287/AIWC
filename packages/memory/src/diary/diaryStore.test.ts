@@ -24,7 +24,12 @@ describe('diary file format', () => {
   })
 
   it('strips a cue section the caller left in the markdown and marks degraded', () => {
-    const raw = renderDiaryFile({ ...entry, degraded: true, cues: [], markdown: entry.markdown + '\n\n## 记忆线索\n* 内联线索\n1. 第二条' })
+    const raw = renderDiaryFile({
+      ...entry,
+      degraded: true,
+      cues: [],
+      markdown: entry.markdown + '\n\n## 记忆线索\n* 内联线索\n1. 第二条',
+    })
     const parsed = parseDiaryFile('2026-09-05', raw)
     expect(parsed.degraded).toBe(true)
     expect(parsed.cues).toEqual(['内联线索', '第二条'])

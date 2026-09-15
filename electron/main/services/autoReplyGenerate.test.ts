@@ -1,15 +1,52 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AutoReplyRule, MessageEvent, ModelClient, SamplingRequest, SamplingPart, SubstrateService } from '@aiwc/protocol'
-import { createAutoReplyGenerator } from './autoReplyGenerate'
+import type {
+  AutoReplyRule,
+  MessageEvent,
+  ModelClient,
+  SamplingRequest,
+  SamplingPart,
+  SubstrateService,
+} from '@aiwc/protocol'
+import { createAutoReplyGenerator, renderReplyInput } from './autoReplyGenerate'
 
-const rule: AutoReplyRule = { id: 'r', sessionId: 'alice', enabled: true, source: 'ai', historyCount: 30, updatedAt: 0 }
-const event: MessageEvent = { id: 'm', source: { channel: 'wechat-ui', chatId: 'alice', peerId: 'alice', chatType: 'dm' }, kind: 'text', text: '明天见', timestamp: 10, addressed: true }
+const rule: AutoReplyRule = {
+  id: 'r',
+  sessionId: 'alice',
+  enabled: true,
+  source: 'ai',
+  historyCount: 30,
+  sendMode: 'auto',
+  updatedAt: 0,
+}
+const event: MessageEvent = {
+  id: 'm',
+  source: { channel: 'wechat-ui', chatId: 'alice', peerId: 'alice', chatType: 'dm' },
+  kind: 'text',
+  text: '明天见',
+  timestamp: 10,
+  addressed: true,
+}
 
 function setup(output = '好呀，明天见') {
   const requests: SamplingRequest[] = []
-  const model = { ref: { supportsVision: false }, async *sample(req: SamplingRequest) { requests.push(req); yield { type: 'text.delta' as const, delta: output }; yield { type: 'finish' as const, reason: 'stop' as const, usage: { inputTokens: 10, outputTokens: 10 } } } } as ModelClient
-  const listMessages = vi.fn(async () => ({ items: [{ seq: 1, isSelf: true, text: '好滴' }, { seq: 2, isSelf: false, kind: 'voice', text: '[语音]', media: { transcript: '明天下午聊' } }] }))
-  const generate = createAutoReplyGenerator({ model: async () => model, substrate: { listMessages } as unknown as SubstrateService })
+  const model = {
+    ref: { supportsVision: false },
+    async *sample(req: SamplingRequest) {
+      requests.push(req)
+      yield { type: 'text.delta' as const, delta: output }
+      yield { type: 'finish' as const, reason: 'stop' as const, usage: { inputTokens: 10, outputTokens: 10 } }
+    },
+  } as unknown as ModelClient
+  const listMessages = vi.fn(async () => ({
+    items: [
+      { seq: 1, isSelf: true, kind: 'text', text: '好滴', createdAt: 1 },
+      { seq: 2, isSelf: false, kind: 'voice', text: '[语音]', createdAt: 2, media: { transcript: '明天下午聊' } },
+    ],
+  }))
+  const generate = createAutoReplyGenerator({
+    model: async () => model,
+    substrate: { listMessages } as unknown as SubstrateService,
+  })
   return { generate, requests, listMessages }
 }
 
@@ -18,14 +55,39 @@ describe('auto-reply generation', () => {
     const h = setup()
     const result = await h.generate(event, { ...rule, prompt: '不要约具体时间', historyCount: 120 })
     expect(result).toEqual({ text: '好呀，明天见' })
-    expect(h.listMessages).toHaveBeenCalledWith({ sessionId: 'alice', limit: 120 })
+    // One read: the newest historyCount messages are context, the wider window teaches the voice.
+    expect(h.listMessages).toHaveBeenCalledWith({ sessionId: 'alice', limit: 200 })
     const req = h.requests[0]!
     expect(req.system).toContain('不要约具体时间')
     // The guard-rails stay in front of the user prompt; they are not a setting.
     expect(req.system).toContain('不编造金额')
+    expect(req.system).toContain('不承认自己是 AI')
+    // The owner's own words in this chat become the style guide.
+    expect(req.system).toContain('主人在这个会话里的口吻')
+    expect(req.system).toContain('- 好滴')
     expect(JSON.stringify(req.history)).toContain('明天下午聊')
     expect(req.tools).toEqual([])
     expect(req.toolChoice).toBe('none')
+    expect(req.temperature).toBeCloseTo(0.75)
+  })
+
+  it('keeps only the newest historyCount messages as context', async () => {
+    const h = setup()
+    h.listMessages.mockResolvedValueOnce({
+      items: [
+        { seq: 1, isSelf: false, kind: 'text', text: '很早的话', createdAt: 1 },
+        { seq: 2, isSelf: false, kind: 'text', text: '最近的话', createdAt: 2 },
+      ],
+    })
+    await h.generate(event, { ...rule, historyCount: 1 })
+    const sent = JSON.stringify(h.requests[0]!.history)
+    expect(sent).toContain('最近的话')
+    expect(sent).not.toContain('很早的话')
+  })
+
+  it('trims assistant tics from the reply: wrapping quotes, Markdown and a full stop the owner never types', async () => {
+    const h = setup('“**好呀**，明天见。”')
+    await expect(h.generate(event, rule)).resolves.toEqual({ text: '好呀，明天见' })
   })
 
   it('works with no prompt at all', async () => {
@@ -61,15 +123,22 @@ function scriptedGeneration(runs: SamplingPart[][], maxOutputTokens?: number) {
       requests.push(req)
       yield* runs[requests.length - 1]!
     },
-  } as ModelClient
-  return { requests, logger, generate: createAutoReplyGenerator({
-    model: async () => model,
-    substrate: { listMessages: async () => ({ items: [] }) } as unknown as SubstrateService,
+  } as unknown as ModelClient
+  return {
+    requests,
     logger,
-  }) }
+    generate: createAutoReplyGenerator({
+      model: async () => model,
+      substrate: { listMessages: async () => ({ items: [] }) } as unknown as SubstrateService,
+      logger,
+    }),
+  }
 }
-const done = (reason: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error'): SamplingPart =>
-  ({ type: 'finish', reason, usage: { inputTokens: 100, outputTokens: 8192, reasoningTokens: 8192 } })
+const done = (reason: 'stop' | 'length' | 'content_filter' | 'aborted' | 'error'): SamplingPart => ({
+  type: 'finish',
+  reason,
+  usage: { inputTokens: 100, outputTokens: 8192, reasoningTokens: 8192 },
+})
 
 describe('thinking model output and finish handling', () => {
   it('retries reasoning-only exhaustion with more room and returns only the fresh complete draft', async () => {
@@ -78,7 +147,7 @@ describe('thinking model output and finish handling', () => {
       [{ type: 'text.delta', delta: '明天见' }, done('stop')],
     ])
     await expect(h.generate(event, rule)).resolves.toEqual({ text: '明天见' })
-    expect(h.requests.map(r => r.maxOutputTokens)).toEqual([8192, 16384])
+    expect(h.requests.map((r) => r.maxOutputTokens)).toEqual([8192, 16384])
     expect(JSON.stringify(h.logger.mock.calls)).not.toContain('private reasoning')
     expect(h.logger.mock.calls[0]![2]).toMatchObject({ finishReason: 'length', textChars: 0 })
   })
@@ -101,11 +170,13 @@ describe('thinking model output and finish handling', () => {
   it('respects an explicitly configured lower output cap without a futile retry', async () => {
     const h = scriptedGeneration([[done('length')]], 1024)
     await expect(h.generate(event, rule)).rejects.toThrow('输出上限')
-    expect(h.requests.map(r => r.maxOutputTokens)).toEqual([1024])
+    expect(h.requests.map((r) => r.maxOutputTokens)).toEqual([1024])
   })
 
   it.each([
-    ['content_filter', '拦截'], ['aborted', '取消'], ['error', '服务商'],
+    ['content_filter', '拦截'],
+    ['aborted', '取消'],
+    ['error', '服务商'],
   ] as const)('reports %s distinctly without retrying', async (reason, message) => {
     const h = scriptedGeneration([[{ type: 'text.delta', delta: 'partial' }, done(reason)]])
     await expect(h.generate(event, rule)).rejects.toThrow(message)
@@ -115,5 +186,31 @@ describe('thinking model output and finish handling', () => {
   it('rejects a stream ending without a finish event even if it has text', async () => {
     const h = scriptedGeneration([[{ type: 'text.delta', delta: 'partial' }]])
     await expect(h.generate(event, rule)).rejects.toThrow('未确认')
+  })
+})
+
+describe('reply input', () => {
+  it('reads like the chat window: a transcript, then the message to answer set apart', () => {
+    const at = new Date(2026, 8, 13, 10, 5).getTime()
+    const text = renderReplyInput({
+      event: {
+        ...event,
+        source: { ...event.source, displayName: '小吴' },
+        timestamp: at,
+        replyTo: { messageId: 'q', text: '周末去哪', authorName: '我' },
+      },
+      history: [
+        { speaker: '我', at: '09-13 09:00', text: '好滴\n一会儿说' },
+        { speaker: '小吴', at: '09-13 10:05', text: '明天见' },
+      ],
+      now: at + 3 * 60 * 60_000,
+      lastMineAt: at - 65 * 60_000,
+    })
+    expect(text).toContain('会话：小吴（私聊）')
+    expect(text).toContain('[09-13 09:00] 我：好滴 一会儿说')
+    expect(text).toContain('需要你回复的是这条：\n[09-13 10:05] 小吴：明天见')
+    expect(text).toContain('引用了 我 的：周末去哪')
+    expect(text).toContain('我上一次在这个会话里发消息是 4 小时前')
+    expect(text).not.toContain('{')
   })
 })

@@ -22,6 +22,7 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { key: '1', mod: true, command: 'rail.select', payload: { fn: 'chat' } },
   { key: '2', mod: true, command: 'rail.select', payload: { fn: 'autoreply' } },
   { key: '3', mod: true, command: 'rail.select', payload: { fn: 'clone' } },
+  { key: '4', mod: true, command: 'rail.select', payload: { fn: 'tasks' } },
   { key: ',', mod: true, command: 'tab.openSettings', payload: {} },
   { key: 'k', mod: true, command: 'search.sessions' },
   { key: 'f', mod: true, command: 'search.inPage' },
@@ -31,6 +32,7 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { key: 'a', mod: true, shift: true, command: 'agent.quoteActiveTab' },
   { key: 'b', mod: true, shift: true, command: 'objectList.toggleCollapsed' },
   { key: 'j', mod: true, shift: true, command: 'agent.toggleCollapsed' },
+  { key: 'l', mod: true, shift: true, command: 'shell.toggleMode' },
   { key: 'k', mod: true, shift: true, command: 'tab.openKit', webOnly: true },
 ]
 
@@ -89,7 +91,10 @@ export function dispatchShortcut(binding: ShortcutBinding): void {
  * Install the window-level keydown listener. Handled events are consumed (preventDefault) so the
  * browser / Electron default (⌘W closing the window, ⌘F find bar) never fires.
  */
-export function installShortcuts(env: ShortcutEnv, target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): () => void {
+export function installShortcuts(
+  env: ShortcutEnv,
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window,
+): () => void {
   const resolved = resolveShortcutEnv(env)
   const onKeyDown = (event: Event) => {
     const e = event as KeyboardEvent
@@ -104,7 +109,14 @@ export function installShortcuts(env: ShortcutEnv, target: Pick<Window, 'addEven
   return () => target.removeEventListener('keydown', onKeyDown, true)
 }
 
-const KEY_GLYPH: Record<string, string> = { ',': ',', arrowup: '↑', arrowdown: '↓', enter: '↵', escape: 'Esc', backspace: '⌫' }
+const KEY_GLYPH: Record<string, string> = {
+  ',': ',',
+  arrowup: '↑',
+  arrowdown: '↓',
+  enter: '↵',
+  escape: 'Esc',
+  backspace: '⌫',
+}
 
 /** Human label for a binding: ⌘⇧T on macOS, Ctrl+Shift+T elsewhere. */
 export function formatShortcut(binding: Pick<ShortcutBinding, 'key' | 'mod' | 'shift' | 'alt'>, mac: boolean): string {
@@ -119,8 +131,14 @@ export function formatShortcut(binding: Pick<ShortcutBinding, 'key' | 'mod' | 's
 }
 
 /** Label for the first binding of a command (menus, tooltips). Undefined when the command has none. */
-export function shortcutLabel<K extends CommandName>(command: K, mac: boolean, payload?: CommandMap[K]): string | undefined {
-  const binding = SHORTCUTS.find((b) => b.command === command && (payload === undefined || JSON.stringify(b.payload) === JSON.stringify(payload)))
+export function shortcutLabel<K extends CommandName>(
+  command: K,
+  mac: boolean,
+  payload?: CommandMap[K],
+): string | undefined {
+  const binding = SHORTCUTS.find(
+    (b) => b.command === command && (payload === undefined || JSON.stringify(b.payload) === JSON.stringify(payload)),
+  )
   return binding ? formatShortcut(binding, mac) : undefined
 }
 
@@ -128,5 +146,5 @@ export function shortcutLabel<K extends CommandName>(command: K, mac: boolean, p
 export function detectMac(platform?: string): boolean {
   if (platform) return platform === 'darwin'
   if (typeof navigator === 'undefined') return true
-  return /Mac|iPhone|iPad/.test(`${navigator.platform} ${navigator.userAgent}`)
+  return /Mac|iPhone|iPad/.test(navigator.userAgent)
 }

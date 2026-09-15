@@ -44,7 +44,11 @@ export type SubstrateFacade = SubstrateService & {
   removeIndex(sessionId: string): Promise<void>
   rebuildIndex(sessionId: string): Promise<void>
   transcribeVoice(sessionId: string, messageId: string, opts?: { force?: boolean }): Promise<string>
-  querySql(req: { db: 'message' | 'contact' | 'session'; sql: string; limit?: number }): Promise<{ columns: string[]; rows: unknown[][] }>
+  querySql(req: {
+    db: 'message' | 'contact' | 'session'
+    sql: string
+    limit?: number
+  }): Promise<{ columns: string[]; rows: unknown[][] }>
   readonly mirror: Mirror
   readonly source: SourceReader
   readonly syncEngine: SyncEngine
@@ -77,7 +81,13 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
     emit(detail ? { type: 'connection', state, detail } : { type: 'connection', state })
   }
 
-  const engine = createSyncEngine({ source, mirror, emit, pageSize: opts.pageSize, watchDebounceMs: opts.watchDebounceMs })
+  const engine = createSyncEngine({
+    source,
+    mirror,
+    emit,
+    pageSize: opts.pageSize,
+    watchDebounceMs: opts.watchDebounceMs,
+  })
 
   const requireOpen = () => {
     if (connection !== 'ready' || !account || !source.isOpen()) throw new SubstrateError('not_open', '尚未连接微信数据')
@@ -95,16 +105,23 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
     if (!source.isOpen() || source.kind !== 'wcdb') return items
     const upgraded: WxMessage[] = []
     for (const message of items) {
-      if (message.presentationVersion) { upgraded.push(message); continue }
+      if (message.presentationVersion) {
+        upgraded.push(message)
+        continue
+      }
       try {
         const page = await source.messagesAfter(message.sessionId, message.seq - 1, 1)
-        const fresh = page.find((m) => m.seq === message.seq && (m.id === message.id || m.id === `wx:${message.id}:${message.seq}`))
+        const fresh = page.find(
+          (m) => m.seq === message.seq && (m.id === message.id || m.id === `wx:${message.id}:${message.seq}`),
+        )
         if (fresh?.presentationVersion) {
           mirror.insertMessages([fresh], { advanceWatermark: false })
           upgraded.push(mirror.getMessage(message.sessionId, fresh.id) ?? message)
           continue
         }
-      } catch { /* Keep the readable cached row if the original is unavailable. */ }
+      } catch {
+        /* Keep the readable cached row if the original is unavailable. */
+      }
       upgraded.push(message)
     }
     return upgraded
@@ -114,13 +131,15 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
     requireOpen()
     const limit = Math.max(1, Math.floor(q.limit || 50))
     const local = mirror.listMessages({ ...q, limit })
-    if (!source.isOpen() || q.afterSeq !== undefined || hasMessageFilters(q)) return { ...local, items: await upgradePresentation(local.items) }
+    if (!source.isOpen() || q.afterSeq !== undefined || hasMessageFilters(q))
+      return { ...local, items: await upgradePresentation(local.items) }
     const oldestLocal = mirror.oldestSeq(q.sessionId)
     // The mirror is filled oldest-first by the background sync. A full local page therefore does not
     // prove that it is the current tail. Ask the live message shards for every unfiltered latest/older
     // page; this keeps the detail pane aligned with session.db even while indexing is still running.
     const boundary = q.beforeSeq ?? Number.MAX_SAFE_INTEGER
-    if (liveExhausted.has(q.sessionId) && (oldestLocal === undefined || boundary <= oldestLocal)) return { ...local, items: await upgradePresentation(local.items) }
+    if (liveExhausted.has(q.sessionId) && (oldestLocal === undefined || boundary <= oldestLocal))
+      return { ...local, items: await upgradePresentation(local.items) }
     try {
       const live = await backfillBefore(q.sessionId, boundary, limit)
       if (!live.length) {
@@ -154,7 +173,9 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
   }
 
   const ensureScopedChunks = async (sessionIds: string[] | undefined) => {
-    const ids = sessionIds?.length ? sessionIds : mirror.listSessions({ limit: opts.semanticSessionScope ?? 30 }).items.map((s) => s.id)
+    const ids = sessionIds?.length
+      ? sessionIds
+      : mirror.listSessions({ limit: opts.semanticSessionScope ?? 30 }).items.map((s) => s.id)
     for (const id of ids) {
       try {
         await mirror.ensureChunks(id)
@@ -169,7 +190,7 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
     const query = q.query.trim()
     const limit = Math.max(1, Math.floor(q.limit || 20))
     if (!query) return []
-    const filters = { sessionIds: q.sessionIds, from: q.from, to: q.to, limit }
+    const filters = { sessionIds: q.sessionIds, from: q.from, to: q.to, limit, match: q.match }
     const mode = q.mode ?? 'keyword'
     if (mode === 'keyword' || !mirror.hasEmbeddings) return mirror.searchFts(query, filters)
     await ensureScopedChunks(q.sessionIds)
@@ -231,7 +252,7 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
     requireOpen()
     if (!source.querySql) throw new SubstrateError('unsupported', '当前数据源不支持 SQL 查询')
     try {
-      const result = await source.querySql(req.db, guarded.sql, guarded.limit)
+      const result = await source.querySql(req.db, guarded)
       mirror.audit(guarded.sql, `query_sql:${req.db}`, result.rows.length)
       return result
     } catch (err) {
@@ -282,14 +303,30 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
 
     listAccounts: async () => (account ? [account] : []),
     getAccount: async () => account,
-    listSessions: async (q) => { requireOpen(); return mirror.listSessions(q) },
-    getSession: async (id) => { requireOpen(); return mirror.getSession(id) },
+    listSessions: async (q) => {
+      requireOpen()
+      return mirror.listSessions(q)
+    },
+    getSession: async (id) => {
+      requireOpen()
+      return mirror.getSession(id)
+    },
     listMessages,
-    getMessage: async (sessionId, messageId) => { requireOpen(); const m = mirror.getMessage(sessionId, messageId); return m ? (await upgradePresentation([m]))[0] : undefined },
+    getMessage: async (sessionId, messageId) => {
+      requireOpen()
+      const m = mirror.getMessage(sessionId, messageId)
+      return m ? (await upgradePresentation([m]))[0] : undefined
+    },
     getContext,
     search,
-    listContacts: async (q) => { requireOpen(); return mirror.listContacts({ query: q.query, kind: q.kind, limit: q.limit, offset: q.offset }) },
-    getContact: async (username) => { requireOpen(); return mirror.getContact(username) },
+    listContacts: async (q) => {
+      requireOpen()
+      return mirror.listContacts({ query: q.query, kind: q.kind, limit: q.limit, offset: q.offset })
+    },
+    getContact: async (username) => {
+      requireOpen()
+      return mirror.getContact(username)
+    },
     async listGroupMembers(groupId, q) {
       requireOpen()
       const local = mirror.listGroupMembers(groupId, q)
@@ -298,7 +335,10 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
         const members = await source.groupMembers(groupId)
         if (members.length) {
           mirror.upsertContacts(members)
-          mirror.upsertGroupMembers(groupId, members.map((c) => ({ username: c.username, displayName: c.remark || c.nickname || undefined })))
+          mirror.upsertGroupMembers(
+            groupId,
+            members.map((c) => ({ username: c.username, displayName: c.remark || c.nickname || undefined })),
+          )
           return mirror.listGroupMembers(groupId, q)
         }
       } catch {
@@ -306,7 +346,10 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
       }
       return local
     },
-    stats: async (q) => { requireOpen(); return mirror.stats(q) },
+    stats: async (q) => {
+      requireOpen()
+      return mirror.stats(q)
+    },
     resolveMedia,
     transcribeVoice,
     async sync(o) {

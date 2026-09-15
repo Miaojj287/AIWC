@@ -5,7 +5,21 @@
 import { Layers } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ThreadId } from '@aiwc/protocol'
-import { Button, ConfirmDialog, DangerDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, FormDialog, FormDialogField, Input } from '@/kit'
+import { useT } from '@/i18n'
+import {
+  Button,
+  ConfirmDialog,
+  DangerDialog,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  FormDialog,
+  FormDialogField,
+  Input,
+} from '@/kit'
+import { isUntitledTitle } from './model'
 
 export type ThreadDialog =
   | { kind: 'rename'; threadId: ThreadId; title: string }
@@ -24,10 +38,11 @@ export interface ThreadDialogsProps {
 }
 
 export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, onDelete }: ThreadDialogsProps) {
+  const t = useT()
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    if (dialog?.kind === 'rename') setTitle(dialog.title)
+    if (dialog?.kind === 'rename') setTitle(isUntitledTitle(dialog.title) ? '' : dialog.title)
     setBusy(false)
   }, [dialog])
 
@@ -49,17 +64,24 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
       <FormDialog
         open={dialog?.kind === 'rename'}
         onOpenChange={openChange}
-        title="重命名会话"
-        submitLabel="保存"
+        title={t('agent.dialog.renameTitle')}
+        submitLabel={t('common.save')}
         loading={busy}
         submitDisabled={title.trim().length === 0}
-        submitDisabledReason="名称不能为空"
+        submitDisabledReason={t('agent.dialog.nameRequired')}
         onSubmit={() => {
           if (dialog?.kind === 'rename') void run(() => onRename(dialog.threadId, title))
         }}
       >
-        <FormDialogField label="名称" htmlFor="agent-thread-title">
-          <Input id="agent-thread-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={60} placeholder="会话名称" />
+        <FormDialogField label={t('agent.dialog.nameLabel')} htmlFor="agent-thread-title">
+          <Input
+            id="agent-thread-title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+            maxLength={60}
+            placeholder={t('agent.dialog.namePlaceholder')}
+          />
         </FormDialogField>
       </FormDialog>
 
@@ -68,9 +90,9 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
         onOpenChange={openChange}
         icon={Layers}
         tone="accent"
-        title="压缩上下文？"
-        description="会把之前的对话与引用整理成一段摘要，保留结论、待办与文件引用，释放大部分上下文。压缩后无法恢复原始对话。"
-        confirmLabel="压缩"
+        title={t('agent.dialog.compactTitle')}
+        description={t('agent.dialog.compactDescription')}
+        confirmLabel={t('agent.dialog.compactConfirm')}
         loading={busy}
         onConfirm={() => {
           if (dialog?.kind === 'compact') void run(() => onCompact(dialog.threadId))
@@ -80,9 +102,9 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
       <DangerDialog
         open={dialog?.kind === 'clear'}
         onOpenChange={openChange}
-        title="清空上下文？"
-        description="会移除这个会话里的全部消息、工具调用记录和引用，Agent 将从零开始。此操作不可恢复。"
-        confirmLabel="清空"
+        title={t('agent.dialog.clearTitle')}
+        description={t('agent.dialog.clearDescription')}
+        confirmLabel={t('common.clear')}
         loading={busy}
         onConfirm={() => {
           if (dialog?.kind === 'clear') void run(() => onClear(dialog.threadId))
@@ -92,9 +114,15 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
       <DangerDialog
         open={dialog?.kind === 'delete'}
         onOpenChange={openChange}
-        title="删除会话？"
-        description={dialog?.kind === 'delete' ? `将永久删除「${dialog.title || '新会话'}」及其全部记录，无法恢复。` : undefined}
-        confirmLabel="删除"
+        title={t('agent.dialog.deleteTitle')}
+        description={
+          dialog?.kind === 'delete'
+            ? t('agent.dialog.deleteDescription', {
+                title: isUntitledTitle(dialog.title) ? t('agent.thread.untitled') : dialog.title,
+              })
+            : undefined
+        }
+        confirmLabel={t('common.delete')}
         loading={busy}
         onConfirm={() => {
           if (dialog?.kind === 'delete') void run(() => onDelete(dialog.threadId))
@@ -103,17 +131,24 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
 
       <Dialog open={dialog?.kind === 'summary'} onOpenChange={openChange}>
         <DialogContent size="lg">
-          <DialogHeader icon={Layers} tone="accent" title="压缩摘要" description="压缩时保留下来的结论、待办与引用。" />
+          <DialogHeader
+            icon={Layers}
+            tone="accent"
+            title={t('agent.dialog.summaryTitle')}
+            description={t('agent.dialog.summaryDescription')}
+          />
           <DialogBody className="max-h-[50vh]">
             {dialog?.kind === 'summary' && dialog.summary ? (
-              <p className="m-0 whitespace-pre-wrap break-words text-body leading-5 text-fg select-text">{dialog.summary}</p>
+              <p className="m-0 whitespace-pre-wrap break-words text-body leading-5 text-fg select-text">
+                {dialog.summary}
+              </p>
             ) : (
-              <p className="m-0 text-caption text-fg-3">没有找到摘要内容。</p>
+              <p className="m-0 text-caption text-fg-3">{t('agent.dialog.summaryEmpty')}</p>
             )}
           </DialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={onClose}>
-              关闭
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

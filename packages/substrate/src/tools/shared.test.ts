@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { clampLimit, compactMessage, describeCoverage, fmtTime, messageText, squash, toJson } from './shared'
+import {
+  clampLimit,
+  compactMessage,
+  describeCoverage,
+  fmtTime,
+  messageText,
+  parseTimeInput,
+  squash,
+  timeFrom,
+  timeTo,
+  toJson,
+} from './shared'
 import { createFakeSubstrate, msg } from './testing/fakeSubstrate'
 
 const TIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
@@ -43,20 +54,41 @@ describe('compactMessage', () => {
     expect(c.media).toBeUndefined()
   })
   it('uses senderName, then senderId for others', () => {
-    expect(compactMessage(msg({ id: 'a', sessionId: 's', seq: 1, senderId: 'u1', senderName: '阿明', text: 'x' })).senderName).toBe('阿明')
+    expect(
+      compactMessage(msg({ id: 'a', sessionId: 's', seq: 1, senderId: 'u1', senderName: '阿明', text: 'x' }))
+        .senderName,
+    ).toBe('阿明')
     expect(compactMessage(msg({ id: 'a', sessionId: 's', seq: 1, senderId: 'u1', text: 'x' })).senderName).toBe('u1')
   })
   it('renders media placeholders without paths or bytes', () => {
-    const voice = compactMessage(msg({ id: 'v', sessionId: 's', seq: 1, kind: 'voice', media: { kind: 'voice', durationMs: 4200, path: '/secret/voice.silk' } }))
+    const voice = compactMessage(
+      msg({
+        id: 'v',
+        sessionId: 's',
+        seq: 1,
+        kind: 'voice',
+        media: { kind: 'voice', durationMs: 4200, path: '/secret/voice.silk' },
+      }),
+    )
     expect(voice.text).toBe('[语音 4s]')
     expect(voice.media).toEqual({ kind: 'voice', durationMs: 4200 })
     expect(JSON.stringify(voice)).not.toContain('/secret')
 
-    const voiceT = compactMessage(msg({ id: 'v', sessionId: 's', seq: 1, kind: 'voice', media: { kind: 'voice', transcript: '明天见' } }))
+    const voiceT = compactMessage(
+      msg({ id: 'v', sessionId: 's', seq: 1, kind: 'voice', media: { kind: 'voice', transcript: '明天见' } }),
+    )
     expect(voiceT.text).toBe('[语音] 明天见')
     expect(voiceT.media?.hasTranscript).toBe(true)
 
-    const file = compactMessage(msg({ id: 'f', sessionId: 's', seq: 1, kind: 'file', media: { kind: 'file', fileName: '预算.xlsx', sizeBytes: 10, path: '/x' } }))
+    const file = compactMessage(
+      msg({
+        id: 'f',
+        sessionId: 's',
+        seq: 1,
+        kind: 'file',
+        media: { kind: 'file', fileName: '预算.xlsx', sizeBytes: 10, path: '/x' },
+      }),
+    )
     expect(file.text).toBe('[文件] 预算.xlsx')
     expect(file.media).toEqual({ kind: 'file', fileName: '预算.xlsx', sizeBytes: 10 })
 
@@ -65,12 +97,23 @@ describe('compactMessage', () => {
     expect(compactMessage(msg({ id: 'k', sessionId: 's', seq: 1, kind: 'sticker' })).text).toBe('[表情]')
   })
   it('keeps a bounded quote', () => {
-    const c = compactMessage(msg({ id: 'q', sessionId: 's', seq: 1, kind: 'quote', text: '回复', quote: { senderName: '小红', text: 'y'.repeat(200) } }))
+    const c = compactMessage(
+      msg({
+        id: 'q',
+        sessionId: 's',
+        seq: 1,
+        kind: 'quote',
+        text: '回复',
+        quote: { senderName: '小红', text: 'y'.repeat(200) },
+      }),
+    )
     expect(c.quote?.senderName).toBe('小红')
     expect(c.quote?.text).toHaveLength(80)
   })
   it('describes messageText for link/card/location/transfer kinds', () => {
-    expect(messageText(msg({ id: 'l', sessionId: 's', seq: 1, kind: 'link', text: '文章标题' }))).toBe('[链接] 文章标题')
+    expect(messageText(msg({ id: 'l', sessionId: 's', seq: 1, kind: 'link', text: '文章标题' }))).toBe(
+      '[链接] 文章标题',
+    )
     expect(messageText(msg({ id: 'l', sessionId: 's', seq: 1, kind: 'link' }))).toBe('[链接]')
     expect(messageText(msg({ id: 't', sessionId: 's', seq: 1, kind: 'transfer', text: '¥100' }))).toBe('[转账] ¥100')
   })
@@ -103,5 +146,33 @@ describe('toJson', () => {
   it('strips undefined and stringifies bigint', () => {
     expect(toJson({ a: undefined, b: 1n, c: [undefined, 2] })).toEqual({ b: '1', c: [null, 2] })
     expect(toJson(undefined)).toBeNull()
+  })
+})
+
+describe('time bounds the model can write naturally', () => {
+  const local = (...a: [number, number, number?, number?, number?, number?, number?]) =>
+    new Date(a[0], a[1], a[2] ?? 1, a[3] ?? 0, a[4] ?? 0, a[5] ?? 0, a[6] ?? 0).getTime()
+
+  it('widens a date, minute or month to the start / end of that span in local time', () => {
+    expect(parseTimeInput('2026-02-14', 'start')).toBe(local(2026, 1, 14))
+    expect(parseTimeInput('2026-02-14', 'end')).toBe(local(2026, 1, 15) - 1)
+    expect(parseTimeInput('2026-02-14 19:28', 'start')).toBe(local(2026, 1, 14, 19, 28))
+    expect(parseTimeInput('2026-02-14 19:28', 'end')).toBe(local(2026, 1, 14, 19, 28, 59, 999))
+    expect(parseTimeInput('2026/2/14T09:05:30', 'end')).toBe(local(2026, 1, 14, 9, 5, 30, 999))
+    expect(parseTimeInput('2026-02', 'start')).toBe(local(2026, 1, 1))
+    expect(parseTimeInput('2026-02', 'end')).toBe(local(2026, 2, 1) - 1)
+  })
+
+  it('keeps numbers as milliseconds and reads numeric strings as seconds or milliseconds', () => {
+    expect(parseTimeInput(1_739_532_480_000, 'start')).toBe(1_739_532_480_000)
+    expect(parseTimeInput('1739532480', 'start')).toBe(1_739_532_480_000)
+    expect(parseTimeInput('1739532480000', 'end')).toBe(1_739_532_480_000)
+  })
+
+  it('rejects impossible or unrecognisable values instead of guessing', () => {
+    for (const bad of ['2026-02-30', '2026-13-01', '2026-02 19:28', '昨天', '2026-02-14 25:00', ''])
+      expect(parseTimeInput(bad, 'start'), bad).toBeUndefined()
+    expect(timeFrom().safeParse('上周').success).toBe(false)
+    expect(timeTo().parse('2026-02-14')).toBe(local(2026, 1, 15) - 1)
   })
 })

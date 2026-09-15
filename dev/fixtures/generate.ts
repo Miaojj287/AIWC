@@ -225,7 +225,12 @@ export function generateDataset(opts: GenerateOptions = {}): DemoFixture {
     }
     const systemCount = rng.int(1, 3)
     for (let k = 0; k < systemCount; k++) {
-      const sys = systemLine(rng, 'group', members.map((m) => m.nickname), pickBurstStart(rng, now, days, profile))
+      const sys = systemLine(
+        rng,
+        'group',
+        members.map((m) => m.nickname),
+        pickBurstStart(rng, now, days, profile),
+      )
       if (sys) bursts.push(sys)
     }
     const session: WxSession = {
@@ -249,8 +254,16 @@ export function generateDataset(opts: GenerateOptions = {}): DemoFixture {
   const dms = sessions.filter((s) => s.kind === 'dm')
   for (const s of rng.sample(dms, 2)) s.pinned = true
   for (const s of rng.sample(groups, 2)) s.pinned = true
-  for (const s of rng.sample(groups.filter((g) => !g.pinned), 4)) s.muted = true
-  for (const s of rng.sample(dms.filter((g) => !g.pinned), 1)) s.muted = true
+  for (const s of rng.sample(
+    groups.filter((g) => !g.pinned),
+    4,
+  ))
+    s.muted = true
+  for (const s of rng.sample(
+    dms.filter((g) => !g.pinned),
+    1,
+  ))
+    s.muted = true
   for (const s of sessions) {
     if (s.muted) s.unread = rng.chance(0.7) ? rng.int(3, 60) : 0
     else s.unread = rng.chance(0.35) ? rng.int(1, 9) : 0

@@ -28,7 +28,8 @@ export function userInstructionsFragmentProvider(memory: Pick<MemoryStore, 'read
         kind: 'user_instructions',
         marker: '<user_instructions>',
         tokenCap: USER_INSTRUCTIONS_TOKEN_CAP,
-        render: () => `<user_instructions>\n以下是用户为你设定的规则（AGENTS.md），优先级高于默认行为：\n${text}\n</user_instructions>`,
+        render: () =>
+          `<user_instructions>\n以下是用户为你设定的规则（AGENTS.md），优先级高于默认行为：\n${text}\n</user_instructions>`,
       }
       return [fragment]
     },
@@ -41,7 +42,10 @@ export function userInstructionsFragmentProvider(memory: Pick<MemoryStore, 'read
  * (agent tools, 设置 › 记忆, diary backfill) invalidates it so the next new thread re-reads the store;
  * threads already running keep their frozen prefix (prompt-cache stability, ARCHITECTURE §5.2).
  */
-export function wireMemoryInvalidation(memory: Pick<MemoryStore, 'subscribe'>, provider: Pick<MemoryFragmentProvider, 'invalidate'>): () => void {
+export function wireMemoryInvalidation(
+  memory: Pick<MemoryStore, 'subscribe'>,
+  provider: Pick<MemoryFragmentProvider, 'invalidate'>,
+): () => void {
   return memory.subscribe(() => provider.invalidate())
 }
 

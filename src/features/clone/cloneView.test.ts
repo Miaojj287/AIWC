@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { CloneStatus } from '@aiwc/protocol'
-import { buildSteps, cloneStatusLine, filterContacts, formatElapsed, formatEta, progressPercent, rangeToQuery, readyCount, viewFor } from './cloneView'
+import {
+  buildSteps,
+  cloneStatusLine,
+  filterContacts,
+  formatElapsed,
+  formatEta,
+  progressPercent,
+  rangeToQuery,
+  readyCount,
+  viewFor,
+} from './cloneView'
 
 const none: CloneStatus = { state: 'none', messageCount: 1284 }
-const building: CloneStatus = { state: 'building', progress: { done: 2, total: 5, step: '提炼事实', startedAt: 0, etaMs: 70_000 } }
+const building: CloneStatus = {
+  state: 'building',
+  progress: { done: 2, total: 5, step: '提炼事实', startedAt: 0, etaMs: 70_000 },
+}
 const ready: CloneStatus = { state: 'ready', version: 2, sampleCount: 38, builtAt: 0 }
 const failed: CloneStatus = { state: 'failed', error: 'timeout', kind: 'model' }
 

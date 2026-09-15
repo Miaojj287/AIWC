@@ -117,7 +117,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         publishedPage = true
         deps.emit({ type: 'sessions.changed' })
       })
-      const sessions: WxSession[] = raw.map((s) => ({ ...s, kind: s.kind ?? sessionKindFromUsername(s.id), title: s.title || s.id }))
+      const sessions: WxSession[] = raw.map((s) => ({
+        ...s,
+        kind: s.kind ?? sessionKindFromUsername(s.id),
+        title: s.title || s.id,
+      }))
       deps.mirror.upsertSessions(sessions)
       if (!publishedPage) deps.emit({ type: 'sessions.changed' })
 
@@ -131,7 +135,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       if (opts.sessionIds) {
         const wanted = new Set(opts.sessionIds)
         targets = sessions.filter((s) => wanted.has(s.id))
-
       }
 
       const total = targets.length
@@ -158,11 +161,17 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         progress: { done: total, total, label: cancelled ? '已取消' : '完成' },
         totals: totals(),
       }
-      if (errors.length) done.error = errors.length === 1 ? errors[0] : `${errors[0]}（另有 ${errors.length - 1} 个会话失败）`
+      if (errors.length)
+        done.error = errors.length === 1 ? errors[0] : `${errors[0]}（另有 ${errors.length - 1} 个会话失败）`
       setStatus(done)
       return done
     } catch (err) {
-      const failed: SyncStatus = { phase: 'error', lastSyncedAt: status.lastSyncedAt, error: errorMessage(err), totals: safeTotals() }
+      const failed: SyncStatus = {
+        phase: 'error',
+        lastSyncedAt: status.lastSyncedAt,
+        error: errorMessage(err),
+        totals: safeTotals(),
+      }
       setStatus(failed)
       return failed
     }
@@ -193,7 +202,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     return running
   }
 
-  const scheduled: Debounced<[string[] | undefined]> = debounce<[string[] | undefined], { ids?: string[]; all: boolean }>(
+  const scheduled: Debounced<[string[] | undefined]> = debounce<
+    [string[] | undefined],
+    { ids?: string[]; all: boolean }
+  >(
     deps.watchDebounceMs ?? 100,
     (state, ids) => {
       if (!ids || state?.all) return { all: true }

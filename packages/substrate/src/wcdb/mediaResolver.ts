@@ -6,12 +6,13 @@
  *  - video / file: not encrypted; resolved to their original path under msg/video, msg/file (hardlink tables first).
  */
 import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs'
-import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { WxMedia } from '@aiwc/protocol'
 import { decryptImageDat } from '../decrypt/decryptImageDat'
 import type { MediaLocator, MessageRawInfo } from './messageMapper'
-import { parseEmojiInfo, parseImageDatNameFromRow } from './contentParsers'
+import { parseImageDatNameFromRow } from './contentParsers'
+import { resolveSticker } from './stickerResolver'
 import { quoteIdent, type WcdbQuery } from './query'
 import { coerceRowNumber, decodeBlob, type Row } from './rowDecoders'
 
@@ -20,6 +21,7 @@ export interface MediaResolverContext {
   accountDir: string
   cacheDir: string
   nativeDir: string
+  emoticonDbPath?: string | null
   hardlinkDbPath: string | null
   mediaDbPaths: string[]
   imageKeys?: { xorHex?: string; aesHex?: string }
@@ -37,8 +39,11 @@ export interface MediaTarget {
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.wxgf']
 
+/** One path segment from WeChat data: unsafe characters become `_`; `.` / `..` (any dot-only name) too. */
 function safeSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9_.@-]/g, '_').slice(0, 120) || '_'
+  const cleaned = value.replace(/[^A-Za-z0-9_.@-]/g, '_').slice(0, 120)
+  // join() resolves dot-only segments, which would move the file out of cacheDir/media/<session>.
+  return /^\.*$/.test(cleaned) ? '_'.repeat(Math.max(1, cleaned.length)) : cleaned
 }
 
 export function mediaCachePath(cacheDir: string, sessionId: string, messageId: string, suffix = ''): string {
@@ -77,7 +82,11 @@ function hardlinkTables(ctx: MediaResolverContext): HardlinkTables {
   const tables: HardlinkTables = {}
   try {
     const names = ctx.q.tables(ctx.hardlinkDbPath)
-    const latest = (prefix: string) => names.filter((n) => n.toLowerCase().startsWith(prefix)).sort().reverse()[0]
+    const latest = (prefix: string) =>
+      names
+        .filter((n) => n.toLowerCase().startsWith(prefix))
+        .sort()
+        .reverse()[0]
     tables.image = latest('image_hardlink_info')
     tables.video = latest('video_hardlink_info')
     tables.file = latest('file_hardlink_info')
@@ -91,7 +100,11 @@ function hardlinkTables(ctx: MediaResolverContext): HardlinkTables {
 
 function dirName(ctx: MediaResolverContext, dirTable: string, rowid: number): string | undefined {
   try {
-    const row = ctx.q.get(ctx.hardlinkDbPath as string, `SELECT username FROM ${quoteIdent(dirTable)} WHERE rowid = ? LIMIT 1`, [rowid])
+    const row = ctx.q.get(
+      ctx.hardlinkDbPath as string,
+      `SELECT username FROM ${quoteIdent(dirTable)} WHERE rowid = ? LIMIT 1`,
+      [rowid],
+    )
     const value = row?.['username']
     return typeof value === 'string' && value ? value : undefined
   } catch {
@@ -105,10 +118,18 @@ interface HardlinkHit {
   dir2?: string
 }
 
-function hardlinkLookup(ctx: MediaResolverContext, table: string | undefined, md5: string | undefined): HardlinkHit | undefined {
+function hardlinkLookup(
+  ctx: MediaResolverContext,
+  table: string | undefined,
+  md5: string | undefined,
+): HardlinkHit | undefined {
   if (!table || !md5 || !ctx.hardlinkDbPath) return undefined
   try {
-    const row = ctx.q.get(ctx.hardlinkDbPath, `SELECT * FROM ${quoteIdent(table)} WHERE lower(md5) = lower(?) LIMIT 1`, [md5])
+    const row = ctx.q.get(
+      ctx.hardlinkDbPath,
+      `SELECT * FROM ${quoteIdent(table)} WHERE lower(md5) = lower(?) LIMIT 1`,
+      [md5],
+    )
     if (!row) return undefined
     const fileName = typeof row['file_name'] === 'string' ? row['file_name'] : ''
     if (!fileName) return undefined
@@ -130,11 +151,15 @@ const datIndexPending = new Map<string, Promise<Map<string, string[]>>>()
 
 /** base name without `_h` / `_t` suffix and `.dat` */
 export function datBaseName(fileName: string): string {
-  return basename(fileName).toLowerCase().replace(/\.dat$/, '').replace(/(?:_h|_t|_hd|_thumb|\.t)$/, '')
+  return basename(fileName)
+    .toLowerCase()
+    .replace(/\.dat$/, '')
+    .replace(/_m$/, '')
+    .replace(/(?:_h|_t|_hd|_thumb|\.t)$/, '')
 }
 
 export function isThumbDat(fileName: string): boolean {
-  return /(?:_t|\.t)\.dat$/i.test(fileName) || /_thumb\.dat$/i.test(fileName)
+  return /(?:_t|\.t|_thumb)(?:_m)?\.dat$/i.test(fileName)
 }
 
 async function datIndex(root: string): Promise<Map<string, string[]>> {
@@ -142,7 +167,11 @@ async function datIndex(root: string): Promise<Map<string, string[]>> {
   if (pending) return pending
   const task = buildDatIndex(root)
   datIndexPending.set(root, task)
-  try { return await task } finally { datIndexPending.delete(root) }
+  try {
+    return await task
+  } finally {
+    datIndexPending.delete(root)
+  }
 }
 
 async function buildDatIndex(root: string): Promise<Map<string, string[]>> {
@@ -177,14 +206,18 @@ async function buildDatIndex(root: string): Promise<Map<string, string[]>> {
 
 /** Rank candidates: HD > plain > thumbnail. */
 export function rankDatCandidates(paths: string[]): { best?: string; thumb?: string } {
-  const score = (p: string) => (/_h(d)?\.dat$/i.test(p) ? 3 : isThumbDat(p) ? 1 : 2)
+  const score = (p: string) => (/_h(d)?(?:_m)?\.dat$/i.test(p) ? 3 : isThumbDat(p) ? 1 : 2)
   const sorted = [...paths].sort((a, b) => score(b) - score(a))
   const best = sorted.find((p) => !isThumbDat(p))
   const thumb = sorted.find((p) => isThumbDat(p))
   return { best: best ?? thumb, thumb }
 }
 
-async function locateImageDat(ctx: MediaResolverContext, locator: MediaLocator, row: Row): Promise<{ best?: string; thumb?: string }> {
+async function locateImageDat(
+  ctx: MediaResolverContext,
+  locator: MediaLocator,
+  row: Row,
+): Promise<{ best?: string; thumb?: string }> {
   const attachRoot = join(ctx.accountDir, 'msg', 'attach')
   const md5 = locator.imageMd5
   const datName = parseImageDatNameFromRow(row) ?? locator.imageDatName
@@ -196,7 +229,16 @@ async function locateImageDat(ctx: MediaResolverContext, locator: MediaLocator, 
     for (const sub of ['Img', 'mg', 'Image', '']) {
       const folder = sub ? join(dir, sub) : dir
       const base = datBaseName(hit.fileName)
-      for (const variant of [`${base}_h.dat`, `${base}.dat`, `${base}_t.dat`, hit.fileName]) {
+      for (const variant of [
+        `${base}_h.dat`,
+        `${base}.dat`,
+        `${base}_t.dat`,
+        `${base}.t.dat`,
+        `${base}_t_M.dat`,
+        `${base}_h_M.dat`,
+        `${base}_M.dat`,
+        hit.fileName,
+      ]) {
         const full = join(folder, variant)
         if (existsSync(full) && !candidates.includes(full)) candidates.push(full)
       }
@@ -218,7 +260,8 @@ async function resolveImage(ctx: MediaResolverContext, target: MediaTarget): Pro
   const thumbBase = `${base}_t`
   const cachedMain = existingCached(base)
   const cachedThumb = existingCached(thumbBase)
-  if (cachedMain) return { kind: 'image', path: cachedMain, thumbPath: cachedThumb, sizeBytes: statSync(cachedMain).size }
+  if (cachedMain)
+    return { kind: 'image', path: cachedMain, thumbPath: cachedThumb, sizeBytes: statSync(cachedMain).size }
 
   const { best, thumb } = await locateImageDat(ctx, target.locator, target.row)
   if (!best) return cachedThumb ? { kind: 'image', thumbPath: cachedThumb } : undefined
@@ -274,7 +317,9 @@ function voiceShape(ctx: MediaResolverContext, dbPath: string): VoiceTableShape 
         shape = {
           table,
           dataCol,
-          svrIdCol: cols.find((c) => ['msg_svr_id', 'msgsvrid', 'svr_id', 'svrid', 'server_id', 'serverid'].includes(c)),
+          svrIdCol: cols.find((c) =>
+            ['msg_svr_id', 'msgsvrid', 'svr_id', 'svrid', 'server_id', 'serverid'].includes(c),
+          ),
           chatIdCol: cols.find((c) => ['chat_name_id', 'chatnameid', 'chat_nameid'].includes(c)),
           timeCol: cols.find((c) => ['create_time', 'createtime', 'time'].includes(c)),
           name2Id: ctx.q.tables(dbPath, 'Name2Id%')[0],
@@ -297,22 +342,34 @@ function findVoiceBlob(ctx: MediaResolverContext, target: MediaTarget): Buffer |
     const data = quoteIdent(shape.dataCol)
     try {
       if (shape.svrIdCol && serverId > 0) {
-        const row = ctx.q.get(dbPath, `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.svrIdCol)} = ? LIMIT 1`, [serverId])
+        const row = ctx.q.get(dbPath, `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.svrIdCol)} = ? LIMIT 1`, [
+          serverId,
+        ])
         const blob = decodeBlob(row?.['d'])
         if (blob && blob.length > 0) return blob
       }
       if (shape.chatIdCol && shape.timeCol && shape.name2Id && createTime > 0) {
         for (const candidate of [target.sessionId, ...ctx.selfKeys]) {
-          const n2i = ctx.q.get(dbPath, `SELECT rowid AS rid FROM ${quoteIdent(shape.name2Id)} WHERE user_name = ?`, [candidate])
+          const n2i = ctx.q.get(dbPath, `SELECT rowid AS rid FROM ${quoteIdent(shape.name2Id)} WHERE user_name = ?`, [
+            candidate,
+          ])
           const rid = coerceRowNumber(n2i?.['rid'], 0)
           if (!rid) continue
-          const rows = ctx.q.all(dbPath, `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.chatIdCol)} = ? AND ${quoteIdent(shape.timeCol)} = ? ORDER BY rowid ASC LIMIT 4`, [rid, createTime])
+          const rows = ctx.q.all(
+            dbPath,
+            `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.chatIdCol)} = ? AND ${quoteIdent(shape.timeCol)} = ? ORDER BY rowid ASC LIMIT 4`,
+            [rid, createTime],
+          )
           const blob = decodeBlob(rows[0]?.['d'])
           if (blob && blob.length > 0) return blob
         }
       }
       if (shape.timeCol && createTime > 0) {
-        const rows = ctx.q.all(dbPath, `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.timeCol)} = ? ORDER BY rowid ASC LIMIT 2`, [createTime])
+        const rows = ctx.q.all(
+          dbPath,
+          `SELECT ${data} AS d FROM ${t} WHERE ${quoteIdent(shape.timeCol)} = ? ORDER BY rowid ASC LIMIT 2`,
+          [createTime],
+        )
         if (rows.length === 1) {
           const blob = decodeBlob(rows[0]?.['d'])
           if (blob && blob.length > 0) return blob
@@ -328,7 +385,8 @@ function findVoiceBlob(ctx: MediaResolverContext, target: MediaTarget): Buffer |
 async function resolveVoice(ctx: MediaResolverContext, target: MediaTarget): Promise<WxMedia | undefined> {
   const path = mediaCachePath(ctx.cacheDir, target.sessionId, target.messageId, '.silk')
   const durationMs = target.locator.durationMs
-  if (existsSync(path) && statSync(path).size > 0) return { kind: 'voice', path, durationMs, sizeBytes: statSync(path).size }
+  if (existsSync(path) && statSync(path).size > 0)
+    return { kind: 'voice', path, durationMs, sizeBytes: statSync(path).size }
   const blob = findVoiceBlob(ctx, target)
   if (!blob) return undefined
   await mkdir(dirname(path), { recursive: true })
@@ -344,7 +402,11 @@ function findUnderMonthDirs(root: string, predicate: (name: string) => boolean):
   if (!existsSync(root)) return undefined
   let dirs: string[] = []
   try {
-    dirs = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse()
+    dirs = readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+      .reverse()
   } catch {
     return undefined
   }
@@ -371,10 +433,19 @@ function resolveVideo(ctx: MediaResolverContext, target: MediaTarget): WxMedia |
     const direct = join(root, hit.dir1, hit.dir2, hit.fileName)
     if (existsSync(direct)) path = direct
   }
-  path = path ?? findUnderMonthDirs(root, (name) => name.toLowerCase() === `${lowerStem}.mp4` || (name.toLowerCase().startsWith(lowerStem) && name.toLowerCase().endsWith('.mp4')))
+  path =
+    path ??
+    findUnderMonthDirs(
+      root,
+      (name) =>
+        name.toLowerCase() === `${lowerStem}.mp4` ||
+        (name.toLowerCase().startsWith(lowerStem) && name.toLowerCase().endsWith('.mp4')),
+    )
   if (!path) return undefined
   const dir = dirname(path)
-  const thumb = [`${stem}_thumb.jpg`, `${stem}.jpg`, `${stem}_thumb.png`].map((n) => join(dir, n)).find((p) => existsSync(p))
+  const thumb = [`${stem}_thumb.jpg`, `${stem}.jpg`, `${stem}_thumb.png`]
+    .map((n) => join(dir, n))
+    .find((p) => existsSync(p))
   const media: WxMedia = { kind: 'video', path, thumbPath: thumb, durationMs: target.locator.durationMs }
   try {
     media.sizeBytes = statSync(path).size
@@ -400,7 +471,13 @@ function resolveFile(ctx: MediaResolverContext, target: MediaTarget): WxMedia | 
   if (!path && fileName) {
     const ext = extname(fileName).toLowerCase()
     const stem = fileName.slice(0, fileName.length - ext.length)
-    path = findUnderMonthDirs(root, (name) => name.startsWith(stem) && name.toLowerCase().endsWith(ext) && (fileSize === undefined || safeSize(join(root, name)) === fileSize))
+    path = findUnderMonthDirs(
+      root,
+      (name) =>
+        name.startsWith(stem) &&
+        name.toLowerCase().endsWith(ext) &&
+        (fileSize === undefined || safeSize(join(root, name)) === fileSize),
+    )
   }
   if (!path) return fileName ? { kind: 'file', fileName, sizeBytes: fileSize } : undefined
   return { kind: 'file', path, fileName: fileName ?? basename(path), sizeBytes: safeSize(path) ?? fileSize }
@@ -426,30 +503,9 @@ export async function resolveMediaFor(ctx: MediaResolverContext, target: MediaTa
       return resolveVideo(ctx, target)
     case 'file':
       return resolveFile(ctx, target)
-    case 'sticker': {
-      const info = parseEmojiInfo(target.raw.content)
-      const url = info.cdnUrl
-      if (url && /^https?:\/\//i.test(url)) return { kind: 'sticker', path: url }
-      return undefined
-    }
+    case 'sticker':
+      return resolveSticker(ctx, target)
     default:
       return undefined
   }
-}
-
-/** Copy an already-plain media file into the cache (used when callers want a stable cached path). */
-export async function cacheCopy(ctx: MediaResolverContext, sessionId: string, messageId: string, src: string): Promise<string> {
-  const dst = mediaCachePath(ctx.cacheDir, sessionId, messageId, extname(src))
-  if (!existsSync(dst)) {
-    await mkdir(dirname(dst), { recursive: true })
-    await copyFile(src, dst)
-  }
-  return dst
-}
-
-/** Test hook: drop cached hardlink/voice shapes and dat indexes. */
-export function resetMediaResolverCaches(): void {
-  hardlinkTableCache.clear()
-  voiceShapeCache.clear()
-  datIndexCache.clear()
 }

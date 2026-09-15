@@ -3,15 +3,28 @@ import { MessageChannel } from 'node:worker_threads'
 import type { SubstrateEvent, SubstrateService, WxSession } from '@aiwc/protocol'
 import { serveSubstrate } from './server'
 import { createSubstrateClient } from './client'
-import { attachPort, isRpcRequest, isRpcResponse, unwrapPortMessage, type HostedService, type PortLike } from './protocol'
+import {
+  attachPort,
+  isRpcRequest,
+  isRpcResponse,
+  unwrapPortMessage,
+  type HostedService,
+  type PortLike,
+} from './protocol'
 import { SubstrateError } from '../shared/errors'
 
+interface FakePort extends PortLike {
+  listeners: Set<(ev: unknown) => void>
+  peer: FakePort | undefined
+  started: boolean
+}
+
 /** Two EventTarget-like endpoints wired together; messages are delivered asynchronously like real ports. */
-function fakePortPair(): [PortLike & { listeners: Set<(ev: unknown) => void> }, PortLike & { listeners: Set<(ev: unknown) => void> }] {
-  const make = () => {
-    const self = {
+function fakePortPair(): [FakePort, FakePort] {
+  const make = (): FakePort => {
+    const self: FakePort = {
       listeners: new Set<(ev: unknown) => void>(),
-      peer: undefined as (typeof self & PortLike) | undefined,
+      peer: undefined,
       started: false,
       postMessage(message: unknown) {
         const peer = self.peer
@@ -126,7 +139,7 @@ describe('host rpc', () => {
     await expect(client.stats({ metric: 'ranking' })).rejects.toMatchObject({ code: 'not_found', message: '没有数据' })
     await expect(client.sync()).rejects.toMatchObject({ code: 'rpc', message: 'boom' })
     // transcribeVoice / querySql are optional on the service → unsupported
-    await expect(client.querySql({ db: 'message', sql: 'SELECT 1' })).rejects.toMatchObject({ code: 'unsupported' })
+    await expect(client.querySql?.({ db: 'message', sql: 'SELECT 1' })).rejects.toMatchObject({ code: 'unsupported' })
 
     const received: SubstrateEvent[] = []
     const off = client.subscribe((e) => received.push(e))

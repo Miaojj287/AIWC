@@ -26,6 +26,12 @@
       "@aiwc/gateway/*": ["packages/gateway/src/*"],
       "@aiwc/memory": ["packages/memory/src/index.ts"],
       "@aiwc/memory/*": ["packages/memory/src/*"],
+      "@aiwc/i18n": ["packages/i18n/src/index.ts"],
+      "@aiwc/i18n/*": ["packages/i18n/src/*"],
+      "@aiwc/office": ["packages/office/src/index.ts"],
+      "@aiwc/office/*": ["packages/office/src/*"],
+      "@aiwc/shell": ["packages/shell/src/index.ts"],
+      "@aiwc/shell/*": ["packages/shell/src/*"],
       "@/*": ["src/*"]
     }
   }

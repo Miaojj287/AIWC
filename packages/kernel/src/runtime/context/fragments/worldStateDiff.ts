@@ -16,7 +16,10 @@ const SECTION_LABEL: Record<WorldStateSection, string> = {
  * not rendered here (that would duplicate the rules); only "rules removed" is worth a line. A diff that leaves
  * nothing to render produces an empty body, which fragmentToItem() turns into "no item".
  */
-export function worldStateDiffFragment(next: WorldStateSnapshot, changed: readonly WorldStateSection[]): ContextFragment {
+export function worldStateDiffFragment(
+  next: WorldStateSnapshot,
+  changed: readonly WorldStateSection[],
+): ContextFragment {
   return createFragment('world_state', '<world_state>', 3000, () => {
     const lines: string[] = []
     for (const key of changed) {

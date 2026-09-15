@@ -3,6 +3,7 @@
  * (CLAUDE.md §1: settings is a workspace Tab, opened from the rail avatar / ⌘,).
  */
 import { onCommand } from '@/app/commands'
+import { t } from '@/i18n'
 import { registerTab } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { SETTINGS_TAB, isSettingsPage, type SettingsTabState } from './model'
@@ -13,7 +14,7 @@ let registered = false
 export function register(): void {
   if (registered) return
   registered = true
-  registerTab({ kind: 'settings', icon: 'settings', component: SettingsTab })
+  registerTab({ kind: 'settings', icon: 'settings', component: SettingsTab, title: () => t('settings.nav.tabTitle') })
   onCommand('tab.openSettings', (payload) => openSettings(payload ?? {}))
 }
 
@@ -29,9 +30,3 @@ export function openSettings({ page, highlight }: { page?: string; highlight?: s
   if (existing) tabs.update(id, { state: { ...(existing.state ?? {}), ...nextState } })
   return id
 }
-
-export { SettingsTab } from './SettingsTab'
-export { ModelForm, type ModelFormProps } from './pages/ModelForm'
-export { CloseRequestDialog } from './CloseRequestDialog'
-export { SETTINGS_TAB, PAGE_META, NAV_GROUPS, SETTINGS_PAGES, isSettingsPage, type SettingsPage, type SettingsTabState } from './model'
-export { SETTINGS_ROWS, searchSettings, type SettingsRow, type SearchHit as SettingsSearchHit } from './searchIndex'

@@ -27,7 +27,9 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
   const todayKey = () => new Date(ctx.now()).toDateString()
   const withDerived = (r: AutoReplyRule): AutoReplyRule => ({
     ...r,
-    todayCount: records.filter((x) => x.ruleId === r.id && x.status === 'sent' && new Date(x.at).toDateString() === todayKey()).length,
+    todayCount: records.filter(
+      (x) => x.ruleId === r.id && x.status === 'sent' && new Date(x.at).toDateString() === todayKey(),
+    ).length,
     pausedReason: halted && r.enabled ? '发送通道已熔断，等待手动恢复' : r.enabled ? undefined : r.pausedReason,
   })
 
@@ -52,32 +54,64 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
   }
 
   function aiDraft(rule: AutoReplyRule, trigger: WxMessage): string {
-    const mine = (data.messagesBySession.get(rule.sessionId) ?? []).filter((m) => m.isSelf && m.kind === 'text' && m.text.length > 3)
+    const mine = (data.messagesBySession.get(rule.sessionId) ?? []).filter(
+      (m) => m.isSelf && m.kind === 'text' && m.text.length > 3,
+    )
     const base = mine.length ? ctx.rng.pick(mine).text : '我看到了，稍后回复你。'
-    return trigger.senderName && data.sessions.get(rule.sessionId)?.kind === 'group' ? `@${trigger.senderName} ${base}` : base
+    return trigger.senderName && data.sessions.get(rule.sessionId)?.kind === 'group'
+      ? `@${trigger.senderName} ${base}`
+      : base
   }
 
-  function send(draft: ReplyDraft, text: string) {
-    const rule = [...rules.values()].find((r) => r.id === draft.ruleId)
+  /** The audit record behind a draft: created pending with the draft, then settled by send / reject. */
+  function recordFor(draft: ReplyDraft): AutoReplyRecord {
+    const existing = draft.recordId ? records.find((r) => r.id === draft.recordId) : undefined
+    if (existing) return existing
     const trigger = data.messageById.get(draft.triggerMessageId)
-    const at = ctx.now()
     const record: AutoReplyRecord = {
       id: ctx.id('rec'),
       ruleId: draft.ruleId ?? '',
       sessionId: draft.source.chatId,
-      triggerMessage: { id: draft.triggerMessageId, text: draft.triggerText, senderName: trigger?.senderName, at: trigger?.createdAt ?? at },
-      replyText: text,
-      at,
-      status: 'sent',
-      recallableUntil: at + RECALL_WINDOW_MS,
+      triggerMessage: {
+        id: draft.triggerMessageId,
+        localId: draft.triggerLocalId ?? draft.triggerMessageId,
+        text: draft.triggerText,
+        senderName: trigger?.senderName,
+        at: trigger?.createdAt ?? ctx.now(),
+      },
+      replyText: draft.draft,
+      at: ctx.now(),
+      status: 'pending',
+      draftId: draft.id,
+      sendMode: draft.mode === 'auto' ? 'auto' : 'confirm',
     }
     records.unshift(record)
+    draft.recordId = record.id
+    return record
+  }
+
+  function send(draft: ReplyDraft, text: string) {
+    const rule = [...rules.values()].find((r) => r.id === draft.ruleId)
+    const at = ctx.now()
+    const record = recordFor(draft)
+    record.replyText = text
+    record.at = at
+    record.status = 'sent'
+    record.recallableUntil = at + RECALL_WINDOW_MS
     draft.state = 'sent'
     draft.draft = text
     emitDraft(draft)
-    ctx.emit('autoreply:record', record)
-    ctx.emit('gateway:event', { type: 'outbound', req: { to: draft.source, parts: [{ type: 'text', text }], reason: 'auto_reply' }, result: { ok: true, messageId: record.id, verified: true } })
-    if (rule) ctx.emit('app:toast', { kind: 'success', text: `已自动回复「${data.sessions.get(rule.sessionId)?.title ?? ''}」` })
+    ctx.emit('autoreply:record', { ...record })
+    ctx.emit('gateway:event', {
+      type: 'outbound',
+      req: { to: draft.source, parts: [{ type: 'text', text }], reason: 'auto_reply' },
+      result: { ok: true, messageId: record.id, verified: true },
+    })
+    if (rule)
+      ctx.emit('app:toast', {
+        kind: 'success',
+        text: `已自动回复「${data.sessions.get(rule.sessionId)?.title ?? ''}」`,
+      })
   }
 
   async function scheduleDraft(rule: AutoReplyRule): Promise<void> {
@@ -87,31 +121,66 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
     const trigger = latestTrigger(rule.sessionId)
     if (!trigger) return
     const session = data.sessions.get(rule.sessionId)
-    const text = current.source === 'fixed' ? fillTemplate(current.fixedText ?? '', current, trigger) : aiDraft(current, trigger)
-    const mode: ReplyDraft['mode'] = 'auto'
+    const text =
+      current.source === 'fixed' ? fillTemplate(current.fixedText ?? '', current, trigger) : aiDraft(current, trigger)
+    const mode: ReplyDraft['mode'] = current.sendMode === 'confirm' ? 'confirm' : 'auto'
     const now = ctx.now()
     const countdownMs = ctx.config().autoReply.countdownMs
+    for (const d of drafts.values())
+      if (d.ruleId === current.id && d.state === 'pending') {
+        d.state = 'expired'
+        d.error = '被同一会话的新草稿取代'
+        emitDraft(d)
+        const r = d.recordId ? records.find((x) => x.id === d.recordId) : undefined
+        if (r) {
+          r.status = 'rejected'
+          r.error = d.error
+          ctx.emit('autoreply:record', { ...r })
+        }
+      }
     const draft: ReplyDraft = {
       id: ctx.id('draft'),
       ruleId: current.id,
-      source: { channel: 'wechat-ui', peerId: trigger.senderId, chatId: rule.sessionId, chatType: session?.kind === 'group' ? 'group' : 'dm', displayName: session?.title },
+      source: {
+        channel: 'wechat-ui',
+        peerId: trigger.senderId,
+        chatId: rule.sessionId,
+        chatType: session?.kind === 'group' ? 'group' : 'dm',
+        displayName: session?.title,
+      },
       triggerMessageId: trigger.id,
+      triggerLocalId: trigger.id,
       triggerText: trigger.text || trigger.media?.transcript || `[${trigger.kind}]`,
       draft: text,
       suggestions: undefined,
       state: 'pending',
       createdAt: now,
-      expiresAt: now + 30 * 60_000,
       mode,
       countdownEndsAt: mode === 'auto' ? now + countdownMs : undefined,
     }
     drafts.set(draft.id, draft)
+    ctx.emit('autoreply:record', { ...recordFor(draft) })
     emitDraft(draft)
     ctx.emit('gateway:event', { type: 'autoreply.queued', draftId: draft.id })
+    if (mode === 'confirm')
+      ctx.emit('app:toast', {
+        id: `autoreply.confirm.${draft.source.chatId}`,
+        kind: 'info',
+        text: `「${session?.title ?? rule.sessionId}」的回复已写好，等你确认后发送`,
+        action: {
+          label: '去确认',
+          command: 'tab.openAutoReply',
+          payload: { sessionId: rule.sessionId, title: session?.title ?? rule.sessionId },
+        },
+      })
     if (mode === 'auto') {
       const ticks = 5
       for (let i = ticks; i > 0; i--) {
-        ctx.emit('gateway:event', { type: 'autoreply.countdown', draftId: draft.id, remainingMs: Math.round((countdownMs * i) / ticks) })
+        ctx.emit('gateway:event', {
+          type: 'autoreply.countdown',
+          draftId: draft.id,
+          remainingMs: Math.round((countdownMs * i) / ticks),
+        })
         await ctx.delay(countdownMs / ticks)
         if (draft.state !== 'pending' || draft.mode !== 'auto') return
       }
@@ -119,6 +188,10 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
         draft.state = 'failed'
         draft.error = '发送通道已熔断'
         emitDraft(draft)
+        const rec = recordFor(draft)
+        rec.status = 'failed'
+        rec.error = draft.error
+        ctx.emit('autoreply:record', { ...rec })
         return
       }
       send(draft, draft.draft)
@@ -152,7 +225,12 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       return r ? withDerived(r) : undefined
     },
     'autoreply:saveRule': (rule) => {
-      const saved: AutoReplyRule = { ...rule, id: rule.id || ctx.id('rule'), updatedAt: ctx.now() }
+      const saved: AutoReplyRule = {
+        ...rule,
+        sendMode: rule.sendMode === 'auto' ? 'auto' : 'confirm',
+        id: rule.id || ctx.id('rule'),
+        updatedAt: ctx.now(),
+      }
       const wasEnabled = rules.get(rule.sessionId)?.enabled ?? false
       rules.set(rule.sessionId, saved)
       ctx.emit('autoreply:rulesChanged', { sessionId: rule.sessionId })
@@ -181,7 +259,9 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       if (r) for (const d of drafts.values()) if (d.ruleId === r.id && d.state === 'pending') d.state = 'expired'
     },
     'autoreply:listRecords': ({ sessionId, status, limit = 50 }) =>
-      records.filter((r) => (!sessionId || r.sessionId === sessionId) && (!status || r.status === status)).slice(0, limit),
+      records
+        .filter((r) => (!sessionId || r.sessionId === sessionId) && (!status || r.status === status))
+        .slice(0, limit),
     'autoreply:recall': async ({ recordId }) => {
       const r = records.find((x) => x.id === recordId)
       if (!r) return { ok: false, error: '记录不存在' }
@@ -192,17 +272,18 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       ctx.emit('autoreply:record', r)
       return { ok: true }
     },
-    'autoreply:listDrafts': () => [...drafts.values()].filter((d) => d.state === 'pending').sort((a, b) => a.createdAt - b.createdAt),
+    'autoreply:listDrafts': () =>
+      [...drafts.values()].filter((d) => d.state === 'pending').sort((a, b) => a.createdAt - b.createdAt),
     'autoreply:resolveDraft': ({ draftId, decision, text }) => {
       const d = drafts.get(draftId)
       if (!d || d.state !== 'pending') return
       if (decision === 'reject') {
         d.state = 'rejected'
         emitDraft(d)
-        const trigger = data.messageById.get(d.triggerMessageId)
-        const rec: AutoReplyRecord = { id: ctx.id('rec'), ruleId: d.ruleId ?? '', sessionId: d.source.chatId, triggerMessage: { id: d.triggerMessageId, text: d.triggerText, senderName: trigger?.senderName, at: trigger?.createdAt ?? ctx.now() }, replyText: d.draft, at: ctx.now(), status: 'rejected' }
-        records.unshift(rec)
-        ctx.emit('autoreply:record', rec)
+        const rec = recordFor(d)
+        rec.status = 'rejected'
+        rec.error = d.mode === 'auto' ? '已取消' : undefined
+        ctx.emit('autoreply:record', { ...rec })
         return
       }
       if (halted) {
@@ -216,7 +297,9 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
     'autoreply:holdDraft': ({ draftId }) => {
       const d = drafts.get(draftId)
       if (!d || d.state !== 'pending') throw new Error('草稿已处理')
-      d.mode = 'confirm'; d.countdownEndsAt = undefined; emitDraft(d)
+      d.mode = 'confirm'
+      d.countdownEndsAt = undefined
+      emitDraft(d)
     },
     'autoreply:retryDraft': async ({ draftId }) => {
       const d = drafts.get(draftId)
@@ -226,11 +309,18 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       else {
         const rule = rules.get(d.source.chatId)
         if (!rule) throw new Error('规则不存在')
-        d.state = 'rejected'; emitDraft(d)
+        d.state = 'rejected'
+        emitDraft(d)
         await scheduleDraft(rule)
       }
     },
-    'autoreply:status': () => ({ halted: halted ? '发送通道已熔断' : undefined, connection: 'ready', demo: true, queued: 0, generating: [] }),
+    'autoreply:status': () => ({
+      halted: halted ? '发送通道已熔断' : undefined,
+      connection: 'ready',
+      demo: true,
+      queued: 0,
+      generating: [],
+    }),
     'autoreply:triggerNow': ({ sessionId }) => {
       const rule = rules.get(sessionId)
       if (!rule?.enabled) return { triggered: false, reason: '这个会话的自动回复没有开启' }
@@ -243,7 +333,8 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       ctx.emit('app:toast', { kind: 'success', text: '自动回复已恢复' })
     },
 
-    'gateway:status': () => [...adapters.entries()].map(([channel, a]) => ({ channel, state: a.state, detail: a.detail })),
+    'gateway:status': () =>
+      [...adapters.entries()].map(([channel, a]) => ({ channel, state: a.state, detail: a.detail })),
     'gateway:connect': ({ channel }) => {
       if (adapters.get(channel)?.state === 'connected') return
       void connect(channel)

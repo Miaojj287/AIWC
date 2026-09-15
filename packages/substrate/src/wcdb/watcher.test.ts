@@ -49,5 +49,7 @@ it('flushes during continuous writes instead of waiting for silence', () => {
     }
     expect(flush.mock.calls.length).toBeGreaterThanOrEqual(3)
     collector.cancel()
-  } finally { vi.useRealTimers() }
+  } finally {
+    vi.useRealTimers()
+  }
 })

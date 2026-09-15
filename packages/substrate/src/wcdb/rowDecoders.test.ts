@@ -55,9 +55,15 @@ describe('xml helpers', () => {
 })
 
 describe('stripSenderPrefix', () => {
-  it('removes wxid prefix but not urls', () => {
+  it('removes a group sender prefix but not urls', () => {
     expect(stripSenderPrefix('wxid_abc:\nhello')).toBe('hello')
+    expect(stripSenderPrefix('zhang-san_88:\nhello')).toBe('hello')
     expect(stripSenderPrefix('https://x.com')).toBe('https://x.com')
+  })
+  it('leaves direct-message text that only contains a colon untouched', () => {
+    expect(stripSenderPrefix('10:30 开会')).toBe('10:30 开会')
+    expect(stripSenderPrefix('Note: bring the keys')).toBe('Note: bring the keys')
+    expect(stripSenderPrefix('TODO:买菜')).toBe('TODO:买菜')
   })
 })
 
@@ -69,6 +75,16 @@ describe('binary content', () => {
   it('decodeMaybeCompressed leaves short strings alone', () => {
     expect(decodeMaybeCompressed('123456')).toBe('123456')
     expect(decodeMaybeCompressed('hello world')).toBe('hello world')
+  })
+  it('decodeMaybeCompressed never reinterprets text that only looks like hex or base64', () => {
+    expect(decodeMaybeCompressed('110101199003074514')).toBe('110101199003074514')
+    expect(decodeMaybeCompressed('3f786a1b2c3d4e5f60718293a4b5c6d7')).toBe('3f786a1b2c3d4e5f60718293a4b5c6d7')
+    expect(decodeMaybeCompressed('QWxpY2VCb2JDYXJvbA==')).toBe('QWxpY2VCb2JDYXJvbA==')
+  })
+  it('decodeMaybeCompressed still inflates a hex or base64 spelled zstd frame', () => {
+    const frame = zstdCompressSync(Buffer.from('压缩的正文 body'))
+    expect(decodeMaybeCompressed(frame.toString('hex'))).toBe('压缩的正文 body')
+    expect(decodeMaybeCompressed(frame.toString('base64'))).toBe('压缩的正文 body')
   })
   it('decodeMessageContent prefers compress_content', () => {
     const compressed = zstdCompressSync(Buffer.from('compressed body'))

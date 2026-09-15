@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "electron/main/index.ts",
+    "electron/preload/index.ts",
+    "electron/hosts/substrateHost.ts",
+    "dev/fixtures/*.tsx",
+    "dev/fixtures/generate.ts",
+    "scripts/*.{cjs,mjs}",
+    "src/kit/index.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "electron/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "dev/**/*.{ts,tsx}",
+    "scripts/**/*.{cjs,mjs}",
+    "src/**/*.css"
+  ],
+  "ignoreBinaries": ["osascript", "pbcopy", "tasklist"],
+  "ignoreDependencies": ["koffi"],
+  "ignoreExportsUsedInFile": true
+}

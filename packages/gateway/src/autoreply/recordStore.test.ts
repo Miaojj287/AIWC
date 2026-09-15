@@ -12,11 +12,17 @@ const rule = (sessionId: string, over: Partial<AutoReplyRule> = {}): AutoReplyRu
   source: 'ai',
   prompt: '简洁礼貌',
   historyCount: 30,
+  sendMode: 'auto',
   updatedAt: 1000,
   ...over,
 })
 
-const record = (id: string, sessionId: string, at: number, status: AutoReplyRecord['status'] = 'sent'): AutoReplyRecord => ({
+const record = (
+  id: string,
+  sessionId: string,
+  at: number,
+  status: AutoReplyRecord['status'] = 'sent',
+): AutoReplyRecord => ({
   id,
   ruleId: `r_${sessionId}`,
   sessionId,

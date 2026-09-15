@@ -5,7 +5,8 @@ import { Avatar, avatarInitial, avatarTileIndex, type AvatarMember, type AvatarS
 
 afterEach(cleanup)
 
-const members = (n: number): AvatarMember[] => Array.from({ length: n }, (_, i) => ({ id: `m-${i}`, name: `成员${i + 1}` }))
+const members = (n: number): AvatarMember[] =>
+  Array.from({ length: n }, (_, i) => ({ id: `m-${i}`, name: `成员${i + 1}` }))
 
 const mosaicCells = (el: HTMLElement) => Array.from(el.children) as HTMLElement[]
 
@@ -45,13 +46,22 @@ describe('Avatar (single)', () => {
   })
 
   it('sizes the initial with type-scale classes only (no text-[Npx])', () => {
-    const expected: Record<AvatarSize, string> = { 20: 'text-micro', 28: 'text-caption', 36: 'text-bubble', 44: 'text-title', 56: 'text-wizard', 64: 'text-wizard' }
+    const expected: Record<AvatarSize, string> = {
+      20: 'text-micro',
+      28: 'text-caption',
+      36: 'text-bubble',
+      44: 'text-title',
+      56: 'text-wizard',
+      64: 'text-wizard',
+    }
     for (const size of Object.keys(expected).map(Number) as AvatarSize[]) {
       const { unmount } = render(<Avatar id="wxid_a" name="alex" size={size} />)
       const cls = screen.getByRole('img', { name: 'alex' }).className
       expect(cls, `size ${size}`).toContain(expected[size])
       expect(cls).not.toMatch(/text-\[/)
-      expect(cls).not.toMatch(/\btext-white\b/)
+      // Tiles are fixed gradients: the initial stays white and must not follow the accent-derived text token,
+      // which turns black under a light accent (CLAUDE.md §10).
+      expect(cls).not.toMatch(/--fg-on-accent/)
       unmount()
     }
   })
@@ -59,7 +69,14 @@ describe('Avatar (single)', () => {
 
 describe('Avatar (group mosaic)', () => {
   it('lays out up to 4 members as 2×2 and 5–9 as 3×3, capped at nine cells', () => {
-    const cases: Array<[number, number, number]> = [[1, 1, 1], [3, 2, 3], [4, 2, 4], [5, 3, 5], [9, 3, 9], [14, 3, 9]]
+    const cases: Array<[number, number, number]> = [
+      [1, 1, 1],
+      [3, 2, 3],
+      [4, 2, 4],
+      [5, 3, 5],
+      [9, 3, 9],
+      [14, 3, 9],
+    ]
     for (const [count, cols, cells] of cases) {
       const { unmount } = render(<Avatar id="g" name="群" members={members(count)} />)
       const el = screen.getByRole('img', { name: '群' })
@@ -95,7 +112,6 @@ describe('Avatar (group mosaic)', () => {
     expect(first!.textContent).toBe('')
   })
 })
-
 
 it('prefers the database group image and retries an updated URL after failure', () => {
   const { container, rerender } = render(<Avatar id="g" name="群" src="/group.png" members={members(3)} />)

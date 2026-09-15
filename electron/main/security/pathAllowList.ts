@@ -6,6 +6,7 @@
 import { lstat, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { t } from '../i18n'
 
 export interface AllowList {
   roots(): string[]
@@ -81,24 +82,29 @@ export interface AllowListFs {
 }
 const nodeFs: AllowListFs = { realpath, lstat }
 
-export const PATH_DENIED_MESSAGE = '该路径不在允许访问的目录内'
-export const PATH_NOT_FOUND_MESSAGE = '文件不存在'
-export const PATH_SYMLINK_MESSAGE = '目标是符号链接，拒绝写入'
+/** Localized at throw time (the message reaches the UI). */
+export const pathDeniedMessage = (): string => t('main.files.pathDenied')
+export const pathNotFoundMessage = (): string => t('main.files.notFound')
+export const pathSymlinkMessage = (): string => t('main.files.symlinkRefused')
 
-const denied = (): Error => new Error(PATH_DENIED_MESSAGE)
+const denied = (): Error => new Error(pathDeniedMessage())
 const isEnoent = (e: unknown): boolean => (e as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
 
 /**
  * Resolve an existing path's symlinks and require BOTH the requested and the real path to be inside
  * the allow-list. Use for every read-style access (open, reveal, read, media).
  */
-export async function resolveAllowedExisting(allowList: Pick<AllowList, 'isAllowed'>, filePath: string, fs: AllowListFs = nodeFs): Promise<string> {
+export async function resolveAllowedExisting(
+  allowList: Pick<AllowList, 'isAllowed'>,
+  filePath: string,
+  fs: AllowListFs = nodeFs,
+): Promise<string> {
   if (!allowList.isAllowed(filePath)) throw denied()
   let real: string
   try {
     real = await fs.realpath(filePath)
   } catch (e) {
-    if (isEnoent(e)) throw new Error(PATH_NOT_FOUND_MESSAGE)
+    if (isEnoent(e)) throw new Error(pathNotFoundMessage())
     throw e
   }
   if (!allowList.isAllowed(real)) throw denied()
@@ -110,11 +116,15 @@ export async function resolveAllowedExisting(allowList: Pick<AllowList, 'isAllow
  * wherever the link points, even inside the allow-list) or when the real path of its deepest existing
  * ancestor leaves the allow-list. Returns the path to actually write (real ancestor + remainder).
  */
-export async function resolveAllowedWriteTarget(allowList: Pick<AllowList, 'isAllowed'>, filePath: string, fs: AllowListFs = nodeFs): Promise<string> {
+export async function resolveAllowedWriteTarget(
+  allowList: Pick<AllowList, 'isAllowed'>,
+  filePath: string,
+  fs: AllowListFs = nodeFs,
+): Promise<string> {
   if (!allowList.isAllowed(filePath)) throw denied()
   const abs = normalise(filePath)
   try {
-    if ((await fs.lstat(abs)).isSymbolicLink()) throw new Error(PATH_SYMLINK_MESSAGE)
+    if ((await fs.lstat(abs)).isSymbolicLink()) throw new Error(pathSymlinkMessage())
     const real = await fs.realpath(abs)
     if (!allowList.isAllowed(real)) throw denied()
     return real

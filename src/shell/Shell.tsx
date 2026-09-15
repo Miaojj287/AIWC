@@ -6,6 +6,8 @@ import { detectMac, shortcutLabel } from '@/app/shortcuts'
 import { IconButton, Tooltip } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { Workspace } from '@/workspace/Workspace'
+import { useLanguage, useT } from '@/i18n'
+import { tabTitle } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { AgentColumn } from './AgentColumn'
 import { AGENT_PANEL_WIDTH, LIST_HANDLE_WIDTH, OBJECT_LIST_WIDTH, useColumnLayout } from './columnLayout'
@@ -27,38 +29,56 @@ export interface ShellProps {
  * to a 40px strip). Only the Workspace absorbs width; only the body absorbs height.
  */
 export function Shell({ platform, runtime }: ShellProps) {
+  const t = useT()
   const mac = detectMac(platform)
   const ui = useConfig((c) => c.ui)
   const layout = useColumnLayout(ui)
-  const activeTitle = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeId)?.title)
+  const activeTab = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeId))
+  useLanguage() // re-render the window title on a language switch
+  const activeTitle = activeTab ? tabTitle(activeTab) : undefined
 
+  const { toggleList, toggleAgent, setListCollapsed, setAgentCollapsed, listCollapsed } = layout
   useEffect(() => {
     const offs = [
-      onCommand('objectList.toggleCollapsed', layout.toggleList),
-      onCommand('agent.toggleCollapsed', layout.toggleAgent),
+      onCommand('objectList.toggleCollapsed', toggleList),
+      onCommand('agent.toggleCollapsed', toggleAgent),
+      onCommand('agent.expand', () => setAgentCollapsed(false)),
       // ⌘K and a rail click both need the list visible
       onCommand('search.sessions', () => {
-        if (layout.listCollapsed) layout.setListCollapsed(false)
+        if (listCollapsed) setListCollapsed(false)
         useShellStore.getState().requestSearchFocus()
       }),
       onCommand('rail.select', () => {
-        if (layout.listCollapsed) layout.setListCollapsed(false)
+        if (listCollapsed) setListCollapsed(false)
       }),
     ]
     return () => offs.forEach((off) => off())
-  }, [layout.toggleList, layout.toggleAgent, layout.setListCollapsed, layout.listCollapsed])
+  }, [toggleList, toggleAgent, setListCollapsed, setAgentCollapsed, listCollapsed])
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-shell text-fg" data-platform={platform} data-runtime={runtime} data-agent-collapsed={layout.agentCollapsed}>
+    <div
+      className="shell-root relative flex h-full w-full flex-col overflow-hidden bg-shell text-fg"
+      data-platform={platform}
+      data-runtime={runtime}
+      data-agent-collapsed={layout.agentCollapsed}
+    >
       <WindowChrome title={activeTitle} showControls={runtime === 'electron' && platform === 'darwin'} />
       <div className="flex min-h-0 flex-1 items-stretch">
         <IconRail mac={mac} />
         {layout.listCollapsed ? (
-          <div className="flex h-full shrink-0 border-r border-line-6 bg-panel" style={{ width: LIST_HANDLE_WIDTH }} data-testid="list-handle">
-            <Tooltip content="展开列表" kbd={shortcutLabel('objectList.toggleCollapsed', mac)} side="right">
+          <div
+            className="shell-list flex h-full shrink-0 border-r border-line-6 bg-panel"
+            style={{ width: LIST_HANDLE_WIDTH }}
+            data-testid="list-handle"
+          >
+            <Tooltip
+              content={t('shell.layout.expandList')}
+              kbd={shortcutLabel('objectList.toggleCollapsed', mac)}
+              side="right"
+            >
               <IconButton
                 icon={PanelLeftOpen}
-                label="展开列表"
+                label={t('shell.layout.expandList')}
                 size="xs"
                 iconSize={11}
                 onClick={() => layout.setListCollapsed(false)}
@@ -72,7 +92,7 @@ export function Shell({ platform, runtime }: ShellProps) {
               <ObjectList mac={mac} />
             </div>
             <Resizer
-              label="调整列表宽度"
+              label={t('shell.layout.resizeList')}
               value={layout.listWidth}
               min={OBJECT_LIST_WIDTH.min}
               max={OBJECT_LIST_WIDTH.max}
@@ -85,7 +105,7 @@ export function Shell({ platform, runtime }: ShellProps) {
         <Workspace />
         {layout.agentCollapsed ? null : (
           <Resizer
-            label="调整 Agent 面板宽度"
+            label={t('shell.layout.resizeAgent')}
             value={layout.agentWidth}
             min={AGENT_PANEL_WIDTH.min}
             max={AGENT_PANEL_WIDTH.max}
@@ -94,7 +114,12 @@ export function Shell({ platform, runtime }: ShellProps) {
             onReset={layout.resetAgent}
           />
         )}
-        <AgentColumn collapsed={layout.agentCollapsed} width={layout.agentWidth} onToggleCollapsed={layout.toggleAgent} mac={mac} />
+        <AgentColumn
+          collapsed={layout.agentCollapsed}
+          width={layout.agentWidth}
+          onToggleCollapsed={layout.toggleAgent}
+          mac={mac}
+        />
       </div>
     </div>
   )

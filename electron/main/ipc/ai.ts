@@ -1,22 +1,23 @@
 import { discoverModels, listRemoteModels, testModel } from '@aiwc/kernel'
 import type { AppContext } from '../contracts'
 import type { Handle, HostBridge } from './register'
+import { t } from '../i18n'
 
 export function registerAiIpc(ctx: AppContext, _host: HostBridge, handle: Handle): void {
   const log = ctx.logger.child('ipc:ai')
 
   handle('ai:testModel', ({ provider, modelId, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? ctx.secrets.reveal(provider.apiKeyRef) ?? undefined : undefined)
+    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
     return testModel({ provider, modelId, apiKey: key })
   })
 
   handle('ai:discoverModels', ({ provider, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? ctx.secrets.reveal(provider.apiKeyRef) ?? undefined : undefined)
+    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
     return discoverModels({ provider, apiKey: key })
   })
 
   handle('ai:listRemoteModels', ({ provider, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? ctx.secrets.reveal(provider.apiKeyRef) ?? undefined : undefined)
+    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
     return listRemoteModels({ provider, apiKey: key })
   })
 
@@ -28,7 +29,7 @@ export function registerAiIpc(ctx: AppContext, _host: HostBridge, handle: Handle
   })
   handle('ai:downloadSttModel', ({ id }) => {
     log.warn('downloadSttModel ignored: local STT runtime not available', { id })
-    throw new Error('本地语音模型下载暂未提供，请先使用在线转写')
+    throw new Error(t('main.ai.localSttUnavailable'))
   })
   handle('ai:cancelSttDownload', ({ id }) => {
     log.debug('cancelSttDownload no-op', { id })

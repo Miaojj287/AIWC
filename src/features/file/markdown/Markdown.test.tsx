@@ -43,6 +43,7 @@ describe('<Markdown> typography stays on the token scale', () => {
     expect(container.firstElementChild?.className).toBe(MARKDOWN_CLASS.root)
     expect(container.querySelector('h1')?.className).toBe(`${MARKDOWN_CLASS.heading} ${MARKDOWN_HEADING_CLASS[1]}`)
     expect(container.querySelector('code')?.className).toBe(MARKDOWN_CLASS.inlineCode)
-    for (const token of MARKDOWN_CLASS.quote.split(' ')) expect(container.querySelector('blockquote')?.className).toContain(token)
+    for (const token of MARKDOWN_CLASS.quote.split(' '))
+      expect(container.querySelector('blockquote')?.className).toContain(token)
   })
 })

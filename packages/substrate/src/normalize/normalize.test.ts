@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { classifyKind, sessionKindFromUsername, splitLocalType, isSystemUsername, contactKindFromUsername } from './kinds'
+import {
+  classifyKind,
+  sessionKindFromUsername,
+  splitLocalType,
+  isGroupUsername,
+  isSystemUsername,
+  contactKindFromUsername,
+} from './kinds'
 import { extractTextFromXml, parseQuote, stripSenderPrefix, extractXmlAttribute, decodeHtmlEntities } from './xml'
 import { previewText } from './preview'
 
@@ -15,6 +22,11 @@ describe('sessionKindFromUsername', () => {
     expect(sessionKindFromUsername('someone@openim')).toBe('dm')
     expect(isSystemUsername('')).toBe(true)
     expect(contactKindFromUsername('wxid_x', { isFriend: false })).toBe('stranger')
+  })
+  it('anchors the group suffix and knows the folded-groups placeholder', () => {
+    expect(isGroupUsername('12345@im.chatroom')).toBe(true)
+    expect(isGroupUsername('12345@chatroom.example')).toBe(false)
+    expect(isSystemUsername('@placeholder_foldgroup')).toBe(true)
   })
 })
 
@@ -49,7 +61,9 @@ describe('xml lite', () => {
     expect(parseQuote('plain text')).toBeUndefined()
   })
   it('extracts title/desc/url and app type', () => {
-    const r = extractTextFromXml('<msg><appmsg><title>产品市场周报 &amp; 复盘</title><des>第 12 周</des><url>https://example.com/a?b=1&amp;c=2</url><type>5</type></appmsg></msg>')
+    const r = extractTextFromXml(
+      '<msg><appmsg><title>产品市场周报 &amp; 复盘</title><des>第 12 周</des><url>https://example.com/a?b=1&amp;c=2</url><type>5</type></appmsg></msg>',
+    )
     expect(r.title).toBe('产品市场周报 & 复盘')
     expect(r.desc).toBe('第 12 周')
     expect(r.url).toBe('https://example.com/a?b=1&c=2')

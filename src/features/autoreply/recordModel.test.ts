@@ -26,7 +26,11 @@ describe('recordModel', () => {
   it('computes Monday-based weeks and filters by range / status', () => {
     expect(new Date(startOfWeek(now)).getDay()).toBe(1)
     expect(new Date(startOfWeek(new Date(2026, 8, 13, 23).getTime())).getDate()).toBe(7) // Sunday → that week's Monday (7 Sep)
-    const list = [rec('today', now - 3600_000), rec('mon', new Date(2026, 8, 7, 9).getTime()), rec('last', new Date(2026, 8, 5, 9).getTime(), { status: 'failed' })]
+    const list = [
+      rec('today', now - 3600_000),
+      rec('mon', new Date(2026, 8, 7, 9).getTime()),
+      rec('last', new Date(2026, 8, 5, 9).getTime(), { status: 'failed' }),
+    ]
     expect(filterRecords(list, 'today', now).map((r) => r.id)).toEqual(['today'])
     expect(filterRecords(list, 'week', now).map((r) => r.id)).toEqual(['today', 'mon'])
     expect(filterRecords(list, 'all', now)).toHaveLength(3)
@@ -44,6 +48,10 @@ describe('recordModel', () => {
   it('summarises triggers and counts statuses', () => {
     expect(triggerSummary(rec('a', 1))).toBe('王伟：报价单能再发一份吗')
     expect(triggerSummary(rec('a', 1, { triggerMessage: { id: 'x', text: '', at: 1 } }))).toBe('（非文本消息）')
-    expect(countByStatus([rec('a', 1), rec('b', 2, { status: 'pending' })])).toMatchObject({ sent: 1, pending: 1, failed: 0 })
+    expect(countByStatus([rec('a', 1), rec('b', 2, { status: 'pending' })])).toMatchObject({
+      sent: 1,
+      pending: 1,
+      failed: 0,
+    })
   })
 })

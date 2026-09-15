@@ -36,7 +36,9 @@ export interface RenderedFragment {
  */
 export function renderFragment(fragment: ContextFragment): RenderedFragment {
   if (fragment.tokenCap > FRAGMENT_TOKEN_CAP_HARD) {
-    throw new Error(`fragment ${fragment.kind}: tokenCap ${fragment.tokenCap} exceeds hard cap ${FRAGMENT_TOKEN_CAP_HARD}`)
+    throw new Error(
+      `fragment ${fragment.kind}: tokenCap ${fragment.tokenCap} exceeds hard cap ${FRAGMENT_TOKEN_CAP_HARD}`,
+    )
   }
   const body = fragment.render()
   const withMarker = body.startsWith(fragment.marker) ? body : `${fragment.marker}\n${body}`
@@ -46,7 +48,11 @@ export function renderFragment(fragment: ContextFragment): RenderedFragment {
   return { kind: fragment.kind, marker: fragment.marker, text, tokenEstimate: estimateTokens(text), truncated }
 }
 
-export function fragmentToItem(fragment: ContextFragment, turnId: TurnId | null, at: number): ContextFragmentItem | undefined {
+export function fragmentToItem(
+  fragment: ContextFragment,
+  turnId: TurnId | null,
+  at: number,
+): ContextFragmentItem | undefined {
   const r = renderFragment(fragment)
   const bodyOnly = r.text.slice(r.marker.length).trim()
   if (!bodyOnly) return undefined

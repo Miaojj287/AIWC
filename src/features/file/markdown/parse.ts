@@ -60,7 +60,11 @@ function parseBlocks(lines: string[]): Block[] {
     }
     const heading = HEADING_RE.exec(line)
     if (heading) {
-      blocks.push({ t: 'heading', level: Math.min(6, heading[1]?.length ?? 1) as Block extends { level: infer L } ? L : never, c: parseInline(heading[2] ?? '') })
+      blocks.push({
+        t: 'heading',
+        level: Math.min(6, heading[1]?.length ?? 1) as Block extends { level: infer L } ? L : never,
+        c: parseInline(heading[2] ?? ''),
+      })
       i++
       continue
     }
@@ -108,7 +112,8 @@ function parseBlocks(lines: string[]): Block[] {
     i++
     while (i < lines.length) {
       const l = lines[i] ?? ''
-      if (isBlank(l) || FENCE_RE.test(l) || HEADING_RE.test(l) || HR_RE.test(l) || QUOTE_RE.test(l) || LIST_RE.test(l)) break
+      if (isBlank(l) || FENCE_RE.test(l) || HEADING_RE.test(l) || HR_RE.test(l) || QUOTE_RE.test(l) || LIST_RE.test(l))
+        break
       para.push(l)
       i++
     }
@@ -232,7 +237,11 @@ export function parseInline(src: string): Inline[] {
       const m = LINK_RE.exec(src.slice(i))
       if (m) {
         flush()
-        out.push({ t: 'link', href: m[2] ?? '', c: ch === '!' ? [{ t: 'text', v: m[1] ?? '' }] : parseInline(m[1] ?? '') })
+        out.push({
+          t: 'link',
+          href: m[2] ?? '',
+          c: ch === '!' ? [{ t: 'text', v: m[1] ?? '' }] : parseInline(m[1] ?? ''),
+        })
         i += m[0].length
         continue
       }

@@ -5,6 +5,7 @@
  * DemoSourceReader (packages/substrate/src/demo).
  */
 import type { WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
+import type { GuardedSql } from './shared/sqlGuard'
 
 export interface SourceOpenOptions {
   dbRoot: string
@@ -36,6 +37,12 @@ export interface SourceReader {
   resolveMedia(message: WxMessage): Promise<WxMedia | undefined>
   /** Change notifications from the underlying store (WCDB file mtime / WAL watch). */
   watch(listener: (change: { sessionIds?: string[] }) => void): () => void
-  /** Optional raw SQL for the audited query_sql tool. */
-  querySql?(db: 'message' | 'contact' | 'session', sql: string, limit: number): Promise<{ columns: string[]; rows: unknown[][] }>
+  /**
+   * Optional raw SQL for the audited query_sql tool. The facade runs guardSelectSql once; the branded
+   * statement already carries the row cap, so sources execute it as is.
+   */
+  querySql?(
+    db: 'message' | 'contact' | 'session',
+    statement: GuardedSql,
+  ): Promise<{ columns: string[]; rows: unknown[][] }>
 }

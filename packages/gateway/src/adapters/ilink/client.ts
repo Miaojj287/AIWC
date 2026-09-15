@@ -12,7 +12,9 @@ import {
   ILINK_CHANNEL_VERSION,
   MessageItemType,
   UploadMediaType,
+  IlinkApiError,
   buildClientVersion,
+  retOfBody,
   type IlinkConfigResp,
   type IlinkMessageItem,
   type IlinkQrStatusResp,
@@ -21,7 +23,15 @@ import {
   type IlinkUpdates,
   type IlinkUploadUrlResp,
 } from './protocol'
-import { MEDIA_LIMITS, aesEcbPaddedSize, buildCdnUploadUrl, prepareUpload, uploadEncryptedMedia, type FetchLike, type UploadedMedia } from './media'
+import {
+  MEDIA_LIMITS,
+  aesEcbPaddedSize,
+  buildCdnUploadUrl,
+  prepareUpload,
+  uploadEncryptedMedia,
+  type FetchLike,
+  type UploadedMedia,
+} from './media'
 
 export interface IlinkClientOptions {
   fetch?: FetchLike
@@ -48,12 +58,38 @@ export interface IlinkClient {
   getConfig(session: IlinkSession, userId: string, contextToken?: string): Promise<IlinkConfigResp | null>
   sendTyping(session: IlinkSession, userId: string, ticket: string, status: 1 | 2): Promise<void>
   sendText(session: IlinkSession, toUserId: string, text: string, contextToken?: string): Promise<SendMessageResult>
-  sendItems(session: IlinkSession, toUserId: string, items: IlinkMessageItem[], contextToken?: string): Promise<SendMessageResult>
-  sendImage(session: IlinkSession, toUserId: string, filePath: string, contextToken?: string): Promise<SendMessageResult>
+  sendItems(
+    session: IlinkSession,
+    toUserId: string,
+    items: IlinkMessageItem[],
+    contextToken?: string,
+  ): Promise<SendMessageResult>
+  sendImage(
+    session: IlinkSession,
+    toUserId: string,
+    filePath: string,
+    contextToken?: string,
+  ): Promise<SendMessageResult>
   sendFile(session: IlinkSession, toUserId: string, filePath: string, contextToken?: string): Promise<SendMessageResult>
-  sendVideo(session: IlinkSession, toUserId: string, filePath: string, contextToken?: string): Promise<SendMessageResult>
-  sendVoice(session: IlinkSession, toUserId: string, filePath: string, opts: { playtimeMs: number; sampleRate?: number; text?: string; contextToken?: string }): Promise<SendMessageResult>
-  uploadMedia(session: IlinkSession, toUserId: string, filePath: string, mediaType: number, maxBytes: number): Promise<UploadedMedia>
+  sendVideo(
+    session: IlinkSession,
+    toUserId: string,
+    filePath: string,
+    contextToken?: string,
+  ): Promise<SendMessageResult>
+  sendVoice(
+    session: IlinkSession,
+    toUserId: string,
+    filePath: string,
+    opts: { playtimeMs: number; sampleRate?: number; text?: string; contextToken?: string },
+  ): Promise<SendMessageResult>
+  uploadMedia(
+    session: IlinkSession,
+    toUserId: string,
+    filePath: string,
+    mediaType: number,
+    maxBytes: number,
+  ): Promise<UploadedMedia>
 }
 
 const CLIENT_VERSION_HEADER = String(buildClientVersion(ILINK_CHANNEL_VERSION))
@@ -85,7 +121,12 @@ export function buildPostHeaders(token: string | undefined, bytes: (n: number) =
 }
 
 /** Exact wire shape of a sendmessage body — kept as a pure function so tests can pin it. */
-export function buildSendMessageBody(toUserId: string, items: IlinkMessageItem[], clientId: string, contextToken?: string): Record<string, unknown> {
+export function buildSendMessageBody(
+  toUserId: string,
+  items: IlinkMessageItem[],
+  clientId: string,
+  contextToken?: string,
+): Record<string, unknown> {
   return {
     msg: {
       from_user_id: '',
@@ -99,8 +140,16 @@ export function buildSendMessageBody(toUserId: string, items: IlinkMessageItem[]
   }
 }
 
-export function toCdnMedia(uploaded: UploadedMedia): { encrypt_query_param: string; aes_key: string; encrypt_type: number } {
-  return { encrypt_query_param: uploaded.encryptedQueryParam, aes_key: Buffer.from(uploaded.aeskey).toString('base64'), encrypt_type: 1 }
+export function toCdnMedia(uploaded: UploadedMedia): {
+  encrypt_query_param: string
+  aes_key: string
+  encrypt_type: number
+} {
+  return {
+    encrypt_query_param: uploaded.encryptedQueryParam,
+    aes_key: Buffer.from(uploaded.aeskey).toString('base64'),
+    encrypt_type: 1,
+  }
 }
 
 export function createIlinkClient(opts: IlinkClientOptions = {}): IlinkClient {
@@ -112,12 +161,19 @@ export function createIlinkClient(opts: IlinkClientOptions = {}): IlinkClient {
   async function apiGet<T>(path: string): Promise<T> {
     const res = await fetchImpl(`${loginBase}/${path}`, { headers: commonHeaders() })
     const text = await res.text()
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`)
+    if (!res.ok) throw new IlinkApiError(`HTTP ${res.status}: ${text}`, res.status, retOfBody(text))
     return JSON.parse(text) as T
   }
 
   /** POST with base_info; resolves null on timeout/abort (normal for long polls). */
-  async function apiPost<T>(baseUrl: string, endpoint: string, body: Record<string, unknown>, token?: string, timeoutMs = defaultTimeout, signal?: AbortSignal): Promise<T | null> {
+  async function apiPost<T>(
+    baseUrl: string,
+    endpoint: string,
+    body: Record<string, unknown>,
+    token?: string,
+    timeoutMs = defaultTimeout,
+    signal?: AbortSignal,
+  ): Promise<T | null> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     const onAbort = (): void => controller.abort()
@@ -131,7 +187,7 @@ export function createIlinkClient(opts: IlinkClientOptions = {}): IlinkClient {
         signal: controller.signal,
       })
       const text = await res.text()
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`)
+      if (!res.ok) throw new IlinkApiError(`HTTP ${res.status}: ${text}`, res.status, retOfBody(text))
       return text ? (JSON.parse(text) as T) : ({} as T)
     } catch (err) {
       if ((err as Error | undefined)?.name === 'AbortError') return null
@@ -142,14 +198,33 @@ export function createIlinkClient(opts: IlinkClientOptions = {}): IlinkClient {
     }
   }
 
-  async function sendItems(session: IlinkSession, toUserId: string, items: IlinkMessageItem[], contextToken?: string): Promise<SendMessageResult> {
+  async function sendItems(
+    session: IlinkSession,
+    toUserId: string,
+    items: IlinkMessageItem[],
+    contextToken?: string,
+  ): Promise<SendMessageResult> {
     const clientId = `aiwc-${random.uuid()}`
-    const resp = await apiPost<{ ret?: number; errmsg?: string }>(session.baseUrl, 'ilink/bot/sendmessage', buildSendMessageBody(toUserId, items, clientId, contextToken), session.token)
-    if (resp && resp.ret !== undefined && resp.ret !== 0) throw new Error(`sendmessage ret=${resp.ret} ${resp.errmsg ?? ''}`.trim())
+    const resp = await apiPost<{ ret?: number; errmsg?: string }>(
+      session.baseUrl,
+      'ilink/bot/sendmessage',
+      buildSendMessageBody(toUserId, items, clientId, contextToken),
+      session.token,
+    )
+    // apiPost answers null on timeout (normal for long polls). For a send that means "unknown", never "sent".
+    if (!resp) throw new IlinkApiError('sendmessage timed out; the message may not have been delivered')
+    if (resp.ret !== undefined && resp.ret !== 0)
+      throw new IlinkApiError(`sendmessage ret=${resp.ret} ${resp.errmsg ?? ''}`.trim(), undefined, resp.ret)
     return { clientId, ret: resp?.ret, errmsg: resp?.errmsg }
   }
 
-  async function uploadMedia(session: IlinkSession, toUserId: string, filePath: string, mediaType: number, maxBytes: number): Promise<UploadedMedia> {
+  async function uploadMedia(
+    session: IlinkSession,
+    toUserId: string,
+    filePath: string,
+    mediaType: number,
+    maxBytes: number,
+  ): Promise<UploadedMedia> {
     const prepared = await prepareUpload(filePath, maxBytes, () => random.bytes(16))
     const resp = await apiPost<IlinkUploadUrlResp>(
       session.baseUrl,
@@ -183,33 +258,87 @@ export function createIlinkClient(opts: IlinkClientOptions = {}): IlinkClient {
 
   return {
     async fetchQrcode() {
-      const resp = await apiGet<{ qrcode: string; qrcode_img_content: string }>(`ilink/bot/get_bot_qrcode?bot_type=${ILINK_BOT_TYPE}`)
+      const resp = await apiGet<{ qrcode: string; qrcode_img_content: string }>(
+        `ilink/bot/get_bot_qrcode?bot_type=${ILINK_BOT_TYPE}`,
+      )
       return { qrcode: resp.qrcode, qrcodeContent: resp.qrcode_img_content }
     },
-    fetchQrcodeStatus: (qrcode) => apiGet<IlinkQrStatusResp>(`ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`),
+    fetchQrcodeStatus: (qrcode) =>
+      apiGet<IlinkQrStatusResp>(`ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`),
     notifyStart: (session) => apiPost(session.baseUrl, 'ilink/bot/msg/notifystart', {}, session.token, 10_000),
     notifyStop: (session) => apiPost(session.baseUrl, 'ilink/bot/msg/notifystop', {}, session.token, 10_000),
     async getUpdates(session, buf, signal) {
-      const resp = await apiPost<IlinkUpdates>(session.baseUrl, 'ilink/bot/getupdates', { get_updates_buf: buf ?? '' }, session.token, 38_000, signal)
+      const resp = await apiPost<IlinkUpdates>(
+        session.baseUrl,
+        'ilink/bot/getupdates',
+        { get_updates_buf: buf ?? '' },
+        session.token,
+        38_000,
+        signal,
+      )
       return resp ?? { ret: 0, msgs: [], get_updates_buf: buf }
     },
-    getConfig: (session, userId, contextToken) => apiPost<IlinkConfigResp>(session.baseUrl, 'ilink/bot/getconfig', { ilink_user_id: userId, context_token: contextToken }, session.token, 10_000),
+    getConfig: (session, userId, contextToken) =>
+      apiPost<IlinkConfigResp>(
+        session.baseUrl,
+        'ilink/bot/getconfig',
+        { ilink_user_id: userId, context_token: contextToken },
+        session.token,
+        10_000,
+      ),
     async sendTyping(session, userId, ticket, status) {
-      await apiPost(session.baseUrl, 'ilink/bot/sendtyping', { ilink_user_id: userId, typing_ticket: ticket, status }, session.token, 10_000)
+      await apiPost(
+        session.baseUrl,
+        'ilink/bot/sendtyping',
+        { ilink_user_id: userId, typing_ticket: ticket, status },
+        session.token,
+        10_000,
+      )
     },
-    sendText: (session, toUserId, text, contextToken) => sendItems(session, toUserId, [{ type: MessageItemType.TEXT, text_item: { text } }], contextToken),
+    sendText: (session, toUserId, text, contextToken) =>
+      sendItems(session, toUserId, [{ type: MessageItemType.TEXT, text_item: { text } }], contextToken),
     sendItems,
     async sendImage(session, toUserId, filePath, contextToken) {
       const uploaded = await uploadMedia(session, toUserId, filePath, UploadMediaType.IMAGE, MEDIA_LIMITS.image)
-      return sendItems(session, toUserId, [{ type: MessageItemType.IMAGE, image_item: { media: toCdnMedia(uploaded), mid_size: uploaded.fileSizeCiphertext } }], contextToken)
+      return sendItems(
+        session,
+        toUserId,
+        [
+          {
+            type: MessageItemType.IMAGE,
+            image_item: { media: toCdnMedia(uploaded), mid_size: uploaded.fileSizeCiphertext },
+          },
+        ],
+        contextToken,
+      )
     },
     async sendFile(session, toUserId, filePath, contextToken) {
       const uploaded = await uploadMedia(session, toUserId, filePath, UploadMediaType.FILE, MEDIA_LIMITS.file)
-      return sendItems(session, toUserId, [{ type: MessageItemType.FILE, file_item: { media: toCdnMedia(uploaded), file_name: basename(filePath), len: String(uploaded.fileSize) } }], contextToken)
+      return sendItems(
+        session,
+        toUserId,
+        [
+          {
+            type: MessageItemType.FILE,
+            file_item: { media: toCdnMedia(uploaded), file_name: basename(filePath), len: String(uploaded.fileSize) },
+          },
+        ],
+        contextToken,
+      )
     },
     async sendVideo(session, toUserId, filePath, contextToken) {
       const uploaded = await uploadMedia(session, toUserId, filePath, UploadMediaType.VIDEO, MEDIA_LIMITS.video)
-      return sendItems(session, toUserId, [{ type: MessageItemType.VIDEO, video_item: { media: toCdnMedia(uploaded), video_size: uploaded.fileSizeCiphertext } }], contextToken)
+      return sendItems(
+        session,
+        toUserId,
+        [
+          {
+            type: MessageItemType.VIDEO,
+            video_item: { media: toCdnMedia(uploaded), video_size: uploaded.fileSizeCiphertext },
+          },
+        ],
+        contextToken,
+      )
     },
     async sendVoice(session, toUserId, filePath, o) {
       const uploaded = await uploadMedia(session, toUserId, filePath, UploadMediaType.VOICE, MEDIA_LIMITS.voice)

@@ -4,7 +4,15 @@
  * so none of these may leak another conversation or the owner's contact graph.
  */
 import { describe, expect, it } from 'vitest'
-import { BOT_NO_ORIGIN_MESSAGE, BOT_TOOL_REFUSED_MESSAGE, botOriginChatId, isBotContext, refuseForBot, scopeBotSession, scopeBotSessions } from './botScope'
+import {
+  BOT_NO_ORIGIN_MESSAGE,
+  BOT_TOOL_REFUSED_MESSAGE,
+  botOriginChatId,
+  isBotContext,
+  refuseForBot,
+  scopeBotSession,
+  scopeBotSessions,
+} from './botScope'
 import { chatStats } from './chatStats'
 import { getContext } from './getContext'
 import { getTimeline } from './getTimeline'
@@ -19,7 +27,12 @@ import { T0, sampleWorld } from './testing/fakeSubstrate'
 const DM = 'user_a'
 const GROUP = 'grp_1@chatroom'
 const bot = botCtxOverrides
-const anchorIn = (sessionId: string, messageId: string, seq: number) => ({ sessionId, messageId, seq, createdAt: T0 + seq * 60_000 })
+const anchorIn = (sessionId: string, messageId: string, seq: number) => ({
+  sessionId,
+  messageId,
+  seq,
+  createdAt: T0 + seq * 60_000,
+})
 
 describe('botScope helpers', () => {
   it('passes non-bot profiles through untouched', () => {
@@ -75,7 +88,10 @@ describe('wechat-bot: search_messages / semantic_search', () => {
     const res = await runTool(searchMessages, { query: '火锅' }, sub, bot(DM))
     expect(res.isError).toBeUndefined()
     const out = body(res)
-    expect(sub.calls[0]).toEqual({ method: 'search', args: [{ query: '火锅', sessionIds: [DM], limit: 10, mode: 'keyword' }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'search',
+      args: [{ query: '火锅', sessionIds: [DM], limit: 20, mode: 'keyword', match: 'relaxed' }],
+    })
     expect(out.hits).toHaveLength(2)
     expect(out.hits.every((h: { anchor: { sessionId: string } }) => h.anchor.sessionId === DM)).toBe(true)
     expect(out.coverage).toMatchObject({ scope: 'sessions', sessionIds: [DM], bounded: false })
@@ -102,16 +118,26 @@ describe('wechat-bot: search_messages / semantic_search', () => {
   it('semantic_search is forced to the origin chat and refuses other sessions', async () => {
     const sub = sampleWorld()
     const out = body(await runTool(semanticSearch, { query: '吃饭 火锅' }, sub, bot(DM)))
-    expect(sub.calls[0]).toEqual({ method: 'search', args: [{ query: '吃饭 火锅', sessionIds: [DM], limit: 8, mode: 'hybrid' }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'search',
+      args: [{ query: '吃饭 火锅', sessionIds: [DM], limit: 15, mode: 'hybrid', match: 'relaxed' }],
+    })
     expect(out.coverage).toMatchObject({ scope: 'sessions', sessionIds: [DM] })
+    // The first call also resolved chat titles / sender names; the refused one must add nothing.
+    const before = sub.calls.length
     const refused = await runTool(semanticSearch, { query: '周报', sessionIds: [GROUP] }, sub, bot(DM))
     expect(refused.isError).toBe(true)
-    expect(sub.calls).toHaveLength(1)
+    expect(sub.calls).toHaveLength(before)
     expect((await runTool(semanticSearch, { query: 'x' }, sub, bot(undefined))).isError).toBe(true)
   })
   it('desktop-chat threads are not scoped even when they carry a wechat origin (profile decides)', async () => {
     const sub = sampleWorld()
-    const out = body(await runTool(searchMessages, { query: '周报' }, sub, { profile: 'desktop-chat', origin: { channel: 'wechat-ilink', chatId: DM } }))
+    const out = body(
+      await runTool(searchMessages, { query: '周报' }, sub, {
+        profile: 'desktop-chat',
+        origin: { channel: 'wechat-ilink', chatId: DM },
+      }),
+    )
     expect(out.hits.map((h: { anchor: { messageId: string } }) => h.anchor.messageId).sort()).toEqual(['g1', 'g2'])
     expect(out.coverage.scope).toBe('all_indexed')
   })
@@ -126,7 +152,11 @@ describe('wechat-bot: single-session tools', () => {
     expect(sub.calls).toEqual([])
     const ok = await runTool(getContext, { anchor: anchorIn(DM, 'm3', 3), radius: 1 }, sub, bot(DM))
     expect(ok.isError).toBeUndefined()
-    expect(body(ok).messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual(['m2', 'm3', 'm4'])
+    expect(body(ok).messages.map((m: { anchor: { messageId: string } }) => m.anchor.messageId)).toEqual([
+      'm2',
+      'm3',
+      'm4',
+    ])
     expect((await runTool(getContext, { anchor: anchorIn(DM, 'm3', 3) }, sub, bot(undefined))).isError).toBe(true)
   })
   it('get_timeline refuses another session and allows the origin chat', async () => {
@@ -171,7 +201,11 @@ describe('wechat-bot: single-session tools', () => {
 })
 
 describe('wechat-bot: enumeration / cross-session tools are not mounted and refuse anyway', () => {
-  const cases: Array<{ name: string; tool: typeof listSessions | typeof listContacts | typeof listGroups | typeof searchMedia; input: unknown }> = [
+  const cases: Array<{
+    name: string
+    tool: typeof listSessions | typeof listContacts | typeof listGroups | typeof searchMedia
+    input: unknown
+  }> = [
     { name: 'list_sessions', tool: listSessions, input: {} },
     { name: 'list_contacts', tool: listContacts, input: { query: '阿' } },
     { name: 'list_groups', tool: listGroups, input: {} },

@@ -2,6 +2,7 @@
  * Access to the desktop IPC bridge. Missing preload is an error, never a source of fabricated data.
  */
 import type { AiwcBridge } from '@aiwc/protocol'
+import { t } from '@/i18n'
 
 declare global {
   interface Window {
@@ -17,7 +18,7 @@ export async function getBridge(): Promise<AiwcBridge> {
     cached = window.aiwc
     return cached
   }
-  throw new Error('无法连接本地微信数据服务，请在桌面应用中打开或重启应用。')
+  throw new Error(t('app.bridgeUnavailable'))
 }
 
 /** Synchronous accessor for code paths that run after bootstrap. */

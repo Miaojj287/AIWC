@@ -8,7 +8,13 @@ import { __resetReplyDeskForTests, useReplyDeskStore } from './store'
 
 const draft = (id: string, patch: Partial<ReplyDraft> = {}): ReplyDraft => ({
   id,
-  source: { channel: 'wechat-ui', peerId: `wxid_${id}`, chatId: `wxid_${id}`, chatType: 'dm', displayName: `联系人${id}` },
+  source: {
+    channel: 'wechat-ui',
+    peerId: `wxid_${id}`,
+    chatId: `wxid_${id}`,
+    chatType: 'dm',
+    displayName: `联系人${id}`,
+  },
   triggerMessageId: `m_${id}`,
   triggerText: '在吗',
   draft: '在的',
@@ -18,7 +24,11 @@ const draft = (id: string, patch: Partial<ReplyDraft> = {}): ReplyDraft => ({
   ...patch,
 })
 
-const DRAFTS = [draft('failed', { state: 'failed', error: '发送失败', createdAt: 1 }), draft('a', { createdAt: 2 }), draft('b', { createdAt: 3, mode: 'suggest' })]
+const DRAFTS = [
+  draft('failed', { state: 'failed', error: '发送失败', createdAt: 1 }),
+  draft('a', { createdAt: 2 }),
+  draft('b', { createdAt: 3, mode: 'suggest' }),
+]
 
 function fakeBridge(drafts: ReplyDraft[]): AiwcBridge {
   return {

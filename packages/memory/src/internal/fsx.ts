@@ -121,7 +121,11 @@ export interface FileLockOptions {
  * Cross-process sidecar lock: `${target}.lock` created with O_EXCL. The lock file holds the pid and
  * time so an operator can see who holds it; a lock older than `staleMs` is broken.
  */
-export async function withFileLock<T>(target: string, fn: () => Promise<T> | T, opts: FileLockOptions = {}): Promise<T> {
+export async function withFileLock<T>(
+  target: string,
+  fn: () => Promise<T> | T,
+  opts: FileLockOptions = {},
+): Promise<T> {
   const lockPath = `${target}.lock`
   const timeoutMs = opts.timeoutMs ?? 5_000
   const staleMs = opts.staleMs ?? 10_000
@@ -134,7 +138,6 @@ export async function withFileLock<T>(target: string, fn: () => Promise<T> | T, 
       writeSync(fd, `${process.pid} ${new Date().toISOString()}\n`, null, 'utf8')
       break
     } catch (e) {
-      if (fd !== undefined) closeSync(fd)
       if ((e as { code?: string }).code !== 'EEXIST') throw e
       try {
         const st = statSync(lockPath)
@@ -148,12 +151,10 @@ export async function withFileLock<T>(target: string, fn: () => Promise<T> | T, 
       }
       if (Date.now() - startedAt > timeoutMs) throw new Error(`lock timeout: ${lockPath}`)
       await sleep(15)
+    } finally {
+      // The lock is the file's existence, not an open handle: close the descriptor on every path, success included.
+      if (fd !== undefined) closeSync(fd)
     }
-  }
-  try {
-    closeSync(openSync(lockPath, 'r'))
-  } catch {
-    /* ignore */
   }
   try {
     return await fn()
@@ -168,15 +169,25 @@ export async function withFileLock<T>(target: string, fn: () => Promise<T> | T, 
 
 /** In-process mutex keyed by string; serialises async sections that touch the same resource. */
 export class KeyedMutex {
-  private readonly tails = new Map<string, Promise<unknown>>()
+  /** Per key, a promise that settles (never rejects) when the last queued task has finished. */
+  private readonly tails = new Map<string, Promise<void>>()
 
   run<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.tails.get(key) ?? Promise.resolve()
-    const next = prev.then(fn, fn)
-    this.tails.set(key, next.catch(() => undefined))
-    void next.finally(() => {
-      if (this.tails.get(key) === next) this.tails.delete(key)
-    }).catch(() => undefined)
-    return next
+    const result = prev.then(fn)
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.tails.set(key, tail)
+    // The caller's promise settles only after the key is released, so a drained queue leaves no entry behind.
+    return result.finally(() => {
+      if (this.tails.get(key) === tail) this.tails.delete(key)
+    })
+  }
+
+  /** Keys with a queued or running task. */
+  get size(): number {
+    return this.tails.size
   }
 }

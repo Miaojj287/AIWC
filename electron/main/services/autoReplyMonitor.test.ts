@@ -1,16 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AutoReplyRule, SubstrateService, WxMessage } from '@aiwc/protocol'
+import type { AutoReplyRule, MessageEvent, SubstrateService, WxMessage } from '@aiwc/protocol'
 import { createAutoReplyMonitor } from './autoReplyMonitor'
 
-const rule: AutoReplyRule = { id: 'r', sessionId: 'alice', enabled: true, source: 'fixed', fixedText: '收到', historyCount: 30, updatedAt: 0 }
+const rule: AutoReplyRule = {
+  id: 'r',
+  sessionId: 'alice',
+  enabled: true,
+  source: 'fixed',
+  fixedText: '收到',
+  historyCount: 30,
+  sendMode: 'auto',
+  updatedAt: 0,
+}
 
 /** `mine` starts the chat with our own message as the last one, i.e. nothing to catch up on. */
 function setup({ mine = false }: { mine?: boolean } = {}) {
   let owner = 'owner'
   let rules: AutoReplyRule[] = [rule]
   let message = {
-    id: 'old', seq: 1, createdAt: Date.now(), sessionId: 'alice',
-    senderId: mine ? 'owner' : 'alice', isSelf: mine, kind: 'text', text: mine ? '我说的' : '旧消息',
+    id: 'old',
+    seq: 1,
+    createdAt: Date.now(),
+    sessionId: 'alice',
+    senderId: mine ? 'owner' : 'alice',
+    isSelf: mine,
+    kind: 'text',
+    text: mine ? '我说的' : '旧消息',
   } as WxMessage
   const substrate = {
     status: () => ({ connection: 'ready', account: { wxid: owner }, sync: { phase: 'idle' } }),
@@ -18,22 +33,47 @@ function setup({ mine = false }: { mine?: boolean } = {}) {
     listMessages: async () => ({ items: [message] }),
     subscribe: () => () => {},
   } as unknown as SubstrateService
-  const ingest = vi.fn(async () => {})
+  const ingest = vi.fn(async (_event: MessageEvent, _opts?: { force?: boolean }) => {})
   const invalidate = vi.fn()
   const accountChanged = vi.fn()
-  const monitor = createAutoReplyMonitor({ substrate, rules: () => rules, ingest, invalidate, accountChanged, quietMs: 5000, pollMs: 100000 })
+  const monitor = createAutoReplyMonitor({
+    substrate,
+    rules: () => rules,
+    ingest,
+    invalidate,
+    accountChanged,
+    quietMs: 5000,
+    pollMs: 100000,
+  })
   return {
-    monitor, ingest, invalidate, accountChanged,
-    setOwner: (value: string) => { owner = value },
-    disable: () => { rules = [{ ...rule, enabled: false }] },
-    remove: () => { rules = [] },
-    message: (patch: Partial<WxMessage>) => { message = { ...message, ...patch } },
+    monitor,
+    ingest,
+    invalidate,
+    accountChanged,
+    setOwner: (value: string) => {
+      owner = value
+    },
+    disable: () => {
+      rules = [{ ...rule, enabled: false }]
+    },
+    remove: () => {
+      rules = []
+    },
+    message: (patch: Partial<WxMessage>) => {
+      message = { ...message, ...patch }
+    },
   }
 }
 
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000) })
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(1_800_000_000_000)
+})
 afterEach(() => vi.useRealTimers())
-const start = async (h: ReturnType<typeof setup>) => { h.monitor.start(); await vi.advanceTimersByTimeAsync(0) }
+const start = async (h: ReturnType<typeof setup>) => {
+  h.monitor.start()
+  await vi.advanceTimersByTimeAsync(0)
+}
 
 describe('local WeChat auto-reply monitor', () => {
   it('catches up on enable: an unanswered message is replied to without waiting for a new one', async () => {
@@ -84,13 +124,20 @@ describe('local WeChat auto-reply monitor', () => {
     await start(h)
     await vi.advanceTimersByTimeAsync(6000)
     expect(h.ingest).not.toHaveBeenCalled()
-    h.message({ id: 'new1', seq: 2, isSelf: false, senderId: 'alice', text: '你在吗' }); await h.monitor.refresh()
+    h.message({ id: 'new1', seq: 2, isSelf: false, senderId: 'alice', text: '你在吗' })
+    await h.monitor.refresh()
     await vi.advanceTimersByTimeAsync(3000)
-    h.message({ id: 'new2', seq: 3, text: '明天见' }); await h.monitor.refresh()
-    await vi.advanceTimersByTimeAsync(4999); expect(h.ingest).not.toHaveBeenCalled()
+    h.message({ id: 'new2', seq: 3, text: '明天见' })
+    await h.monitor.refresh()
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(h.ingest).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(h.ingest).toHaveBeenCalledTimes(1)
-    expect(h.ingest.mock.calls[0]?.[0]).toMatchObject({ text: '明天见', source: { channel: 'wechat-ui', chatId: 'alice' }, raw: { accountId: 'owner' } })
+    expect(h.ingest.mock.calls[0]?.[0]).toMatchObject({
+      text: '明天见',
+      source: { channel: 'wechat-ui', chatId: 'alice' },
+      raw: { accountId: 'owner' },
+    })
     h.monitor.stop()
   })
 
@@ -98,7 +145,14 @@ describe('local WeChat auto-reply monitor', () => {
     const h = setup({ mine: true })
     await start(h)
     await vi.advanceTimersByTimeAsync(6000)
-    h.message({ id: 'new', seq: 2, isSelf: false, senderId: 'alice', text: '很久以前', createdAt: Date.now() - 20 * 60_000 })
+    h.message({
+      id: 'new',
+      seq: 2,
+      isSelf: false,
+      senderId: 'alice',
+      text: '很久以前',
+      createdAt: Date.now() - 20 * 60_000,
+    })
     await h.monitor.refresh()
     await vi.advanceTimersByTimeAsync(6000)
     expect(h.ingest).not.toHaveBeenCalled()
@@ -122,9 +176,15 @@ describe('local WeChat auto-reply monitor', () => {
     it('refuses with a reason instead of doing nothing silently', async () => {
       const h = setup({ mine: true })
       await start(h)
-      await expect(h.monitor.triggerNow('alice')).resolves.toEqual({ triggered: false, reason: '最后一条是你发的，没有待回复的消息' })
+      await expect(h.monitor.triggerNow('alice')).resolves.toEqual({
+        triggered: false,
+        reason: '最后一条是你发的，没有待回复的消息',
+      })
       h.disable()
-      await expect(h.monitor.triggerNow('alice')).resolves.toEqual({ triggered: false, reason: '这个会话的自动回复没有开启' })
+      await expect(h.monitor.triggerNow('alice')).resolves.toEqual({
+        triggered: false,
+        reason: '这个会话的自动回复没有开启',
+      })
       expect(h.ingest).not.toHaveBeenCalled()
       h.monitor.stop()
     })
@@ -144,7 +204,8 @@ describe('local WeChat auto-reply monitor', () => {
   it.each(['self', 'disabled', 'removed', 'account', 'stop'])('cancels a pending reply on %s', async (action) => {
     const h = setup({ mine: true })
     await start(h)
-    h.message({ id: 'new', seq: 2, isSelf: false, senderId: 'alice' }); await h.monitor.refresh()
+    h.message({ id: 'new', seq: 2, isSelf: false, senderId: 'alice' })
+    await h.monitor.refresh()
     if (action === 'self') h.message({ id: 'mine', seq: 3, isSelf: true })
     if (action === 'disabled') h.disable()
     if (action === 'removed') h.remove()

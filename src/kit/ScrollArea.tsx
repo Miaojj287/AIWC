@@ -1,5 +1,5 @@
 import { ScrollArea as Radix } from 'radix-ui'
-import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type ReactNode } from 'react'
+import { forwardRef, type ComponentPropsWithoutRef, type ComponentRef, type ReactNode } from 'react'
 import { cn } from './cn'
 
 export interface ScrollAreaProps extends ComponentPropsWithoutRef<typeof Radix.Root> {
@@ -14,12 +14,27 @@ export interface ScrollAreaProps extends ComponentPropsWithoutRef<typeof Radix.R
  * ScrollArea — thin overlay scrollbar (8px, fill-13, hover fill-20) that appears on hover.
  * Use for the three fixed columns and Tab bodies; plain overflow-auto is fine for small boxes.
  */
-export const ScrollArea = forwardRef<ElementRef<typeof Radix.Root>, ScrollAreaProps>(function ScrollArea(
-  { children, className, viewportClassName, orientation = 'vertical', viewportRef, type = 'hover', scrollHideDelay = 600, ...rest },
+export const ScrollArea = forwardRef<ComponentRef<typeof Radix.Root>, ScrollAreaProps>(function ScrollArea(
+  {
+    children,
+    className,
+    viewportClassName,
+    orientation = 'vertical',
+    viewportRef,
+    type = 'hover',
+    scrollHideDelay = 600,
+    ...rest
+  },
   ref,
 ) {
   return (
-    <Radix.Root ref={ref} type={type} scrollHideDelay={scrollHideDelay} className={cn('relative min-h-0 overflow-hidden', className)} {...rest}>
+    <Radix.Root
+      ref={ref}
+      type={type}
+      scrollHideDelay={scrollHideDelay}
+      className={cn('relative min-h-0 overflow-hidden', className)}
+      {...rest}
+    >
       <Radix.Viewport ref={viewportRef} className={cn('size-full rounded-[inherit] [&>div]:!block', viewportClassName)}>
         {children}
       </Radix.Viewport>

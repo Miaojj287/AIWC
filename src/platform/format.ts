@@ -8,6 +8,7 @@
  *  formatDuration    m:ss (h:mm:ss above an hour)         formatVoiceDuration  12"
  *  formatBytes       1.2 KB / 3.4 MB                      formatCount          99+
  */
+import { t } from '@/i18n'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -34,7 +35,7 @@ export function formatTime(ms: number | undefined, now: number = Date.now()): st
   if (ms === undefined || !Number.isFinite(ms) || ms <= 0) return ''
   const days = dayDiff(ms, now)
   if (days <= 0) return formatClock(ms)
-  if (days === 1) return '昨天'
+  if (days === 1) return t('format.yesterday')
   const d = new Date(ms)
   const n = new Date(now)
   if (d.getFullYear() === n.getFullYear()) return `${d.getMonth() + 1}/${d.getDate()}`
@@ -43,12 +44,12 @@ export function formatTime(ms: number | undefined, now: number = Date.now()): st
 
 export function formatDateDivider(ms: number, now: number = Date.now()): string {
   const days = dayDiff(ms, now)
-  if (days <= 0) return '今天'
-  if (days === 1) return '昨天'
+  if (days <= 0) return t('format.today')
+  if (days === 1) return t('format.yesterday')
   const d = new Date(ms)
   const n = new Date(now)
-  if (d.getFullYear() === n.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+  if (d.getFullYear() === n.getFullYear()) return t('format.monthDay', { month: d.getMonth() + 1, day: d.getDate() })
+  return t('format.yearMonthDay', { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() })
 }
 
 /** Full timestamp for tooltips / records: YYYY/M/D HH:mm */
@@ -59,9 +60,9 @@ export function formatDateTime(ms: number): string {
 
 export function formatRelative(ms: number, now: number = Date.now()): string {
   const diff = now - ms
-  if (diff < MINUTE) return '刚刚'
-  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} 分钟前`
-  if (diff < 24 * HOUR && dayDiff(ms, now) === 0) return `${Math.floor(diff / HOUR)} 小时前`
+  if (diff < MINUTE) return t('format.justNow')
+  if (diff < HOUR) return t('format.minutesAgo', { n: Math.floor(diff / MINUTE) })
+  if (diff < 24 * HOUR && dayDiff(ms, now) === 0) return t('format.hoursAgo', { n: Math.floor(diff / HOUR) })
   return formatTime(ms, now)
 }
 
@@ -101,12 +102,6 @@ export function formatCount(n: number, max = 99): string {
 /** Thousands separator for stats: 1,284 */
 export function formatNumber(n: number): string {
   return Math.round(n).toLocaleString('en-US')
-}
-
-/** Ratio (0–1) → 62% */
-export function formatPercent(ratio: number, digits = 0): string {
-  if (!Number.isFinite(ratio)) return ''
-  return `${(ratio * 100).toFixed(digits)}%`
 }
 
 /** Middle-ellipsis for paths / wxids that must stay recognisable at both ends. */

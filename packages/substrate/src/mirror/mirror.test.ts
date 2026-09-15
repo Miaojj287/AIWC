@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { EmbeddingClient, WxMessage, WxSession } from '@aiwc/protocol'
 import { createMirror, type Mirror } from './index'
 import { buildFtsQueries } from './search'
+import { openMirrorDb } from './schema'
 import { buildChunks, CHUNK_GAP_MS } from './chunks'
 import { alignVectorHits, fuseHits, reciprocalRankFusion } from './rrf'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
@@ -52,8 +53,15 @@ afterEach(() => {
 describe('mirror: sessions & messages', () => {
   it('upserts sessions, inserts messages with dedupe and maintains watermark / counters', () => {
     const m = open()
-    m.upsertSessions([session('wxid_a', 'dm', '阿甲'), session('g1@chatroom', 'group', '产品群', { pinned: true, memberCount: 12 })])
-    const r1 = m.insertMessages([msg('wxid_a', 1, '你好'), msg('wxid_a', 2, '我们的产品市场很大'), msg('wxid_a', 3, 'roadmap 下周发')])
+    m.upsertSessions([
+      session('wxid_a', 'dm', '阿甲'),
+      session('g1@chatroom', 'group', '产品群', { pinned: true, memberCount: 12 }),
+    ])
+    const r1 = m.insertMessages([
+      msg('wxid_a', 1, '你好'),
+      msg('wxid_a', 2, '我们的产品市场很大'),
+      msg('wxid_a', 3, 'roadmap 下周发'),
+    ])
     expect(r1.inserted).toBe(3)
     expect(r1.changedSessions).toEqual(['wxid_a'])
     const r2 = m.insertMessages([msg('wxid_a', 2, 'dup'), msg('wxid_a', 4, '收到')])
@@ -100,13 +108,19 @@ describe('mirror: sessions & messages', () => {
     expect(a?.pinned).toBe(true)
     expect(a?.unread).toBe(0)
     // both pinned now → recency decides among pinned
-    expect(m.listSessions({ limit: 10 }).items.slice(0, 2).map((s) => s.id)).toEqual(['wxid_a', 'g1@chatroom'])
+    expect(
+      m
+        .listSessions({ limit: 10 })
+        .items.slice(0, 2)
+        .map((s) => s.id),
+    ).toEqual(['wxid_a', 'g1@chatroom'])
   })
 
   it('pages messages before/after with filters and returns context around an anchor', () => {
     const m = open()
     const list: WxMessage[] = []
-    for (let i = 1; i <= 30; i++) list.push(msg('wxid_a', i, `消息 ${i}`, { isSelf: i % 2 === 0, kind: i % 10 === 0 ? 'image' : 'text' }))
+    for (let i = 1; i <= 30; i++)
+      list.push(msg('wxid_a', i, `消息 ${i}`, { isSelf: i % 2 === 0, kind: i % 10 === 0 ? 'image' : 'text' }))
     m.insertMessages(list)
 
     const latest = m.listMessages({ sessionId: 'wxid_a', limit: 10 })
@@ -162,12 +176,20 @@ describe('mirror: sessions & messages', () => {
       { username: 'gh_x', nickname: '公众号', kind: 'official' },
     ])
     expect(m.listContacts({ limit: 10 }).total).toBe(3)
-    expect(m.listContacts({ limit: 10, kind: 'friend' }).items.map((c) => c.username).sort()).toEqual(['wxid_a', 'wxid_b'])
+    expect(
+      m
+        .listContacts({ limit: 10, kind: 'friend' })
+        .items.map((c) => c.username)
+        .sort(),
+    ).toEqual(['wxid_a', 'wxid_b'])
     expect(m.listContacts({ limit: 10, query: 'ali' }).items.map((c) => c.username)).toEqual(['wxid_a'])
     expect(m.getContact('wxid_a')?.remark).toBe('阿甲')
 
     m.upsertSessions([session('g1@chatroom', 'group', '产品群')])
-    m.upsertGroupMembers('g1@chatroom', [{ username: 'wxid_a', displayName: '甲总' }, { username: 'wxid_z', displayName: '路人' }])
+    m.upsertGroupMembers('g1@chatroom', [
+      { username: 'wxid_a', displayName: '甲总' },
+      { username: 'wxid_z', displayName: '路人' },
+    ])
     const members = m.listGroupMembers('g1@chatroom')
     expect(members.total).toBe(2)
     const a = members.items.find((c) => c.username === 'wxid_a')
@@ -190,6 +212,23 @@ describe('mirror: keyword search', () => {
     expect(mixed.unicode).toBe('"roadmap"*')
     expect(buildFtsQueries('  ')).toEqual({ like: [] })
     expect(buildFtsQueries('say "hi"')).toEqual({ unicode: '"say"* "hi"*', trigram: '"say"', like: [] })
+  })
+
+  it('relaxed: OR-s the exact Chinese phrase with the dictionary words ICU finds in it', () => {
+    // 在一起 is a real word (3 chars → trigram); 了 is dropped; the whole sentence stays as the precise group.
+    const q = buildFtsQueries('你和小吴已经在一起了', { relaxed: true })
+    expect(q.trigram).toBe('("你和小吴已经在一起了") OR ("在一起")')
+    expect(q.like).toEqual(['已经'])
+    expect(q.likeAny).toBe(true)
+    expect(buildFtsQueries('产品市场', { relaxed: true })).toEqual({
+      trigram: '"产品市场"',
+      like: ['产品', '市场'],
+      likeAny: true,
+    })
+    // A single name typed on its own is still a substring match.
+    expect(buildFtsQueries('小吴', { relaxed: true })).toEqual({ like: ['小吴'], likeAny: true })
+    // exact (the UI search box) never expands.
+    expect(buildFtsQueries('你和小吴已经在一起了')).toEqual({ trigram: '"你和小吴已经在一起了"', like: [] })
   })
 
   it('finds CJK via trigram and latin via unicode61, with snippets and filters', () => {
@@ -225,6 +264,87 @@ describe('mirror: keyword search', () => {
 
     expect(m.searchFts('不存在的词汇', { limit: 10 })).toEqual([])
     expect(m.searchFts('', { limit: 10 })).toEqual([])
+  })
+
+  it('relaxed finds a sentence by its words when nobody typed it verbatim, ranking fuller matches first; exact does not', () => {
+    const m = open()
+    m.insertMessages([
+      msg('wxid_a', 1, '我们已经在一起了'),
+      msg('wxid_a', 2, '你们在一起多久了'),
+      msg('wxid_a', 3, '今天没去上班'),
+      msg('wxid_a', 4, '开会时间改到三点'),
+      msg('wxid_a', 5, '没时间'),
+    ])
+    const hits = m.searchFts('你和小吴已经在一起了', { limit: 10, match: 'relaxed' })
+    expect(hits.map((h) => h.message.seq)).toEqual([1, 2])
+    expect(m.searchFts('你和小吴已经在一起了', { limit: 10 })).toEqual([])
+    // Two-character words are OR-ed in relaxed mode and scored by how many of them a message contains.
+    expect(m.searchFts('上班 今天', { limit: 10, match: 'relaxed' }).map((h) => h.message.seq)).toEqual([3])
+    expect(
+      m
+        .searchFts('上班 开会', { limit: 10, match: 'relaxed' })
+        .map((h) => h.message.seq)
+        .sort(),
+    ).toEqual([3, 4])
+    expect(m.searchFts('上班 开会', { limit: 10 })).toEqual([])
+    // The chat search box stays an exact substring search: 开会时间 must not match 没时间.
+    expect(m.searchFts('开会时间', { limit: 10 }).map((h) => h.message.seq)).toEqual([4])
+  })
+
+  it('searches quoted replies and voice transcripts without re-indexing message text', () => {
+    const m = open()
+    m.insertMessages([
+      msg('wxid_a', 1, '好的', { kind: 'quote', quote: { senderName: '张三', text: '报价单能再发一份吗' } }),
+      msg('wxid_a', 2, '[语音消息]', { kind: 'voice', media: { kind: 'voice', durationMs: 3000 } }),
+      msg('wxid_a', 3, '普通消息'),
+    ])
+    expect(m.searchFts('报价单', { limit: 10 }).map((h) => h.message.seq)).toEqual([1])
+    expect(m.searchFts('老地方', { limit: 10 })).toEqual([])
+    m.updateMedia('wxid_a', 'wxid_a#2', { kind: 'voice', durationMs: 3000, transcript: '明天下午三点老地方见' })
+    const voice = m.searchFts('老地方', { limit: 10 })
+    expect(voice.map((h) => h.message.seq)).toEqual([2])
+    expect(voice[0]?.snippet).toContain('老地方')
+    m.removeSession('wxid_a')
+    expect(m.searchFts('老地方', { limit: 10 })).toEqual([])
+  })
+
+  it('never lets a malformed media / quote column fail a message insert, and backfills old rows once', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aiwc-extras-'))
+    const dbPath = join(dir, 'mirror.db')
+    const db = openMirrorDb(dbPath)
+    const insert = (id: string, seq: number, media: string | null, quote: string | null) =>
+      db.run(
+        `INSERT INTO messages (session_id, msg_id, seq, created_at, sender_id, is_self, kind, text, media_json, quote_json) VALUES ('s', ?, ?, ?, 'x', 0, 'text', 'x', ?, ?)`,
+        id,
+        seq,
+        seq,
+        media,
+        quote,
+      )
+    expect(() => insert('bad', 1, '{not json', '[oops')).not.toThrow()
+    expect(() => insert('ok', 2, JSON.stringify({ kind: 'voice', transcript: '明天老地方' }), null)).not.toThrow()
+    expect(() => db.run(`UPDATE messages SET media_json = '{still bad' WHERE msg_id = 'ok'`)).not.toThrow()
+    expect(db.all<{ text: string }>('SELECT text FROM message_extras')).toEqual([])
+    db.run(`UPDATE messages SET quote_json = ? WHERE msg_id = 'bad'`, JSON.stringify({ text: '报价单再发一份' }))
+    expect(db.all<{ text: string }>('SELECT text FROM message_extras').map((r) => r.text)).toEqual(['报价单再发一份'])
+    // Re-opening (with the backfill flag cleared) recreates the triggers and never duplicates rows.
+    db.run("DELETE FROM meta WHERE k = 'message_extras_v1'")
+    db.close()
+    const again = openMirrorDb(dbPath)
+    try {
+      expect(again.all<{ n: number }>('SELECT COUNT(*) AS n FROM message_extras')[0]?.n).toBe(1)
+      again.run(
+        `UPDATE messages SET media_json = ? WHERE msg_id = 'ok'`,
+        JSON.stringify({ kind: 'voice', transcript: '明天老地方' }),
+      )
+      expect(again.all<{ text: string }>('SELECT text FROM message_extras ORDER BY id').map((r) => r.text)).toEqual([
+        '报价单再发一份',
+        '明天老地方',
+      ])
+    } finally {
+      again.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -306,8 +426,17 @@ describe('mirror: stats', () => {
     const m = open()
     m.upsertSessions([session('wxid_a', 'dm', '阿甲'), session('g1@chatroom', 'group', '产品群')])
     const list: WxMessage[] = []
-    for (let i = 1; i <= 6; i++) list.push(msg('wxid_a', i, `a${i}`, { isSelf: i % 2 === 0, createdAt: T0 + i * 3_600_000 }))
-    for (let i = 1; i <= 4; i++) list.push(msg('g1@chatroom', i, `g${i}`, { senderId: `u${i % 2}`, senderName: `成员${i % 2}`, kind: i === 4 ? 'image' : 'text', createdAt: T0 + 86_400_000 * 3 + i * 1000 }))
+    for (let i = 1; i <= 6; i++)
+      list.push(msg('wxid_a', i, `a${i}`, { isSelf: i % 2 === 0, createdAt: T0 + i * 3_600_000 }))
+    for (let i = 1; i <= 4; i++)
+      list.push(
+        msg('g1@chatroom', i, `g${i}`, {
+          senderId: `u${i % 2}`,
+          senderName: `成员${i % 2}`,
+          kind: i === 4 ? 'image' : 'text',
+          createdAt: T0 + 86_400_000 * 3 + i * 1000,
+        }),
+      )
     m.insertMessages(list)
 
     const ov = m.stats({ metric: 'overview' })
@@ -338,14 +467,26 @@ describe('mirror: stats', () => {
 
 describe('rrf', () => {
   it('fuses ranked lists and prefers items present in several lists', () => {
-    const a = [{ item: 'x', rank: 1 }, { item: 'y', rank: 2 }, { item: 'z', rank: 3 }]
-    const b = [{ item: 'z', rank: 1 }, { item: 'y', rank: 2 }]
+    const a = [
+      { item: 'x', rank: 1 },
+      { item: 'y', rank: 2 },
+      { item: 'z', rank: 3 },
+    ]
+    const b = [
+      { item: 'z', rank: 1 },
+      { item: 'y', rank: 2 },
+    ]
     const merged = reciprocalRankFusion([a, b], (s) => s)
     expect(merged.map((m) => m.key)).toEqual(['z', 'y', 'x'])
     expect(merged[0]?.ranks).toEqual([3, 1])
   })
   it('fuseHits marks overlaps as fused and keeps the keyword snippet', () => {
-    const mk = (seq: number, source: 'fts' | 'vector', snippet: string) => ({ message: msg('s', seq, `t${seq}`), score: 1, snippet, source })
+    const mk = (seq: number, source: 'fts' | 'vector', snippet: string) => ({
+      message: msg('s', seq, `t${seq}`),
+      score: 1,
+      snippet,
+      source,
+    })
     const fts = [mk(1, 'fts', '[k]1'), mk(2, 'fts', '[k]2')]
     const vec = [mk(2, 'vector', 'v2'), mk(3, 'vector', 'v3')]
     const out = fuseHits([fts, vec], 10)
@@ -361,8 +502,20 @@ describe('rrf', () => {
       { message: msg('s', 40, 'k40'), score: 1, snippet: '[k]40', source: 'fts' as const },
     ]
     const vec = [
-      { message: msg('s', 8, 'anchor'), score: 0.9, snippet: 'chunk 1-15', source: 'vector' as const, range: { startSeq: 1, endSeq: 15 } },
-      { message: msg('s', 23, 'anchor'), score: 0.8, snippet: 'chunk 16-30', source: 'vector' as const, range: { startSeq: 16, endSeq: 30 } },
+      {
+        message: msg('s', 8, 'anchor'),
+        score: 0.9,
+        snippet: 'chunk 1-15',
+        source: 'vector' as const,
+        range: { startSeq: 1, endSeq: 15 },
+      },
+      {
+        message: msg('s', 23, 'anchor'),
+        score: 0.8,
+        snippet: 'chunk 16-30',
+        source: 'vector' as const,
+        range: { startSeq: 16, endSeq: 30 },
+      },
     ]
     const aligned = alignVectorHits(vec, kw)
     expect(aligned[0]?.message.seq).toBe(7)
@@ -388,7 +541,7 @@ describe('mirror: on-disk persistence', () => {
       const b = createMirror({ dbPath })
       expect(b.countMessages()).toBe(1)
       expect(b.meta.get('hello')).toBe('world')
-      expect(b.meta.get('schema_version')).toBe('3')
+      expect(b.meta.get('schema_version')).toBe('4')
       expect(b.searchFts('产品市场', { limit: 5 })).toHaveLength(1)
       b.close()
     } finally {
@@ -396,7 +549,6 @@ describe('mirror: on-disk persistence', () => {
     }
   })
 })
-
 
 describe('mirror: source provenance', () => {
   it('clears legacy and cross-account data, including search and contacts, but retains the same source', async () => {
@@ -406,7 +558,7 @@ describe('mirror: source provenance', () => {
     m.insertMessages([msg('old', 1, 'legacy searchable message')])
     m.bindSource('wcdb:account-a')
     expect(m.countMessages()).toBe(0)
-    expect(m.listSessions({ includeHidden: true }).total).toBe(0)
+    expect(m.listSessions({ includeHidden: true, limit: 100 }).total).toBe(0)
     expect(m.getContact('old')).toBeUndefined()
     expect(m.searchFts('legacy', { limit: 10 })).toEqual([])
     m.upsertSessions([session('new', 'group', 'New', { collapsed: true })])
@@ -426,29 +578,48 @@ it('upgrades legacy presentation on reread without duplicating messages or losin
     mirror.insertMessages([old])
     const fresh: WxMessage = { ...old, kind: 'system', media: undefined, presentationVersion: 1 }
     expect(mirror.insertMessages([fresh]).inserted).toBe(0)
-    expect(mirror.getMessage('s', old.id)).toMatchObject({ kind: 'system', presentationVersion: 1, media: { path: '/cached.jpg' } })
+    expect(mirror.getMessage('s', old.id)).toMatchObject({
+      kind: 'system',
+      presentationVersion: 1,
+      media: { path: '/cached.jpg' },
+    })
     expect(mirror.countMessages('s')).toBe(1)
     expect(mirror.watermark('s')).toBe(1)
-    const article: WxMessage = { ...fresh, kind: 'link', rich: { type: 'article', title: '文章', url: 'https://example.com/' } }
+    const article: WxMessage = {
+      ...fresh,
+      kind: 'link',
+      rich: { type: 'article', title: '文章', url: 'https://example.com/' },
+    }
     mirror.insertMessages([article])
     expect(mirror.getMessage('s', old.id)?.rich).toEqual(article.rich)
-  } finally { mirror.close() }
+  } finally {
+    mirror.close()
+  }
 })
 
 it('keeps old and new messages whose shards share local ids and upgrades legacy rows in place', () => {
   const m = createMirror({ dbPath: ':memory:' })
   try {
-    const old = msg('Tencent-Games', 1747309846000, '旧文章', { id: '125', createdAt: 1747309846000, media: { kind: 'image', path: '/cache/old.png' } })
+    const old = msg('Tencent-Games', 1747309846000, '旧文章', {
+      id: '125',
+      createdAt: 1747309846000,
+      media: { kind: 'image', path: '/cache/old.png' },
+    })
     m.insertMessages([old])
     const upgraded = { ...old, id: `wx:125:${old.seq}`, media: undefined }
     m.insertMessages([upgraded])
-    const latest = msg('Tencent-Games', 1788775756000, '最新文章', { id: 'wx:125:1788775756000', createdAt: 1788775756000 })
+    const latest = msg('Tencent-Games', 1788775756000, '最新文章', {
+      id: 'wx:125:1788775756000',
+      createdAt: 1788775756000,
+    })
     m.insertMessages([latest], { advanceWatermark: false })
     expect(m.countMessages('Tencent-Games')).toBe(2)
     expect(m.getMessage('Tencent-Games', upgraded.id)?.media?.path).toBe('/cache/old.png')
     expect(m.listMessages({ sessionId: 'Tencent-Games', limit: 1 }).items[0]?.text).toBe('最新文章')
     expect(m.watermark('Tencent-Games')).toBe(old.seq)
-  } finally { m.close() }
+  } finally {
+    m.close()
+  }
 })
 
 it('repairs an inflated legacy sync watermark once without deleting indexed history', () => {
@@ -468,5 +639,7 @@ it('repairs an inflated legacy sync watermark once without deleting indexed hist
     const reopened = createMirror({ dbPath })
     expect(reopened.watermark('s')).toBe(20)
     reopened.close()
-  } finally { rmSync(dir, { recursive: true, force: true }) }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

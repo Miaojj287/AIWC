@@ -21,7 +21,7 @@ export const menuItemClass = (opts: { description?: boolean; danger?: boolean; i
     opts.inset && 'pl-8',
   )
 
-export const menuLabelClass = 'px-2 pb-1 pt-1.5 text-micro font-medium text-fg-3'
+export const menuLabelClass = 'truncate px-2 pb-1 pt-1.5 text-micro font-medium text-fg-3'
 export const menuSeparatorClass = 'my-1 h-px w-full bg-line-8'
 export const menuShortcutClass = 'ml-auto shrink-0 pl-3 font-latin text-micro text-fg-3'
 export const menuIconClass = 'shrink-0 text-fg-2'

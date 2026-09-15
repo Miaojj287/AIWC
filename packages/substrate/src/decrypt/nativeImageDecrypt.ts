@@ -16,7 +16,11 @@ export interface NativeDecryptResult {
 }
 
 interface NativeAddon {
-  decryptDatNative: (inputPath: string, xorKey: number, aesKey?: string) => { data: Buffer; ext?: string; isWxgf?: boolean; is_wxgf?: boolean }
+  decryptDatNative: (
+    inputPath: string,
+    xorKey: number,
+    aesKey?: string,
+  ) => { data: Buffer; ext?: string; isWxgf?: boolean; is_wxgf?: boolean }
 }
 
 let cached: { dir: string; addon: NativeAddon | null } | undefined
@@ -59,7 +63,12 @@ export function loadNativeImageAddon(nativeDir: string): NativeAddon | null {
 }
 
 /** Returns null when the addon is unavailable or fails, so callers can fall back. */
-export function decryptDatViaNative(nativeDir: string, inputPath: string, xorKey: number, aesKeyAscii?: string): NativeDecryptResult | null {
+export function decryptDatViaNative(
+  nativeDir: string,
+  inputPath: string,
+  xorKey: number,
+  aesKeyAscii?: string,
+): NativeDecryptResult | null {
   const addon = loadNativeImageAddon(nativeDir)
   if (!addon) return null
   try {
@@ -71,9 +80,4 @@ export function decryptDatViaNative(nativeDir: string, inputPath: string, xorKey
   } catch {
     return null
   }
-}
-
-/** Test hook. */
-export function resetNativeImageAddonCache(): void {
-  cached = undefined
 }

@@ -16,7 +16,16 @@
 import { execFile, spawn } from 'node:child_process'
 import { InjectorError, type WeChatInjector } from './types'
 import { sleep } from '../../../core/emitter'
-import { VK_F, VK_RETURN, VK_V, isTrusted, loadMacNative, probeWeChatWindow, tap, type WeChatWindowState } from './macNative'
+import {
+  VK_F,
+  VK_RETURN,
+  VK_V,
+  isTrusted,
+  loadMacNative,
+  probeWeChatWindow,
+  tap,
+  type WeChatWindowState,
+} from './macNative'
 
 const WECHAT_BUNDLE_ID = 'com.tencent.xinWeChat'
 const ACTIVATE_SCRIPTS = [
@@ -25,7 +34,8 @@ const ACTIVATE_SCRIPTS = [
   'tell application "System Events" to tell process "WeChat" to set frontmost to true',
   'tell application "System Events" to tell process "微信" to set frontmost to true',
 ]
-const FRONTMOST_SCRIPT = 'tell application "System Events" to get name of first application process whose frontmost is true'
+const FRONTMOST_SCRIPT =
+  'tell application "System Events" to get name of first application process whose frontmost is true'
 /**
  * WeChat finishes the paste asynchronously; pressing Return before it lands hits an empty composer
  * and the text shows up afterwards — which reads as "sometimes it just does not send". The cost
@@ -60,8 +70,10 @@ function runOsascript(script: string): Promise<string> {
     execFile('osascript', ['-e', script], { timeout: 8000 }, (error, stdout, stderr) => {
       if (error) {
         const detail = `${stderr || error.message}`
-        if (/not authorized to send Apple events|-1743/.test(detail)) return reject(new InjectorError('automation-denied', detail))
-        if (/not allowed assistive access|1002|-25211/.test(detail)) return reject(new InjectorError('no-permission', detail))
+        if (/not authorized to send Apple events|-1743/.test(detail))
+          return reject(new InjectorError('automation-denied', detail))
+        if (/not allowed assistive access|1002|-25211/.test(detail))
+          return reject(new InjectorError('no-permission', detail))
         return reject(new Error(detail))
       }
       resolve(String(stdout).trim())
@@ -80,7 +92,9 @@ function pbcopy(text: string): Promise<void> {
 
 function openWeChat(): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile('/usr/bin/open', ['-b', WECHAT_BUNDLE_ID], { timeout: 8000 }, (error) => error ? reject(error) : resolve())
+    execFile('/usr/bin/open', ['-b', WECHAT_BUNDLE_ID], { timeout: 8000 }, (error) =>
+      error ? reject(error) : resolve(),
+    )
   })
 }
 
@@ -126,7 +140,10 @@ function createFocusController(deps: DarwinInjectorDeps) {
     if (await isFrontmost()) return
     const attempts: Array<[string, () => Promise<unknown>]> = [
       ['open-bundle', deps.launch ?? openWeChat],
-      ...ACTIVATE_SCRIPTS.map((script, i): [string, () => Promise<unknown>] => [`applescript-${i + 1}`, () => run(script)]),
+      ...ACTIVATE_SCRIPTS.map((script, i): [string, () => Promise<unknown>] => [
+        `applescript-${i + 1}`,
+        () => run(script),
+      ]),
     ]
     let permissionError: InjectorError | undefined
     for (const [method, perform] of attempts) {
@@ -134,7 +151,10 @@ function createFocusController(deps: DarwinInjectorDeps) {
         await perform()
       } catch (err) {
         if (err instanceof InjectorError) permissionError = err
-        log('warn', 'wechat activation attempt failed', { method, error: err instanceof Error ? err.message : String(err) })
+        log('warn', 'wechat activation attempt failed', {
+          method,
+          error: err instanceof Error ? err.message : String(err),
+        })
         continue
       }
       for (let poll = 0; poll < ACTIVATE_POLLS; poll++) {
@@ -172,7 +192,8 @@ export function createDarwinInjector(deps: DarwinInjectorDeps = {}): WeChatInjec
 
   const pressCommandF = async () => (useNative ? tap(VK_F, true) : void (await keystroke('f', ['command'])))
   const pressCommandV = async () => (useNative ? tap(VK_V, true) : void (await keystroke('v', ['command'])))
-  const pressReturn = async () => (useNative ? tap(VK_RETURN) : void (await run('tell application "System Events" to key code 36')))
+  const pressReturn = async () =>
+    useNative ? tap(VK_RETURN) : void (await run('tell application "System Events" to key code 36'))
 
   return {
     async focusSession(name) {

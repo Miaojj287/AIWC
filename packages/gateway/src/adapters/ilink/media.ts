@@ -61,7 +61,12 @@ export function detectMediaType(buffer: Buffer): string | null {
   if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg'
   if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png'
   if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif'
-  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp'
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  )
+    return 'image/webp'
   if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) return 'application/pdf'
   if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'video/mp4'
   if (buffer.subarray(0, 9).toString('ascii') === '#!SILK_V3') return 'audio/silk'
@@ -89,7 +94,11 @@ export function decodeIncomingBuffer(raw: Buffer, attachment: IlinkAttachment): 
   const decrypted = decryptAesEcb(raw, key)
   if (!decrypted) return raw
   if (detectMediaType(decrypted)) return decrypted
-  if ((attachment.mediaType.startsWith('text/') || attachment.mediaType === 'application/json') && looksMostlyText(decrypted)) return decrypted
+  if (
+    (attachment.mediaType.startsWith('text/') || attachment.mediaType === 'application/json') &&
+    looksMostlyText(decrypted)
+  )
+    return decrypted
   if (attachment.kind === 'image' || attachment.kind === 'voice') return decrypted
   return raw
 }
@@ -117,7 +126,10 @@ export async function downloadAttachment(
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DOWNLOAD_TIMEOUT_MS)
   const maxBytes = opts.maxBytes ?? MEDIA_LIMITS.inbound
   try {
-    const res = await fetchImpl(attachment.url, { headers: { Accept: '*/*', 'User-Agent': 'Mozilla/5.0 MicroMessenger AIWC' }, signal: controller.signal })
+    const res = await fetchImpl(attachment.url, {
+      headers: { Accept: '*/*', 'User-Agent': 'Mozilla/5.0 MicroMessenger AIWC' },
+      signal: controller.signal,
+    })
     if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`)
     const declared = Number(res.headers.get('content-length') ?? '')
     if (Number.isFinite(declared) && declared > maxBytes) throw new Error('附件超过大小上限')
@@ -152,7 +164,9 @@ export interface UploadedMedia {
 }
 
 export function createFileKey(fileName: string, random: () => Buffer = () => randomBytes(16)): string {
-  const ext = extname(fileName).replace(/[^a-z0-9.]/gi, '').slice(0, 16)
+  const ext = extname(fileName)
+    .replace(/[^a-z0-9.]/gi, '')
+    .slice(0, 16)
   return `${random().toString('hex')}${ext}`
 }
 
@@ -170,7 +184,11 @@ export function assertUploadable(filePath: string, maxBytes: number): number {
 }
 
 /** Read + encrypt a local file; the caller obtains the upload URL and posts `encrypted`. */
-export async function prepareUpload(filePath: string, maxBytes: number, random: () => Buffer = () => randomBytes(16)): Promise<{ plaintext: Buffer; encrypted: Buffer; aeskey: Buffer; filekey: string; rawFileMd5: string }> {
+export async function prepareUpload(
+  filePath: string,
+  maxBytes: number,
+  random: () => Buffer = () => randomBytes(16),
+): Promise<{ plaintext: Buffer; encrypted: Buffer; aeskey: Buffer; filekey: string; rawFileMd5: string }> {
   assertUploadable(filePath, maxBytes)
   const plaintext = await readFile(filePath)
   const aeskey = random()
@@ -180,16 +198,26 @@ export async function prepareUpload(filePath: string, maxBytes: number, random: 
 }
 
 /** POST encrypted bytes to the CDN with retries; 4xx is final. Returns x-encrypted-param. */
-export async function uploadEncryptedMedia(fetchImpl: FetchLike, uploadUrl: string, encrypted: Buffer, retries = CDN_UPLOAD_RETRIES): Promise<string> {
+export async function uploadEncryptedMedia(
+  fetchImpl: FetchLike,
+  uploadUrl: string,
+  encrypted: Buffer,
+  retries = CDN_UPLOAD_RETRIES,
+): Promise<string> {
   let lastError: unknown
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
-      const res = await fetchImpl(uploadUrl, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: new Uint8Array(encrypted) })
+      const res = await fetchImpl(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array(encrypted),
+      })
       if (res.status >= 400 && res.status < 500) {
         const detail = res.headers.get('x-error-message') ?? (await res.text().catch(() => ''))
         throw new Error(`CDN 上传被拒绝 ${res.status}: ${detail}`)
       }
-      if (res.status !== 200) throw new Error(`CDN 上传失败：${res.headers.get('x-error-message') ?? `status ${res.status}`}`)
+      if (res.status !== 200)
+        throw new Error(`CDN 上传失败：${res.headers.get('x-error-message') ?? `status ${res.status}`}`)
       const param = res.headers.get('x-encrypted-param')
       if (!param) throw new Error('CDN 上传响应缺少 x-encrypted-param')
       return param

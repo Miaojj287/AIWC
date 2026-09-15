@@ -27,7 +27,8 @@ export interface MessageOps {
   auditLog(limit?: number): Array<{ at: number; sql: string; reason: string; rows: number }>
 }
 
-const MESSAGE_COLUMNS = 'id, session_id, msg_id, seq, created_at, sender_id, sender_name, is_self, kind, text, media_json, quote_json, presentation_json'
+const MESSAGE_COLUMNS =
+  'id, session_id, msg_id, seq, created_at, sender_id, sender_name, is_self, kind, text, media_json, quote_json, presentation_json'
 
 export function createMessageOps(db: Db): MessageOps {
   const insertSql = `INSERT OR IGNORE INTO messages (session_id, msg_id, seq, created_at, sender_id, sender_name, is_self, kind, text, media_json, quote_json, presentation_json)
@@ -46,7 +47,12 @@ export function createMessageOps(db: Db): MessageOps {
   }
 
   const setWatermark = (sessionId: string, seq: number, indexedUntil?: number) => {
-    db.run('INSERT OR IGNORE INTO sessions (id, kind, title) VALUES (?, ?, ?)', sessionId, sessionKindFromUsername(sessionId), sessionId)
+    db.run(
+      'INSERT OR IGNORE INTO sessions (id, kind, title) VALUES (?, ?, ?)',
+      sessionId,
+      sessionKindFromUsername(sessionId),
+      sessionId,
+    )
     db.run(
       `UPDATE sessions SET watermark_seq = MAX(watermark_seq, ?), indexed_until = MAX(COALESCE(indexed_until, 0), COALESCE(?, 0)) WHERE id = ?`,
       Math.max(0, Math.floor(seq)),
@@ -88,10 +94,25 @@ export function createMessageOps(db: Db): MessageOps {
           if (qualified) {
             // Upgrade only the identical old row. A reused local_id with another seq is a
             // different message and must be inserted, never overwritten or ignored.
-            const legacy = db.get<{ msg_id: string }>('SELECT msg_id FROM messages WHERE session_id = ? AND msg_id = ? AND seq = ?', m.sessionId, qualified[1]!, m.seq)
+            const legacy = db.get<{ msg_id: string }>(
+              'SELECT msg_id FROM messages WHERE session_id = ? AND msg_id = ? AND seq = ?',
+              m.sessionId,
+              qualified[1],
+              m.seq,
+            )
             if (legacy) {
-              db.run('UPDATE messages SET msg_id = ? WHERE session_id = ? AND msg_id = ?', m.id, m.sessionId, legacy.msg_id)
-              db.run('UPDATE voice_transcripts SET msg_id = ? WHERE session_id = ? AND msg_id = ?', m.id, m.sessionId, legacy.msg_id)
+              db.run(
+                'UPDATE messages SET msg_id = ? WHERE session_id = ? AND msg_id = ?',
+                m.id,
+                m.sessionId,
+                legacy.msg_id,
+              )
+              db.run(
+                'UPDATE voice_transcripts SET msg_id = ? WHERE session_id = ? AND msg_id = ?',
+                m.id,
+                m.sessionId,
+                legacy.msg_id,
+              )
             }
           }
           const r = db.run(
@@ -112,11 +133,17 @@ export function createMessageOps(db: Db): MessageOps {
           // Re-reading a page upgrades old presentation without discarding decrypted media,
           // transcripts, watermarks, or counting an existing message as newly inserted.
           if (r.changes === 0 && m.presentationVersion) {
-            db.run(`UPDATE messages SET kind = ?, text = ?, quote_json = ?, presentation_json = ?
+            db.run(
+              `UPDATE messages SET kind = ?, text = ?, quote_json = ?, presentation_json = ?
               WHERE session_id = ? AND msg_id = ? AND COALESCE(presentation_json, '') != ?`,
-              m.kind, m.text, m.quote ? JSON.stringify(m.quote) : null,
-              JSON.stringify({ rich: m.rich, presentationVersion: m.presentationVersion }), m.sessionId, m.id,
-              JSON.stringify({ rich: m.rich, presentationVersion: m.presentationVersion }))
+              m.kind,
+              m.text,
+              m.quote ? JSON.stringify(m.quote) : null,
+              JSON.stringify({ rich: m.rich, presentationVersion: m.presentationVersion }),
+              m.sessionId,
+              m.id,
+              JSON.stringify({ rich: m.rich, presentationVersion: m.presentationVersion }),
+            )
           }
           if (r.changes > 0) {
             const cur = perSession.get(m.sessionId) ?? { inserted: 0, maxSeq: -Infinity }
@@ -177,12 +204,20 @@ export function createMessageOps(db: Db): MessageOps {
     },
 
     getMessage(sessionId, messageId) {
-      const row = db.get<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND msg_id = ?`, sessionId, messageId)
+      const row = db.get<MessageRow>(
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND msg_id = ?`,
+        sessionId,
+        messageId,
+      )
       return row ? rowToMessage(row) : undefined
     },
 
     getMessageBySeq(sessionId, seq) {
-      const row = db.get<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND seq = ? LIMIT 1`, sessionId, seq)
+      const row = db.get<MessageRow>(
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND seq = ? LIMIT 1`,
+        sessionId,
+        seq,
+      )
       return row ? rowToMessage(row) : undefined
     },
 
@@ -194,7 +229,12 @@ export function createMessageOps(db: Db): MessageOps {
         anchor.seq,
         r,
       )
-      const at = db.all<MessageRow>(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND (msg_id = ? OR seq = ?) ORDER BY seq ASC`, anchor.sessionId, anchor.messageId, anchor.seq)
+      const at = db.all<MessageRow>(
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND (msg_id = ? OR seq = ?) ORDER BY seq ASC`,
+        anchor.sessionId,
+        anchor.messageId,
+        anchor.seq,
+      )
       const after = db.all<MessageRow>(
         `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
         anchor.sessionId,
@@ -222,12 +262,18 @@ export function createMessageOps(db: Db): MessageOps {
     },
 
     countMessages(sessionId) {
-      if (sessionId) return num(db.get<{ c: number }>('SELECT COUNT(*) AS c FROM messages WHERE session_id = ?', sessionId)?.c)
+      if (sessionId)
+        return num(db.get<{ c: number }>('SELECT COUNT(*) AS c FROM messages WHERE session_id = ?', sessionId)?.c)
       return num(db.get<{ c: number }>('SELECT COUNT(*) AS c FROM messages')?.c)
     },
 
     updateMedia(sessionId, messageId, media) {
-      db.run('UPDATE messages SET media_json = ? WHERE session_id = ? AND msg_id = ?', media ? JSON.stringify(media) : null, sessionId, messageId)
+      db.run(
+        'UPDATE messages SET media_json = ? WHERE session_id = ? AND msg_id = ?',
+        media ? JSON.stringify(media) : null,
+        sessionId,
+        messageId,
+      )
     },
 
     removeSession(sessionId) {
@@ -235,6 +281,7 @@ export function createMessageOps(db: Db): MessageOps {
         db.run('DELETE FROM chunk_vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE session_id = ?)', sessionId)
         db.run('DELETE FROM chunks WHERE session_id = ?', sessionId)
         db.run('DELETE FROM voice_transcripts WHERE session_id = ?', sessionId)
+        db.run('DELETE FROM message_extras WHERE session_id = ?', sessionId)
         db.run('DELETE FROM messages WHERE session_id = ?', sessionId)
         db.run('UPDATE sessions SET watermark_seq = 0, indexed_count = 0, indexed_until = NULL WHERE id = ?', sessionId)
       })
@@ -242,10 +289,20 @@ export function createMessageOps(db: Db): MessageOps {
 
     transcripts: {
       get(sessionId, messageId) {
-        return db.get<{ text: string }>('SELECT text FROM voice_transcripts WHERE session_id = ? AND msg_id = ?', sessionId, messageId)?.text
+        return db.get<{ text: string }>(
+          'SELECT text FROM voice_transcripts WHERE session_id = ? AND msg_id = ?',
+          sessionId,
+          messageId,
+        )?.text
       },
       set(sessionId, messageId, text) {
-        db.run('INSERT OR REPLACE INTO voice_transcripts (session_id, msg_id, text, created_at) VALUES (?, ?, ?, ?)', sessionId, messageId, text, nowMs())
+        db.run(
+          'INSERT OR REPLACE INTO voice_transcripts (session_id, msg_id, text, created_at) VALUES (?, ?, ?, ?)',
+          sessionId,
+          messageId,
+          text,
+          nowMs(),
+        )
       },
     },
 

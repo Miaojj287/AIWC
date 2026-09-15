@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { Dialog as Radix } from 'radix-ui'
 import type { ReactNode } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE } from './icon'
 
@@ -22,6 +23,7 @@ export interface DrawerProps {
  * (all auto-reply records) — never for a new feature page, which is a workspace Tab (CLAUDE.md §1).
  */
 export function Drawer({ open, onOpenChange, title, actions, children, footer, width = 360, className }: DrawerProps) {
+  const t = useT()
   return (
     <Radix.Root open={open} onOpenChange={onOpenChange}>
       <Radix.Portal>
@@ -38,7 +40,7 @@ export function Drawer({ open, onOpenChange, title, actions, children, footer, w
             <Radix.Description className="sr-only">{title}</Radix.Description>
             {actions}
             <Radix.Close
-              aria-label="关闭"
+              aria-label={t('kit.close')}
               className="inline-flex size-6 items-center justify-center rounded-control text-fg-3 outline-none hover:bg-line-8 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
             >
               <X size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden />

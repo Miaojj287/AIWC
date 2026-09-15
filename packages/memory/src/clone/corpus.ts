@@ -98,7 +98,11 @@ export function mergeTurns(messages: readonly WxMessage[], subjectIsSelf: boolea
   return turns
 }
 
-export function computeStats(messages: readonly WxMessage[], turns: readonly CloneTurn[], subjectIsSelf: boolean): CorpusStats {
+export function computeStats(
+  messages: readonly WxMessage[],
+  turns: readonly CloneTurn[],
+  subjectIsSelf: boolean,
+): CorpusStats {
   const isSubject = (m: WxMessage) => (subjectIsSelf ? m.isSelf : !m.isSelf)
   let voiceCount = 0
   let transcribedVoiceCount = 0
@@ -172,7 +176,12 @@ export function turnLine(turn: CloneTurn, subjectName: string, otherName: string
  * (the obvious choice) silently throws away years of a relationship and produces a profile of the
  * last few weeks; keeping the tail *and* evenly sampling the rest costs the same number of calls.
  */
-export function renderChunks(turns: readonly CloneTurn[], subjectName: string, otherName: string, maxChunks = PROFILE_MAX_CHUNKS): string[] {
+export function renderChunks(
+  turns: readonly CloneTurn[],
+  subjectName: string,
+  otherName: string,
+  maxChunks = PROFILE_MAX_CHUNKS,
+): string[] {
   const chunks: string[] = []
   let cur: string[] = []
   let chars = 0

@@ -1,5 +1,12 @@
 import { Check, Ellipsis, Pin, PinOff, RotateCcw, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent,
+} from 'react'
 import { shortcutLabel } from '@/app/shortcuts'
 import {
   cn,
@@ -16,7 +23,8 @@ import {
   type MenuSpec,
 } from '@/kit'
 import { tabIcon } from './tabIcons'
-import { getTabRegistration, type TabDescriptor } from './tabRegistry'
+import { t, useLanguage } from '@/i18n'
+import { getTabRegistration, tabTitle, type TabDescriptor } from './tabRegistry'
 import { useTabsStore } from './tabsStore'
 
 export interface TabStripProps {
@@ -31,6 +39,7 @@ export interface TabStripProps {
  * horizontal overflow scroll with a `···` manager menu on the right (DESIGN-SPEC §0.3).
  */
 export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
+  useLanguage() // registered tab titles are localized at render
   const tabs = useTabsStore((s) => s.tabs)
   const activeId = useTabsStore((s) => s.activeId)
   const canReopen = useTabsStore((s) => s.recentlyClosed.length > 0)
@@ -42,12 +51,25 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
     },
     [onRequestClose],
   )
-  const closeOthers = useCallback((id: string) => closeMany(store().tabs.filter((t) => t.id !== id && !t.pinned).map((t) => t.id)), [closeMany, store])
+  const closeOthers = useCallback(
+    (id: string) =>
+      closeMany(
+        store()
+          .tabs.filter((t) => t.id !== id && !t.pinned)
+          .map((t) => t.id),
+      ),
+    [closeMany, store],
+  )
   const closeToRight = useCallback(
     (id: string) => {
       const list = store().tabs
       const idx = list.findIndex((t) => t.id === id)
-      return closeMany(list.slice(idx + 1).filter((t) => !t.pinned).map((t) => t.id))
+      return closeMany(
+        list
+          .slice(idx + 1)
+          .filter((t) => !t.pinned)
+          .map((t) => t.id),
+      )
     },
     [closeMany, store],
   )
@@ -96,7 +118,13 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
 
   return (
     <div className="workspace-tab-strip flex h-10 shrink-0 items-stretch bg-shell pr-2" data-testid="tab-strip">
-      <div ref={scrollRef} role="tablist" aria-label="工作区标签" onWheel={onWheel} className="scrollbar-none flex min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden">
+      <div
+        ref={scrollRef}
+        role="tablist"
+        aria-label={t('workspace.tabStrip.ariaLabel')}
+        onWheel={onWheel}
+        className="scrollbar-none flex min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden"
+      >
         {tabs.map((tab, index) => {
           const reg = getTabRegistration(tab.kind)
           return (
@@ -105,7 +133,7 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
                 <Tab
                   ref={(el) => drag.register(tab.id, el)}
                   icon={tabIcon(tab.kind, reg?.icon)}
-                  label={tab.title}
+                  label={tabTitle(tab)}
                   active={tab.id === activeId}
                   pinned={tab.pinned}
                   dirty={tab.dirty}
@@ -131,7 +159,7 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
       <div className="flex shrink-0 items-center pl-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <IconButton icon={Ellipsis} label="标签管理" />
+            <IconButton icon={Ellipsis} label={t('workspace.tabStrip.manage')} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[220px]">
             <DropdownMenuItems items={overflow} />
@@ -159,13 +187,37 @@ export interface TabMenuContext {
 /** Per-tab right-click menu (Figma 149:415 ③): 关闭 / 关闭其他 / 关闭右侧 — 固定标签 — 恢复已关闭. */
 export function tabMenuSpec(tab: TabDescriptor, ctx: TabMenuContext): MenuSpec {
   return [
-    { id: 'close', label: '关闭', icon: X, shortcut: shortcutLabel('tab.closeActive', ctx.mac), disabled: Boolean(tab.pinned), onSelect: ctx.close },
-    { id: 'closeOthers', label: '关闭其他', disabled: !ctx.hasOthers, onSelect: ctx.closeOthers },
-    { id: 'closeRight', label: '关闭右侧', disabled: !ctx.hasRight, onSelect: ctx.closeRight },
+    {
+      id: 'close',
+      label: t('workspace.tabStrip.close'),
+      icon: X,
+      shortcut: shortcutLabel('tab.closeActive', ctx.mac),
+      disabled: Boolean(tab.pinned),
+      onSelect: ctx.close,
+    },
+    {
+      id: 'closeOthers',
+      label: t('workspace.tabStrip.closeOthers'),
+      disabled: !ctx.hasOthers,
+      onSelect: ctx.closeOthers,
+    },
+    { id: 'closeRight', label: t('workspace.tabStrip.closeRight'), disabled: !ctx.hasRight, onSelect: ctx.closeRight },
     { type: 'separator' },
-    { id: 'pin', label: tab.pinned ? '取消固定' : '固定标签', icon: tab.pinned ? PinOff : Pin, onSelect: ctx.togglePin },
+    {
+      id: 'pin',
+      label: tab.pinned ? t('workspace.tabStrip.unpin') : t('workspace.tabStrip.pin'),
+      icon: tab.pinned ? PinOff : Pin,
+      onSelect: ctx.togglePin,
+    },
     { type: 'separator' },
-    { id: 'reopen', label: '恢复已关闭的标签', icon: RotateCcw, shortcut: shortcutLabel('tab.reopenClosed', ctx.mac), disabled: !ctx.canReopen, onSelect: ctx.reopen },
+    {
+      id: 'reopen',
+      label: t('workspace.tabStrip.reopen'),
+      icon: RotateCcw,
+      shortcut: shortcutLabel('tab.reopenClosed', ctx.mac),
+      disabled: !ctx.canReopen,
+      onSelect: ctx.reopen,
+    },
   ]
 }
 
@@ -179,24 +231,49 @@ export interface OverflowMenuContext {
 }
 
 /** The `···` manager: every open tab (check on the active one) — 恢复已关闭 / 关闭其他 / 关闭右侧. */
-export function overflowMenuSpec(tabs: readonly TabDescriptor[], activeId: string | null, ctx: OverflowMenuContext): MenuSpec {
-  const items: MenuSpec = [{ type: 'label', id: 'tabs', label: tabs.length ? `标签页 · ${tabs.length}` : '没有打开的标签' }]
+export function overflowMenuSpec(
+  tabs: readonly TabDescriptor[],
+  activeId: string | null,
+  ctx: OverflowMenuContext,
+): MenuSpec {
+  const items: MenuSpec = [
+    {
+      type: 'label',
+      id: 'tabs',
+      label: tabs.length ? t('workspace.tabStrip.count', { n: tabs.length }) : t('workspace.tabStrip.none'),
+    },
+  ]
   for (const tab of tabs) {
     items.push({
       id: `tab:${tab.id}`,
-      label: tab.title,
+      label: tabTitle(tab),
       icon: tabIcon(tab.kind, getTabRegistration(tab.kind)?.icon),
-      badge: tab.id === activeId ? <Check size={12} strokeWidth={2} aria-label="当前" className="text-accent" /> : undefined,
+      badge:
+        tab.id === activeId ? (
+          <Check size={12} strokeWidth={2} aria-label={t('workspace.tabStrip.current')} className="text-accent" />
+        ) : undefined,
       onSelect: () => ctx.activate(tab.id),
     })
   }
   items.push(
     { type: 'separator' },
-    { id: 'reopen', label: '恢复已关闭的标签', icon: RotateCcw, shortcut: shortcutLabel('tab.reopenClosed', ctx.mac), disabled: !ctx.canReopen, onSelect: ctx.reopen },
-    { id: 'closeOthers', label: '关闭其他', disabled: !activeId || tabs.filter((t) => t.id !== activeId && !t.pinned).length === 0, onSelect: ctx.closeOthers },
+    {
+      id: 'reopen',
+      label: t('workspace.tabStrip.reopen'),
+      icon: RotateCcw,
+      shortcut: shortcutLabel('tab.reopenClosed', ctx.mac),
+      disabled: !ctx.canReopen,
+      onSelect: ctx.reopen,
+    },
+    {
+      id: 'closeOthers',
+      label: t('workspace.tabStrip.closeOthers'),
+      disabled: !activeId || tabs.filter((t) => t.id !== activeId && !t.pinned).length === 0,
+      onSelect: ctx.closeOthers,
+    },
     {
       id: 'closeRight',
-      label: '关闭右侧',
+      label: t('workspace.tabStrip.closeRight'),
       disabled: !activeId || !tabs.slice(tabs.findIndex((t) => t.id === activeId) + 1).some((t) => !t.pinned),
       onSelect: ctx.closeRight,
     },

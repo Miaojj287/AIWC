@@ -9,27 +9,31 @@ Gallery：工作区 Tab `kit`（`src/features/kit`），每个组件 × 每个�
 | 组件 | 一句话 | 什么时候用 |
 |---|---|---|
 | `Button` | primary / ghost / outline / danger / link，h30 r6，sm h26；`icon`、`loading` | 每屏一个 primary；danger 只在破坏性确认；link 做行内动作 |
-| `IconButton` | 28 方形图标钮，`label` 必填；`active` = 橙 15% 底 | 工具栏、hover 露出的 `···`、输入框尾部（size xs） |
+| `IconButton` | 28 方形图标钮，`label` 必填；`active` = 强调色 15% 底 | 工具栏、hover 露出的 `···`、输入框尾部（size xs） |
 | `Toggle` | Radix Switch 36×20 | 即时生效的开 / 关（设置行右侧、规则启停） |
 | `Checkbox` | 16 r4，支持 `indeterminate`，可带 `label / description` | 多选、导出勾选、全选 |
-| `Radio` / `RadioGroup` | 16 圆，选中 5px 橙环 | 弹窗 / popover 里的单选表单；主界面不用 radio |
+| `Radio` / `RadioGroup` | 16 圆，选中 5px 强调色环 | 弹窗 / popover 里的单选表单；主界面不用 radio |
 | `SegmentedControl` | 2–3 选一，←/→ 键盘移动即选中 | 主题、全部 / 已开启 / 已暂停、本地 / 在线 |
 | `Select` | 触发器 h28 + 带勾 / 描述 / 徽标 / 搜索 / 「管理…」页脚的列表 | 从若干项里选一个（模型、提供商、触发方式） |
+| `ColorField` | 左侧色样（点开色板）+ 右侧可编辑 HEX，3 / 6 位；拖动只更新局部预览，松手 / 回车 / 失焦才 `onCommit` | 外观设置里的强调色、背景、前景、字体色 |
 | `Input` | h32，6 态；`icon`、`trailing`、`mono`、密码 👁、`error` 行内报错 | 所有单行输入；路径 / wxid / 密钥用 `mono` |
 | `Textarea` | 同框，12/18；`autosize` | 提示词、固定文案、记忆编辑 |
 | `SearchBox` | 搜索图标 + 清除 ×；Enter 提交，Esc 清空 | 会话搜索、设置搜索、成员筛选 |
-| `FieldLabel` | 图标 + 名称 + ? tooltip + 提示 + 状态 | 向导 / 设置里的字段标题行 |
+| `FieldLabel` | 图标 + 名称 + `help` 问号 + 提示 + 状态（状态单行截断） | 向导 / 设置里的字段标题行 |
 | `Badge` | 语义色 14% 底 + 30% 描边；`dot` 变体 | 已验证 / 未验证 / 本地 / 分身 / 失败 / 等待确认 |
-| `Chip` | filter（带计数，选中橙 12%）/ mention（橙 chip + ×） | 列表筛选；Agent 输入框的 @ 引用 |
-| `InlineHint` | 图标 12 + 文字 11.5，四种语义色 | 控件下的校验 / 状态一句话 |
+| `Chip` | filter（带计数，选中强调色 12%）/ mention（强调色 chip + ×） | 列表筛选；Agent 输入框的 @ 引用 |
+| `InlineHint` | 图标 12 + 文字 11.5，四种语义色；`truncate` 单行省略并把全文放进 `title` | 控件下的校验 / 状态一句话；窄标题栏里的状态行用 `truncate` |
 | `Spinner` | 12 / 16 / 24 旋转 loader | 加载中、按钮 loading、同步条 |
 | `ProgressBar` | 6px 条，确定 / 不确定 | 下载、克隆、密钥获取、上下文占用 |
 | `Skeleton` / `SkeletonListRows` | 脉冲占位；列表行骨架 | 列表首次加载 |
 | `EmptyState` | empty / loading / error / no-results 一个模板 | 每个列表 / 区域必备四态 |
+| `ErrorBoundary` | 子树渲染出错时显示 `EmptyState` 错误态 +「重试」（重新挂载子树）；`compact`、`fallback` | 每个 Tab 宿主、对象列表主体、Agent 面板；内容整体换掉时给它 `key`，旧错误不残留 |
 | `toast()` / `Toaster` / `ToastView` | store + 右下角容器；4s 自动消失，带操作 / progress 常驻 | 操作结果；`Toaster` 只在 App 挂一次 |
-| `Tooltip` / `TooltipProvider` | 纯文字 / 带 `kbd` / 两行 | 图标按钮说明、禁用原因、上下文明细 |
+| `Tooltip` / `TooltipProvider` | 纯文字 / 带 `kbd` / 两行 / `multiline` 说明（最宽 240 可换行） | 图标按钮说明、禁用原因、上下文明细 |
+| `HelpTip` | 13 问号图标 + `multiline` Tooltip，无障碍名「{subject}说明」 | 替代长说明文字：`SettingRow` / `Section` / `FieldLabel` 的 `help` 已内置，不要手摆 |
 | `Popover*` | r12 浮层卡 | 轻量确认 / 小表单（权限确认、会话信息、纠正） |
 | `DropdownMenu*` / `ContextMenu*` / `MenuSpec` | 同一套项样式：h30 / 带描述 42、分组、快捷键、子菜单、禁用、徽标、危险项最后 | `···` 与右键用同一份 `MenuSpec` |
+| `MenuItemContent` / `menuItemClass` / `menuLabelClass` | 菜单项的内部布局与类名（与上面同一套） | 不是 Radix 菜单、但要长得像菜单项的列表：输入框建议列表、线程列表 |
 | `Dialog*` | 基础件：`DialogContent`(size / lockOutside / lockEscape) + `DialogHeader` + `DialogBody` + `DialogFooter` | 自己组合特殊弹窗时 |
 | `ConfirmDialog` | info 图标，取消默认焦点 | 普通二次确认 |
 | `DangerDialog` | danger 主按钮，遮罩点击不关闭，可选 `confirmWord` | 删除 / 清空 / 撤回 / 发送 |
@@ -37,9 +41,9 @@ Gallery：工作区 Tab `kit`（`src/features/kit`），每个组件 × 每个�
 | `ProgressDialog` | 进度条 + 状态 + 步骤 ✓/⟳/○/!，只有取消 | 长任务 |
 | `Drawer` | 右侧 360 抽屉 | 长列表详情（全部记录）；不做功能页 |
 | `Avatar` | 36 / 28 / 20，首字 + 8 个哈希渐变块；`members` 九宫格（r4 色块 / 图片，格内不放文字） | 会话 / 联系人 / 群 |
-| `ListItem` | 头像 36｜标题 13 + 副标题 12｜meta / trailing；选中橙 12%，hover 露出 `hoverActions` | 会话、联系人、规则 |
-| `SettingRow` | 标题 + 说明｜控件；行间 1px；`stacked` 整行控件 | 所有设置页；放在 `<Card variant="rows">` 里 |
-| `Tab` | h40，激活 = 与内容同底 + 上圆角 8 + 橙图标 + ×；`pinned` / `dirty` | 工作区与 Agent 面板的 Tab 条 |
+| `ListItem` | 头像 36｜标题 13 + 副标题 12｜meta / trailing；选中强调色 12%，hover 露出 `hoverActions` | 会话、联系人、规则 |
+| `SettingRow` | 标题 + 一句说明 + `help` 问号｜控件；行间 1px；`stacked` 整行控件；窄于 380px 时控件自动落到文字下方 | 所有设置页；放在 `<Card variant="rows">` 里 |
+| `Tab` | h40，激活 = 与内容同底 + 上圆角 8 + 强调色图标 + ×；`pinned` / `dirty` | 工作区与 Agent 面板的 Tab 条 |
 | `Card` | 面板底 + 1px line-6 + r12 + p16，无投影 | 分组内容、设置卡、克隆确认页 |
 | `Kbd` | 快捷键胶囊 | tooltip / 菜单里的快捷键 |
 | `Divider` | 1px 线，可竖向 / 带文字 | 层与层之间 |
@@ -47,3 +51,6 @@ Gallery：工作区 Tab `kit`（`src/features/kit`），每个组件 × 每个�
 
 约定：图标只用 lucide（stroke 1.75）；不用 emoji；每个可点的东西都有 hover / focus-visible / disabled 态；
 破坏性动作走 `DangerDialog`；长任务走 `ProgressDialog`；结果走 `toast`；校验走 `Input error` / `InlineHint`。
+
+截断：单行文字的 `truncate` 放在文字自己的 span 上，不放在 `flex` / `inline-flex` 容器上（否则会截出半个字而没有「…」），flex 链上的每一项加 `min-w-0`。`truncation.test.ts` 会检查同一 class 串里是否同时出现 `flex` 和 `truncate`。
+

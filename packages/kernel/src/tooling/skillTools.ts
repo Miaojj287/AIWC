@@ -1,12 +1,15 @@
 /**
- * Skill tools: `skill_view` reads a skill body; `skill_manage` lets the desktop agent create /
- * patch / delete skills under the first agent- or user-writable directory.
+ * Skill tools: `skill_view` reads a skill body; `skill_manage` lets the desktop agent create or patch
+ * skills under the first agent- or user-writable directory; `skill_delete` removes one. Deleting is its
+ * own tool because its risk differs: `destructive` always asks and can never be allowed permanently,
+ * whereas a create/patch approval may be remembered.
  */
 import { promises as fsp } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { z } from 'zod'
-import { defineTool, type ToolDefinition, type ToolProfile, type ToolResult } from '@aiwc/protocol'
+import { defineTool, type AnyToolDefinition, type ToolProfile, type ToolResult } from '@aiwc/protocol'
 import { parseSkillFile, SKILL_BODY_MAX_CHARS, SKILL_FILE, type SkillIndexExt } from './skillIndex'
+import type { SkillMeta } from '../ports'
 
 export const SKILL_NAME_RE = /^[a-z0-9-]{2,40}$/
 
@@ -18,7 +21,7 @@ const SkillViewInput = z.object({
 })
 
 const SkillManageInput = z.object({
-  action: z.enum(['create', 'patch', 'delete']).describe('create=新建；patch=修改；delete=删除'),
+  action: z.enum(['create', 'patch']).describe('create=新建；patch=修改'),
   name: z.string().min(1).describe('技能名称，只允许小写字母、数字和连字符（2–40 字符）'),
   content: z.string().optional().describe('create / patch 时的完整 SKILL.md 内容（含 --- frontmatter ---）'),
   find: z.string().optional().describe('patch 时要替换的原文（与 replace 搭配；不提供 content 时使用）'),
@@ -26,9 +29,13 @@ const SkillManageInput = z.object({
 })
 type SkillManageInputT = z.infer<typeof SkillManageInput>
 
+const SkillDeleteInput = z.object({
+  name: z.string().min(1).describe('要删除的技能名称（只能删除用户或 Agent 创建的技能）'),
+})
+
 const err = (message: string): ToolResult => ({ content: message, isError: true })
 
-export function skillTools(index: SkillIndexExt): ToolDefinition<any, any>[] { // eslint-disable-line @typescript-eslint/no-explicit-any
+export function skillTools(index: SkillIndexExt): AnyToolDefinition[] {
   const skillView = defineTool<z.infer<typeof SkillViewInput>>({
     name: 'skill_view',
     description: '读取一个技能（SKILL.md）的完整说明。先在 <skills_index> 里找到名称，需要按技能行事时再调用。',
@@ -49,24 +56,17 @@ export function skillTools(index: SkillIndexExt): ToolDefinition<any, any>[] { /
 
   const skillManage = defineTool<SkillManageInputT>({
     name: 'skill_manage',
-    description: '新建、修改或删除用户技能（SKILL.md）。内容必须以 YAML frontmatter 开头并包含 name 与 description；只能操作用户或 Agent 创建的技能。',
+    description:
+      '新建或修改用户技能（SKILL.md）。内容必须以 YAML frontmatter 开头并包含 name 与 description；只能操作用户或 Agent 创建的技能。删除请用 skill_delete。',
     inputSchema: SkillManageInput,
     profiles: ['desktop-chat'],
     risk: 'write',
     parallelSafe: false,
-    summarize: (i) => `${i.action === 'create' ? '新建' : i.action === 'patch' ? '修改' : '删除'}技能 ${i.name}`,
+    summarize: (i) => `${i.action === 'create' ? '新建' : '修改'}技能 ${i.name}`,
     async execute(input) {
-      const target = index.writableDir()
-      if (!target) return err('没有可写的技能目录')
-      if (!SKILL_NAME_RE.test(input.name)) return err('技能名称无效：只允许小写字母、数字和连字符，长度 2–40')
-
-      const root = resolve(target.path)
-      const dir = resolve(root, input.name)
-      if (!dir.startsWith(root + sep)) return err('技能名称非法')
-      const file = join(dir, SKILL_FILE)
-      const existing = index.get(input.name)
-      if (existing && existing.source === 'builtin') return err(`内置技能不可修改：${input.name}`)
-      if (existing && resolve(existing.dir) !== dir) return err(`技能 ${input.name} 位于其他目录，无法操作`)
+      const target = resolveSkillTarget(index, input.name)
+      if ('error' in target) return err(target.error)
+      const { dir, file, existing } = target
 
       switch (input.action) {
         case 'create': {
@@ -87,7 +87,9 @@ export function skillTools(index: SkillIndexExt): ToolDefinition<any, any>[] { /
           } else if (input.find !== undefined && input.replace !== undefined) {
             const current = await fsp.readFile(file, 'utf8')
             if (!current.includes(input.find)) return err('patch 失败：未找到要替换的原文')
-            next = current.replace(input.find, input.replace)
+            const replacement = input.replace
+            // A replacer function inserts the text literally; a string would expand `$&`, `$$`, `` $` `` in snippets.
+            next = current.replace(input.find, () => replacement)
           } else {
             return err('patch 需要提供 content，或 find 与 replace')
           }
@@ -97,25 +99,62 @@ export function skillTools(index: SkillIndexExt): ToolDefinition<any, any>[] { /
           await index.refresh()
           return { content: `已更新技能 ${input.name}` }
         }
-        case 'delete': {
-          if (!existing) return err(`未找到技能：${input.name}`)
-          await fsp.rm(dir, { recursive: true, force: true })
-          await index.refresh()
-          return { content: `已删除技能 ${input.name}` }
-        }
       }
     },
   })
 
-  return [skillView, skillManage]
+  const skillDelete = defineTool<z.infer<typeof SkillDeleteInput>>({
+    name: 'skill_delete',
+    description: '删除一个用户或 Agent 创建的技能（整个技能目录，不可恢复）。内置技能不可删除。',
+    inputSchema: SkillDeleteInput,
+    profiles: ['desktop-chat'],
+    risk: 'destructive',
+    parallelSafe: false,
+    summarize: (i) => `删除技能 ${i.name}`,
+    async execute(input) {
+      const target = resolveSkillTarget(index, input.name)
+      if ('error' in target) return err(target.error)
+      if (!target.existing) return err(`未找到技能：${input.name}`)
+      await fsp.rm(target.dir, { recursive: true, force: true })
+      await index.refresh()
+      return { content: `已删除技能 ${input.name}` }
+    },
+  })
+
+  return [skillView, skillManage, skillDelete]
 }
 
-function validateContent(content: string, name: string): { content: string; error?: undefined } | { content?: undefined; error: string } {
-  if (content.length > SKILL_BODY_MAX_CHARS) return { error: `技能内容过长：${content.length} 字符，上限 ${SKILL_BODY_MAX_CHARS}` }
+interface SkillTarget {
+  dir: string
+  file: string
+  existing: SkillMeta | undefined
+}
+
+/** Where a writable skill lives. Refuses invalid names, paths outside the writable dir, and built-in skills. */
+function resolveSkillTarget(index: SkillIndexExt, name: string): SkillTarget | { error: string } {
+  const target = index.writableDir()
+  if (!target) return { error: '没有可写的技能目录' }
+  if (!SKILL_NAME_RE.test(name)) return { error: '技能名称无效：只允许小写字母、数字和连字符，长度 2–40' }
+  const root = resolve(target.path)
+  const dir = resolve(root, name)
+  if (!dir.startsWith(root + sep)) return { error: '技能名称非法' }
+  const existing = index.get(name)
+  if (existing?.source === 'builtin') return { error: `内置技能不可修改：${name}` }
+  if (existing && resolve(existing.dir) !== dir) return { error: `技能 ${name} 位于其他目录，无法操作` }
+  return { dir, file: join(dir, SKILL_FILE), existing }
+}
+
+function validateContent(
+  content: string,
+  name: string,
+): { content: string; error?: undefined } | { content?: undefined; error: string } {
+  if (content.length > SKILL_BODY_MAX_CHARS)
+    return { error: `技能内容过长：${content.length} 字符，上限 ${SKILL_BODY_MAX_CHARS}` }
   const { frontmatter, body } = parseSkillFile(content)
   if (!frontmatter) return { error: '缺少 YAML frontmatter（需以 --- 开头并包含 name 与 description）' }
   if (!frontmatter.name?.trim()) return { error: 'frontmatter 缺少 name' }
-  if (frontmatter.name.trim() !== name) return { error: `frontmatter 的 name（${frontmatter.name}）与技能名称（${name}）不一致` }
+  if (frontmatter.name.trim() !== name)
+    return { error: `frontmatter 的 name（${frontmatter.name}）与技能名称（${name}）不一致` }
   if (!frontmatter.description?.trim()) return { error: 'frontmatter 缺少 description' }
   if (!body.trim()) return { error: '技能正文为空' }
   return { content }

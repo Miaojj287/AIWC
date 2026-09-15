@@ -8,6 +8,7 @@ import type { ModelResolverLike } from '../contracts'
 import type { SecretStore } from '../config/secretStore'
 import type { Logger } from '../log'
 import { nullLogger } from '../log'
+import { t } from '../i18n'
 
 export interface ModelResolverDeps {
   config: () => AppConfig
@@ -19,7 +20,7 @@ export interface ModelResolverDeps {
 export class ModelNotConfiguredError extends Error {
   readonly code = 'invalid_request' as const
   readonly retryable = false
-  constructor(message = '尚未配置模型。请到「设置 › AI 接入」添加模型服务商并选择默认模型。') {
+  constructor(message = t('main.ai.notConfigured')) {
     super(message)
     this.name = 'ModelNotConfiguredError'
   }
@@ -45,9 +46,12 @@ export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike 
   function find(selection: ModelSelection): { provider: ProviderConfig; model: ProviderConfig['models'][number] } {
     const cfg = deps.config()
     const provider = cfg.ai.providers.find((p) => p.id === selection.providerId)
-    if (!provider) throw new ModelNotConfiguredError(`找不到模型服务商「${selection.providerId}」，请检查「设置 › AI 接入」。`)
+    if (!provider) throw new ModelNotConfiguredError(t('main.ai.providerNotFound', { provider: selection.providerId }))
     const model = provider.models.find((m) => m.modelId === selection.modelId)
-    if (!model) throw new ModelNotConfiguredError(`服务商「${provider.label}」下没有模型「${selection.modelId}」。`)
+    if (!model)
+      throw new ModelNotConfiguredError(
+        t('main.ai.modelNotFound', { provider: provider.label, model: selection.modelId }),
+      )
     return { provider, model }
   }
 
@@ -56,9 +60,9 @@ export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike 
     const hit = cache.get(key)
     if (hit) return hit
     const { provider, model } = find(selection)
-    const apiKey = provider.apiKeyRef ? deps.secrets.reveal(provider.apiKeyRef) ?? undefined : undefined
+    const apiKey = provider.apiKeyRef ? (deps.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined
     if (!apiKey && !isLocalProvider(provider)) {
-      log.warn(`服务商 ${provider.id} 没有可用的 API Key（ref=${provider.apiKeyRef ?? '无'}）`)
+      log.warn(`provider ${provider.id} has no usable API key (ref=${provider.apiKeyRef ?? 'none'})`)
     }
     const client = createAiSdkModelClient({ provider, model, apiKey })
     cache.set(key, client)
@@ -69,16 +73,27 @@ export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike 
     clientFor,
     invalidate: () => cache.clear(),
     async resolve(selection) {
-      const requested = selection && deps.config().ai.providers.find(p => p.id === selection.providerId)?.models.find(m => m.modelId === selection.modelId)
-      const sel = requested && requested.enabled !== false && requested.available !== false ? selection : deps.config().ai.defaultModel
-      if (!sel) throw new ModelNotConfiguredError()
-      return clientFor(sel)
+      const cfg = deps.config()
+      const provider = selection && cfg.ai.providers.find((p) => p.id === selection.providerId)
+      const requested = selection && provider?.models.find((m) => m.modelId === selection.modelId)
+      if (selection && requested && requested.enabled !== false && requested.available !== false)
+        return clientFor(selection)
+      // A thread pinned to a local model must never be silently moved to the (possibly online) default.
+      if (provider && isLocalProvider(provider))
+        throw new ModelNotConfiguredError(
+          t('main.ai.modelNotFound', { provider: provider.label, model: selection?.modelId ?? '' }),
+        )
+      if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
+      return clientFor(cfg.ai.defaultModel)
     },
-    async resolveAuxiliary() {
-      // No separate "cheap" model in config yet: reuse the default. Kept as a seam for later.
-      const sel = deps.config().ai.defaultModel
-      if (!sel) throw new ModelNotConfiguredError()
-      return clientFor(sel)
+    async resolveAuxiliary(primary) {
+      // No separate "cheap" model in config yet. A local thread keeps using its own local model; everything else
+      // uses the default. Never route a local thread's content to an online provider.
+      const cfg = deps.config()
+      const provider = primary && cfg.ai.providers.find((p) => p.id === primary.providerId)
+      if (primary && provider && isLocalProvider(provider)) return clientFor(primary)
+      if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
+      return clientFor(cfg.ai.defaultModel)
     },
     list() {
       const cfg = deps.config()

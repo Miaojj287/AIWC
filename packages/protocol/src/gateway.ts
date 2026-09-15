@@ -87,9 +87,7 @@ export interface PlatformAdapter {
   recall?(messageId: string, to: SessionSource): Promise<SendResult>
 }
 
-export type ReplyDecision =
-  | { reply: true; reason: string }
-  | { reply: false; reason: string; observe: boolean }
+export type ReplyDecision = { reply: true; reason: string } | { reply: false; reason: string; observe: boolean }
 
 /** Injected into tools that may send. Enforces origin-only for bot channels. */
 export interface GatewayOutbound {

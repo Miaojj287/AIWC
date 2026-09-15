@@ -3,10 +3,11 @@
  * objectId = contactId) and the `tab.openClone` command.
  */
 import { onCommand } from '@/app/commands'
+import { t } from '@/i18n'
 import { registerObjectList } from '@/shell/objectListRegistry'
 import { registerTab } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
-import { CLONE_TAB_PREFIX, CloneTab } from './CloneTab'
+import { CloneTab } from './CloneTab'
 import { CLONE_SEGMENTS, ContactList } from './ContactList'
 
 let registered = false
@@ -14,19 +15,36 @@ let registered = false
 export function register(): void {
   if (registered) return
   registered = true
-  registerTab({ kind: 'clone', icon: 'bot', component: CloneTab })
-  registerObjectList({ fn: 'clone', title: 'AI 克隆', component: ContactList, segments: CLONE_SEGMENTS.map((s) => ({ id: s.id, label: s.label })) })
+  // tab.title stores the contact's own name; the localized AI 克隆 · / 克隆中 · prefix is added at render
+  // (CloneTab mirrors the building state into tab.state.building).
+  registerTab({
+    kind: 'clone',
+    icon: 'bot',
+    component: CloneTab,
+    title: (tab) => t(tab.state?.building ? 'clone.tab.titleBuilding' : 'clone.tab.title', { name: tab.title }),
+  })
+  // Getters: registered once at startup, read at render so the header follows the UI language.
+  registerObjectList({
+    fn: 'clone',
+    get title() {
+      return t('clone.list.title')
+    },
+    component: ContactList,
+    segments: CLONE_SEGMENTS.map((s) => ({
+      id: s.id,
+      get label() {
+        return t(s.labelKey)
+      },
+    })),
+  })
   onCommand('tab.openClone', ({ contactId, title }) => openClone(contactId, title))
 }
 
-/** Open (or focus) the clone tab for a contact. */
+/** Open (or focus) the clone tab for a contact; `title` is the contact name. */
 export function openClone(contactId: string, title: string): string {
-  return useTabsStore.getState().open({ kind: 'clone', objectId: contactId, title: `${CLONE_TAB_PREFIX}${title}` })
+  return useTabsStore.getState().open({ kind: 'clone', objectId: contactId, title })
 }
 
-export { CloneTab, CLONE_TAB_PREFIX, CLONE_BUILDING_PREFIX } from './CloneTab'
-export { ContactList, CLONE_SEGMENTS } from './ContactList'
-export { PersonaChat, type PersonaChatProps } from './views/PersonaChat'
 export * from './cloneView'
 export * from './personaChat'
 export * from './profileModel'

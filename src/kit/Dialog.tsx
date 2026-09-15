@@ -1,6 +1,13 @@
 import { X } from 'lucide-react'
 import { Dialog as Radix } from 'radix-ui'
-import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes, type ReactNode } from 'react'
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type ComponentRef,
+  type HTMLAttributes,
+  type ReactNode,
+} from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE, type IconComponent } from './icon'
 
@@ -43,10 +50,22 @@ const SIZE: Record<NonNullable<DialogContentProps['size']>, string> = {
   xl: 'w-[520px]',
 }
 
-export const DialogContent = forwardRef<ElementRef<typeof Radix.Content>, DialogContentProps>(function DialogContent(
-  { size = 'sm', lockOutside = false, lockEscape = false, hideClose = false, className, children, onPointerDownOutside, onInteractOutside, onEscapeKeyDown, ...rest },
+export const DialogContent = forwardRef<ComponentRef<typeof Radix.Content>, DialogContentProps>(function DialogContent(
+  {
+    size = 'sm',
+    lockOutside = false,
+    lockEscape = false,
+    hideClose = false,
+    className,
+    children,
+    onPointerDownOutside,
+    onInteractOutside,
+    onEscapeKeyDown,
+    ...rest
+  },
   ref,
 ) {
+  const t = useT()
   return (
     <Radix.Portal>
       <Radix.Overlay className="kit-overlay fixed inset-0 z-50" />
@@ -75,7 +94,7 @@ export const DialogContent = forwardRef<ElementRef<typeof Radix.Content>, Dialog
         {children}
         {hideClose ? null : (
           <Radix.Close
-            aria-label="关闭"
+            aria-label={t('kit.close')}
             className="absolute right-4 top-4 inline-flex size-6 items-center justify-center rounded-control text-fg-3 outline-none hover:bg-line-8 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
           >
             <X size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden />
@@ -94,7 +113,14 @@ export interface DialogHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, 
 }
 
 /** Icon box 36 r10 (tone 15% ground) | title 14 Medium + description 12.5 fg-2. */
-export function DialogHeader({ icon: Icon, tone = 'accent', title, description, className, ...rest }: DialogHeaderProps) {
+export function DialogHeader({
+  icon: Icon,
+  tone = 'accent',
+  title,
+  description,
+  className,
+  ...rest
+}: DialogHeaderProps) {
   return (
     <div className={cn('flex items-start gap-3 pr-6', className)} {...rest}>
       {Icon ? (

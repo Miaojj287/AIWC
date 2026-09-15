@@ -47,7 +47,7 @@ function splitFrontMatter(raw: string): { meta: FrontMatter; body: string } {
   let meta: FrontMatter = {}
   try {
     const parsed: unknown = parseYaml(yamlText)
-    if (parsed && typeof parsed === 'object') meta = parsed as FrontMatter
+    if (parsed && typeof parsed === 'object') meta = parsed
   } catch {
     meta = {}
   }
@@ -143,7 +143,9 @@ export function createDiaryStore(opts: { dir: string }): DiaryStoreExt {
 
     async put(entry) {
       assertDate(entry.date)
-      await mutex.run(entry.date, () => withFileLock(pathFor(entry.date), () => atomicWriteFile(pathFor(entry.date), renderDiaryFile(entry))))
+      await mutex.run(entry.date, () =>
+        withFileLock(pathFor(entry.date), () => atomicWriteFile(pathFor(entry.date), renderDiaryFile(entry))),
+      )
     },
   }
 }

@@ -20,6 +20,7 @@ export const dayString = (d: Date): string => {
 const MODE_LABEL: Record<PermissionMode, string> = {
   ask: 'Ask（写入前询问；发送 / 删除必须确认）',
   bypass: 'Bypass（读写放行；发送 / 删除仍需确认）',
+  autopilot: 'Autopilot（读写与对外发送都放行；删除仍需确认）',
 }
 
 export function environmentFragment(input: EnvironmentInput): ContextFragment {

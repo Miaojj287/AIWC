@@ -3,30 +3,43 @@
  * (恢复默认), account Select with verified badges + 验证 / 重新扫描.
  */
 import { CircleCheck, ExternalLink, Folder, FolderOpen, RefreshCw, RotateCcw, Sparkles, UserRound } from 'lucide-react'
+import { useT } from '@/i18n'
 import { Avatar, Badge, Button, Card, FieldLabel, InlineHint, Input, Select, type SelectOption } from '@/kit'
 import { toMediaUrl } from '@/platform/mediaUrl'
 import { openLocalPath } from '@/platform/openExternal'
 import { useWizardStore } from './wizardStore'
 
 export function AccountCard() {
+  const t = useT()
   const s = useWizardStore()
 
   const pathStatus = s.detecting
     ? undefined
     : s.dbRootSource === 'auto'
-      ? { kind: 'success' as const, text: '已自动获取' }
+      ? { kind: 'success' as const, text: t('onboarding.account.pathAuto') }
       : s.dbRootSource === 'cached'
-        ? { kind: 'success' as const, text: '已从缓存加载' }
+        ? { kind: 'success' as const, text: t('onboarding.account.pathCached') }
         : s.dbRootSource === 'manual'
-          ? { kind: 'info' as const, text: '手动选择' }
+          ? { kind: 'info' as const, text: t('onboarding.account.pathManual') }
           : undefined
 
   const accountOptions: SelectOption[] = s.accounts.map((a) => ({
     value: a.wxid,
-    label: a.nickname || '微信用户（昵称暂不可用）',
+    label: a.nickname || t('onboarding.account.unnamedAccount'),
     description: a.wxid,
-    leading: <Avatar id={a.wxid} name={a.nickname || '微信用户'} src={toMediaUrl(a.avatarPath)} size={28} />,
-    badge: a.verified ? <Badge tone="ok">已验证</Badge> : <Badge tone="warn">未验证</Badge>,
+    leading: (
+      <Avatar
+        id={a.wxid}
+        name={a.nickname || t('onboarding.account.unnamedAvatar')}
+        src={toMediaUrl(a.avatarPath)}
+        size={28}
+      />
+    ),
+    badge: a.verified ? (
+      <Badge tone="ok">{t('onboarding.account.verified')}</Badge>
+    ) : (
+      <Badge tone="warn">{t('onboarding.account.unverified')}</Badge>
+    ),
   }))
 
   const verified = s.verifyState === 'verified'
@@ -37,9 +50,9 @@ export function AccountCard() {
       <div className="flex flex-col gap-2">
         <FieldLabel
           icon={Folder}
-          label="微信数据库路径"
-          help="微信 → 设置 → 账号与储存 → 储存位置，可查看该目录"
-          hint="可手动修改（获取方式：微信 → 设置 → 账号与储存 → 储存位置）"
+          label={t('onboarding.account.pathLabel')}
+          help={t('onboarding.account.pathHelp')}
+          hint={t('onboarding.account.pathHint')}
           status={pathStatus}
           htmlFor="ob-dbroot"
         />
@@ -48,30 +61,46 @@ export function AccountCard() {
             id="ob-dbroot"
             mono
             value={s.detecting ? '' : s.dbRoot}
-            placeholder={s.detecting ? '正在检测微信进程…' : '未找到微信数据目录，请自动获取或手动选择'}
+            placeholder={
+              s.detecting ? t('onboarding.account.detectingPlaceholder') : t('onboarding.account.notFoundPlaceholder')
+            }
             onChange={(e) => s.setDbRoot(e.target.value)}
             onBlur={() => void s.loadAccounts()}
             disabled={s.detecting}
             error={Boolean(s.dbRootError)}
             wrapperClassName="flex-1"
-            aria-label="微信数据库路径"
+            aria-label={t('onboarding.account.pathLabel')}
           />
           <Button variant="ghost" icon={FolderOpen} onClick={() => void s.browse()} disabled={s.detecting}>
-            浏览
+            {t('onboarding.account.browse')}
           </Button>
           <Button icon={s.dbRootError ? RefreshCw : Sparkles} loading={s.detecting} onClick={() => void s.detect()}>
-            {s.detecting ? '获取中…' : s.dbRootError ? '重试' : '自动获取'}
+            {s.detecting
+              ? t('onboarding.account.detecting')
+              : s.dbRootError
+                ? t('common.retry')
+                : t('onboarding.account.detect')}
           </Button>
         </div>
         {s.dbRootError ? (
           <InlineHint kind="error">{s.dbRootError}</InlineHint>
         ) : s.detecting ? (
-          <InlineHint kind="info">正在读取微信的储存位置…</InlineHint>
+          <InlineHint kind="info">{t('onboarding.account.readingLocation')}</InlineHint>
         ) : s.dbRoot ? (
           <div className="flex items-center gap-3">
-            {s.detectedVersion ? <span className="text-note text-fg-3">微信 {s.detectedVersion}</span> : null}
-            <Button variant="link" size="sm" trailingIcon={ExternalLink} onClick={() => void openLocalPath(s.dbRoot, '数据目录')} className="-ml-2">
-              打开此文件夹
+            {s.detectedVersion ? (
+              <span className="text-note text-fg-3">
+                {t('onboarding.account.wechatVersion', { version: s.detectedVersion })}
+              </span>
+            ) : null}
+            <Button
+              variant="link"
+              size="sm"
+              trailingIcon={ExternalLink}
+              onClick={() => void openLocalPath(s.dbRoot, t('onboarding.account.dataFolder'))}
+              className="-ml-2"
+            >
+              {t('onboarding.account.openFolder')}
             </Button>
           </div>
         ) : null}
@@ -79,14 +108,32 @@ export function AccountCard() {
 
       {/* 缓存目录 */}
       <div className="flex flex-col gap-2">
-        <FieldLabel icon={Folder} label="缓存目录" help="解密后的数据库副本、图片与索引都放在这里" hint="可选，留空使用默认目录；存放解密后的数据与索引，建议选择空间充足的磁盘" htmlFor="ob-cache" />
+        <FieldLabel
+          icon={Folder}
+          label={t('onboarding.account.cacheLabel')}
+          help={t('onboarding.account.cacheHelp')}
+          hint={t('onboarding.account.cacheHint')}
+          htmlFor="ob-cache"
+        />
         <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content/60 p-2">
-          <Input id="ob-cache" mono value={s.cacheDir} placeholder={s.defaultCacheDir ? `默认：${s.defaultCacheDir}` : '默认：应用数据目录'} onChange={(e) => s.setCacheDir(e.target.value)} wrapperClassName="flex-1" aria-label="缓存目录" />
+          <Input
+            id="ob-cache"
+            mono
+            value={s.cacheDir}
+            placeholder={
+              s.defaultCacheDir
+                ? t('onboarding.account.cacheDefault', { path: s.defaultCacheDir })
+                : t('onboarding.account.cacheDefaultAppData')
+            }
+            onChange={(e) => s.setCacheDir(e.target.value)}
+            wrapperClassName="flex-1"
+            aria-label={t('onboarding.account.cacheLabel')}
+          />
           <Button variant="ghost" icon={FolderOpen} onClick={() => void s.browseCache()}>
-            浏览
+            {t('onboarding.account.browse')}
           </Button>
           <Button variant="ghost" icon={RotateCcw} onClick={s.resetCacheDir} disabled={!s.cacheDir}>
-            恢复默认
+            {t('onboarding.account.resetCache')}
           </Button>
         </div>
       </div>
@@ -95,10 +142,22 @@ export function AccountCard() {
       <div className="flex flex-col gap-2">
         <FieldLabel
           icon={UserRound}
-          label="微信账号 (Wxid)"
-          help="同一台电脑登录过的每个微信账号在数据目录下各有一个 wxid_ 开头的文件夹"
-          hint={s.accounts.length === 0 && s.dbRoot && !s.accountsLoading ? '没有检测到微信号？' : `该目录下检测到 ${s.accounts.length} 个账号`}
-          status={verified ? { kind: 'success', text: '已验证' } : s.verifyState === 'failed' ? { kind: 'error', text: '未验证' } : s.wxid ? { kind: 'warning', text: '未验证' } : undefined}
+          label={t('onboarding.account.accountLabel')}
+          help={t('onboarding.account.accountHelp')}
+          hint={
+            s.accounts.length === 0 && s.dbRoot && !s.accountsLoading
+              ? t('onboarding.account.noAccountsHint')
+              : t('onboarding.account.accountsFound', { n: s.accounts.length })
+          }
+          status={
+            verified
+              ? { kind: 'success', text: t('onboarding.account.verified') }
+              : s.verifyState === 'failed'
+                ? { kind: 'error', text: t('onboarding.account.unverified') }
+                : s.wxid
+                  ? { kind: 'warning', text: t('onboarding.account.unverified') }
+                  : undefined
+          }
           htmlFor="ob-wxid"
         />
         <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content/60 p-2">
@@ -107,46 +166,67 @@ export function AccountCard() {
             options={accountOptions}
             value={s.wxid || null}
             onValueChange={s.selectWxid}
-            placeholder={s.accountsLoading ? '扫描中…' : s.dbRoot ? '选择账号' : '先选择数据库路径'}
+            placeholder={
+              s.accountsLoading
+                ? t('onboarding.account.scanning')
+                : s.dbRoot
+                  ? t('onboarding.account.selectAccount')
+                  : t('onboarding.account.selectPathFirst')
+            }
             disabled={!s.dbRoot || s.accountsLoading}
             fullWidth
             size="lg"
             searchable={s.accounts.length > 6}
             className="h-auto min-h-12 flex-1 py-1.5"
-            aria-label="微信账号"
-            renderValue={(o) => o ? (
-              <span className="flex min-w-0 items-center gap-2 text-left">
-                {o.leading}
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-body font-medium">{o.label}</span>
-                  <span className="truncate font-mono text-micro text-fg-3">{o.value}</span>
+            aria-label={t('onboarding.account.accountAria')}
+            renderValue={(o) =>
+              o ? (
+                <span className="flex min-w-0 items-center gap-2 text-left">
+                  {o.leading}
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-body font-medium">{o.label}</span>
+                    <span className="truncate font-mono text-micro text-fg-3">{o.value}</span>
+                  </span>
                 </span>
-              </span>
-            ) : undefined}
+              ) : undefined
+            }
           />
           {verified ? (
-            <Button variant="ghost" icon={RefreshCw} loading={s.accountsLoading} onClick={() => void s.loadAccounts()} disabled={!s.dbRoot}>
-              重新扫描
+            <Button
+              variant="ghost"
+              icon={RefreshCw}
+              loading={s.accountsLoading}
+              onClick={() => void s.loadAccounts()}
+              disabled={!s.dbRoot}
+            >
+              {t('onboarding.account.rescan')}
             </Button>
           ) : (
-            <Button icon={CircleCheck} loading={s.verifyState === 'verifying'} onClick={() => void s.verify()} disabled={!s.wxid || !s.dbRoot}>
-              验证账号
+            <Button
+              icon={CircleCheck}
+              loading={s.verifyState === 'verifying'}
+              onClick={() => void s.verify()}
+              disabled={!s.wxid || !s.dbRoot}
+            >
+              {t('onboarding.account.verify')}
             </Button>
           )}
         </div>
         {s.accountsError ? (
           <InlineHint kind="error">{s.accountsError}</InlineHint>
         ) : s.verifyState === 'failed' ? (
-          <InlineHint kind="error">{s.verifyError ?? '该 wxid 与所选数据库目录不匹配，请重新选择或验证'}</InlineHint>
+          <InlineHint kind="error">{s.verifyError ?? t('onboarding.account.verifyMismatch')}</InlineHint>
         ) : verified ? (
           <InlineHint kind="success">
-            账号目录已验证
-            {s.accounts.find((a) => a.wxid === s.wxid)?.nickname ? ` · ${s.accounts.find((a) => a.wxid === s.wxid)?.nickname}` : ''}
+            {t('onboarding.account.accountVerified')}
+            {s.accounts.find((a) => a.wxid === s.wxid)?.nickname
+              ? ` · ${s.accounts.find((a) => a.wxid === s.wxid)?.nickname}`
+              : ''}
           </InlineHint>
         ) : s.wxid ? (
-          <InlineHint kind="warning">请点击「验证账号」确认目录与账号匹配，否则无法进入下一步</InlineHint>
+          <InlineHint kind="warning">{t('onboarding.account.verifyToContinue')}</InlineHint>
         ) : s.accounts.length > 1 ? (
-          <InlineHint kind="info">检测到 {s.accounts.length} 个账号，请选择要接入的那一个</InlineHint>
+          <InlineHint kind="info">{t('onboarding.account.chooseOne', { n: s.accounts.length })}</InlineHint>
         ) : null}
       </div>
     </Card>

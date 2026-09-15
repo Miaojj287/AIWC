@@ -6,50 +6,27 @@
  *   MessageList    — transcript renderer, reused by the clone page
  *   Composer       — input card with @ / / popovers, reused by the clone page
  */
-import { onCommand } from '@/app/commands'
+import { asThreadId } from '@aiwc/protocol'
+import { onCommand, runCommand } from '@/app/commands'
 import { useAgentStore } from './agentStore'
+import { ShellApprovalBody, ShellCard } from './messages/ShellCards'
+import { watchPetReactions } from './petSignal'
+import { registerApprovalBody, registerToolCard } from './toolCards'
 
 export function register(): void {
+  watchPetReactions()
+  // The shell tool belongs to the framework, so its transcript cards live here, not in a feature.
+  registerToolCard('shell', ShellCard)
+  registerApprovalBody('shell', ShellApprovalBody)
   onCommand('agent.quote', (payload) => void useAgentStore.getState().quote(payload))
   onCommand('agent.newThread', (payload) => void useAgentStore.getState().newThread(payload ?? {}))
+  onCommand('agent.openThread', ({ threadId }) => {
+    useAgentStore.getState().openThread(asThreadId(threadId))
+    runCommand('agent.expand')
+  })
 }
 
-export { AgentPanel, type AgentPanelProps } from './AgentPanel'
-export { MessageList, type MessageListProps } from './MessageList'
-export { Composer, COMPOSER_PLACEHOLDER, type ComposerProps } from './Composer'
-export { ApprovalCard, type ApprovalCardProps } from './ApprovalCard'
-export { Markdown, type MarkdownProps } from './MarkdownView'
-export { parseMarkdown, parseInline, inlineToText, type Block, type Inline } from './markdownParser'
-export { MARKDOWN_CLASS, MARKDOWN_HEADING_CLASS, type MarkdownClassKey, type MarkdownHeadingLevel } from './markdownStyles'
-export { ContextRing, type ContextRingProps } from './composer/ContextRing'
-export { PermissionSelect, PERMISSION_MODES, type PermissionSelectProps } from './composer/PermissionSelect'
-export { ModelSelect, modelLabelFor, type ModelSelectProps } from './composer/ModelSelect'
-export { SendButton, type SendButtonProps } from './composer/SendButton'
-export { useAgentStore, subscribeAgentEvents, selectActiveView, selectActiveSummary, selectOpenThreads, type AgentState, type ModelOption } from './agentStore'
-export { reduceEvent, reduceEvents, itemsFromHistory, viewFromHistory, findUserInput, humanizeToolName } from './reducer'
-export { detectTrigger, applyTrigger, addMention, removeMention, buildUserInput, matchesQuery, MENTION_KIND_LABEL, type Trigger, type TriggerKind } from './mentions'
-export { defaultMentionSources, MENTION_TABS, type MentionSources, type MentionCandidate } from './mentionSources'
-export { contextRefFromTab, activeTabContextRef, mentionFromContextRef, type ContextRef } from './contextRef'
-export {
-  createThreadView,
-  emptyDraft,
-  SCRATCH_DRAFT_KEY,
-  userItemText,
-  usageRatio,
-  formatTokens,
-  formatSeconds,
-  USAGE_WARN_RATIO,
-  type ThreadItem,
-  type ThreadItemKind,
-  type ThreadViewState,
-  type ToolCallView,
-  type ApprovalRequest,
-  type ComposerDraft,
-  type PlanStep,
-  type PlanStepStatus,
-  type ThreadError,
-} from './model'
-export type { AssistantItem, FeedbackVerdict } from './messages/AssistantMessage'
-export type { UserItem } from './messages/UserMessage'
-export type { ArtifactItem } from './messages/ArtifactCard'
-export type { ErrorItem } from './messages/ErrorCard'
+export { AgentPanel } from './AgentPanel'
+export { AgentWindow } from './window/AgentWindow'
+
+export { useAgentPetSignal } from './petSignal'

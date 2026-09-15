@@ -5,6 +5,7 @@
 import { ArrowDown, ArrowUp, AtSign, Download, Trash, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { Button, Checkbox, IconButton, SearchBox, Spinner, Tooltip, cn } from '@/kit'
+import { useT } from '@/i18n'
 
 export interface SearchBarProps {
   query: string
@@ -18,7 +19,18 @@ export interface SearchBarProps {
   onNext(): void
 }
 
-export function SearchBar({ query, onQueryChange, onSubmit, onClose, searching, hitCount, currentIndex, onPrev, onNext }: SearchBarProps) {
+export function SearchBar({
+  query,
+  onQueryChange,
+  onSubmit,
+  onClose,
+  searching,
+  hitCount,
+  currentIndex,
+  onPrev,
+  onNext,
+}: SearchBarProps) {
+  const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     inputRef.current?.focus()
@@ -32,7 +44,7 @@ export function SearchBar({ query, onQueryChange, onSubmit, onClose, searching, 
         value={query}
         onValueChange={onQueryChange}
         onSubmit={onSubmit}
-        placeholder="搜索这个会话的聊天记录，回车定位"
+        placeholder={t('chat.searchBar.placeholder')}
         wrapperClassName="w-[320px]"
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !query) {
@@ -46,16 +58,38 @@ export function SearchBar({ query, onQueryChange, onSubmit, onClose, searching, 
         }}
       />
       <span className="min-w-[80px] font-latin text-caption text-fg-3">
-        {searching ? <Spinner size={12} /> : has ? (hitCount === 0 ? '无结果' : `${currentIndex + 1} / ${hitCount}`) : ''}
+        {searching ? (
+          <Spinner size={12} />
+        ) : has ? (
+          hitCount === 0 ? (
+            t('chat.searchBar.noResults')
+          ) : (
+            `${currentIndex + 1} / ${hitCount}`
+          )
+        ) : (
+          ''
+        )}
       </span>
-      <Tooltip content="上一条" kbd="⇧↵">
-        <IconButton size="sm" icon={ArrowUp} label="上一条" disabled={!has || hitCount === 0} onClick={onPrev} />
+      <Tooltip content={t('chat.searchBar.previous')} kbd="⇧↵">
+        <IconButton
+          size="sm"
+          icon={ArrowUp}
+          label={t('chat.searchBar.previous')}
+          disabled={!has || hitCount === 0}
+          onClick={onPrev}
+        />
       </Tooltip>
-      <Tooltip content="下一条" kbd="↵">
-        <IconButton size="sm" icon={ArrowDown} label="下一条" disabled={!has || hitCount === 0} onClick={onNext} />
+      <Tooltip content={t('chat.searchBar.next')} kbd="↵">
+        <IconButton
+          size="sm"
+          icon={ArrowDown}
+          label={t('chat.searchBar.next')}
+          disabled={!has || hitCount === 0}
+          onClick={onNext}
+        />
       </Tooltip>
       <span className="flex-1" />
-      <IconButton size="sm" icon={X} label="关闭搜索" onClick={onClose} />
+      <IconButton size="sm" icon={X} label={t('chat.searchBar.close')} onClick={onClose} />
     </div>
   )
 }
@@ -69,21 +103,36 @@ export interface SelectionBarProps {
 }
 
 export function SelectionBar({ count, onQuote, onExport, onDelete, onCancel }: SelectionBarProps) {
+  const t = useT()
   return (
     <div className="flex h-[38px] shrink-0 items-center gap-1 border-b border-accent/20 bg-accent-12 px-4">
-      <span className="mr-2 text-caption font-medium text-accent">已选 {count} 条</span>
+      <span className="mr-2 text-caption font-medium text-accent">{t('chat.selectionBar.selected', { n: count })}</span>
       <Button variant="link" size="sm" icon={AtSign} onClick={onQuote} disabled={count === 0}>
-        引用到 Agent
+        {t('chat.actions.quoteToAgent')}
       </Button>
-      <Button variant="link" size="sm" icon={Download} onClick={onExport} disabled={count === 0} className="text-fg-2 hover:text-fg">
-        下载
+      <Button
+        variant="link"
+        size="sm"
+        icon={Download}
+        onClick={onExport}
+        disabled={count === 0}
+        className="text-fg-2 hover:text-fg"
+      >
+        {t('chat.actions.download')}
       </Button>
-      <Button variant="link" size="sm" icon={Trash} onClick={onDelete} disabled={count === 0} className="text-fg-2 hover:text-danger">
-        删除
+      <Button
+        variant="link"
+        size="sm"
+        icon={Trash}
+        onClick={onDelete}
+        disabled={count === 0}
+        className="text-fg-2 hover:text-danger"
+      >
+        {t('common.delete')}
       </Button>
       <span className="flex-1" />
       <Button variant="link" size="sm" onClick={onCancel} className="text-fg-2 hover:text-fg">
-        取消
+        {t('common.cancel')}
       </Button>
     </div>
   )
@@ -99,19 +148,48 @@ export interface BottomBarProps {
   selectedCount: number
 }
 
-export function BottomBar({ allState, onToggleAll, onExport, onDelete, onQuote, disabled, selectedCount }: BottomBarProps) {
+export function BottomBar({
+  allState,
+  onToggleAll,
+  onExport,
+  onDelete,
+  onQuote,
+  disabled,
+  selectedCount,
+}: BottomBarProps) {
+  const t = useT()
   return (
     <div className={cn('flex h-[44px] shrink-0 items-center gap-1 border-t border-line-6 px-4')}>
-      <Checkbox checked={allState} onCheckedChange={(c) => onToggleAll(c === true)} disabled={disabled} label="全选" className="mr-2 items-center" />
-      <Button variant="link" size="sm" icon={Download} onClick={onExport} disabled={disabled} className="text-fg-2 hover:text-fg">
-        下载
+      <Checkbox
+        checked={allState}
+        onCheckedChange={(c) => onToggleAll(c === true)}
+        disabled={disabled}
+        label={t('chat.bottomBar.selectAll')}
+        className="mr-2 items-center"
+      />
+      <Button
+        variant="link"
+        size="sm"
+        icon={Download}
+        onClick={onExport}
+        disabled={disabled}
+        className="text-fg-2 hover:text-fg"
+      >
+        {t('chat.actions.download')}
       </Button>
-      <Button variant="link" size="sm" icon={Trash} onClick={onDelete} disabled={disabled} className="text-fg-2 hover:text-danger">
-        删除
+      <Button
+        variant="link"
+        size="sm"
+        icon={Trash}
+        onClick={onDelete}
+        disabled={disabled}
+        className="text-fg-2 hover:text-danger"
+      >
+        {t('common.delete')}
       </Button>
       <span className="flex-1" />
       <Button variant="link" size="sm" icon={AtSign} onClick={onQuote} disabled={disabled}>
-        {selectedCount > 0 ? `引用 ${selectedCount} 条到 Agent` : '引用到 Agent'}
+        {selectedCount > 0 ? t('chat.bottomBar.quoteSelected', { n: selectedCount }) : t('chat.actions.quoteToAgent')}
       </Button>
     </div>
   )

@@ -2,6 +2,7 @@
  * Clone status → view mapping and list copy (DESIGN-SPEC §4). Pure — tested in cloneView.test.ts.
  */
 import type { CloneStatus } from '@aiwc/protocol'
+import { t, type MessageKey } from '@/i18n'
 
 export type CloneView = 'idle' | 'building' | 'ready' | 'failed'
 
@@ -27,12 +28,13 @@ export function progressPercent(progress: { done: number; total: number }): numb
   return Math.max(0, Math.min(100, Math.round((progress.done / progress.total) * 100)))
 }
 
-/** 约 1 分钟 / 约 30 秒 / 即将完成 */
-export function formatEta(ms: number | undefined): string {
+/** 约 1 分钟 / 约 30 秒 / 即将完成; `remaining` words it for the building card (预计还需 1 分钟). */
+export function formatEta(ms: number | undefined, style: 'short' | 'remaining' = 'short'): string {
   if (ms === undefined || !Number.isFinite(ms)) return ''
-  if (ms < 5_000) return '即将完成'
-  if (ms < 60_000) return `约 ${Math.ceil(ms / 10_000) * 10} 秒`
-  return `约 ${Math.ceil(ms / 60_000)} 分钟`
+  const key = style === 'remaining' ? 'clone.eta.remaining' : 'clone.eta.short'
+  if (ms < 5_000) return t(key, { unit: 'soon', n: 0 })
+  if (ms < 60_000) return t(key, { unit: 'seconds', n: Math.ceil(ms / 10_000) * 10 })
+  return t(key, { unit: 'minutes', n: Math.ceil(ms / 60_000) })
 }
 
 /** 1 分 12 秒 / 45 秒 */
@@ -40,7 +42,7 @@ export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
   const m = Math.floor(total / 60)
   const s = total % 60
-  return m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`
+  return m > 0 ? t('clone.elapsed.minutes', { m, s }) : t('clone.elapsed.seconds', { s })
 }
 
 export type StatusTone = 'ok' | 'accent' | 'danger' | 'neutral'
@@ -58,27 +60,37 @@ export function cloneStatusLine(status: CloneStatus | undefined, messageCount?: 
     case 'building': {
       const pct = progressPercent(status.progress)
       const eta = formatEta(status.progress.etaMs)
-      return { text: `克隆中 · ${pct}%${eta ? ` · ${eta}` : ''}`, tone: 'accent' }
+      const text = t('clone.status.building', { percent: pct })
+      return { text: eta ? `${text} · ${eta}` : text, tone: 'accent' }
     }
     case 'ready':
-      return { text: `已克隆 · v${status.version} · ${status.sampleCount} 个样本`, tone: 'ok' }
+      return { text: t('clone.status.ready', { version: status.version, n: status.sampleCount }), tone: 'ok' }
     case 'failed':
-      return { text: `失败 · ${failureTitle(status.kind)}`, tone: 'danger' }
+      return { text: t('clone.status.failed', { reason: failureTitle(status.kind) }), tone: 'danger' }
     case 'none':
-      return { text: `未克隆 · ${fmt(status.messageCount)} 条消息`, tone: 'neutral' }
+      return {
+        text: t('clone.status.none', { n: status.messageCount, count: fmt(status.messageCount) }),
+        tone: 'neutral',
+      }
     default:
-      return { text: messageCount !== undefined ? `未克隆 · ${fmt(messageCount)} 条消息` : '未克隆', tone: 'neutral' }
+      return {
+        text:
+          messageCount !== undefined
+            ? t('clone.status.none', { n: messageCount, count: fmt(messageCount) })
+            : t('clone.status.notCloned'),
+        tone: 'neutral',
+      }
   }
 }
 
 export function failureTitle(kind: Extract<CloneStatus, { state: 'failed' }>['kind']): string {
   switch (kind) {
     case 'model':
-      return '模型错误'
+      return t('clone.failure.model')
     case 'too_few_messages':
-      return '有效消息过少'
+      return t('clone.failure.tooFewMessages')
     default:
-      return '未知错误'
+      return t('clone.failure.unknown')
   }
 }
 
@@ -93,9 +105,17 @@ export interface CloneListEntry {
   avatarPath?: string
 }
 
-export function filterContacts<T extends CloneListEntry>(entries: readonly T[], query: string, segment: CloneSegment): T[] {
+export function filterContacts<T extends CloneListEntry>(
+  entries: readonly T[],
+  query: string,
+  segment: CloneSegment,
+): T[] {
   const q = query.trim().toLowerCase()
-  return entries.filter((e) => (segment === 'all' || e.status.state === 'ready') && (!q || e.displayName.toLowerCase().includes(q) || e.contactId.toLowerCase().includes(q)))
+  return entries.filter(
+    (e) =>
+      (segment === 'all' || e.status.state === 'ready') &&
+      (!q || e.displayName.toLowerCase().includes(q) || e.contactId.toLowerCase().includes(q)),
+  )
 }
 
 export function readyCount(entries: readonly CloneListEntry[]): number {
@@ -104,10 +124,11 @@ export function readyCount(entries: readonly CloneListEntry[]): number {
 
 export type TrainingRange = 'all' | 'year' | 'quarter'
 
-export const RANGE_OPTIONS: ReadonlyArray<{ value: TrainingRange; label: string; description: string }> = [
-  { value: 'quarter', label: '最近 3 个月', description: '只用近期消息，更贴近当前说话方式' },
-  { value: 'year', label: '最近 1 年', description: '推荐 · 兼顾样本量与时效' },
-  { value: 'all', label: '全部', description: '使用全部历史消息' },
+/** Labels are catalog keys — resolve with t() at render. */
+export const RANGE_OPTIONS: ReadonlyArray<{ value: TrainingRange; label: MessageKey; description: MessageKey }> = [
+  { value: 'quarter', label: 'clone.range.quarter', description: 'clone.range.quarterDescription' },
+  { value: 'year', label: 'clone.range.year', description: 'clone.range.yearDescription' },
+  { value: 'all', label: 'clone.range.all', description: 'clone.range.allDescription' },
 ]
 
 const DAY = 86_400_000
@@ -131,13 +152,25 @@ export interface BuildStep {
   status: 'todo' | 'doing' | 'done'
 }
 
-export const DEFAULT_BUILD_STEPS = ['读取消息与语音转写', '提炼说话风格、口头禅与常用表情', '生成样本对话', '写入本地画像 · 不上传'] as const
+/** Fallback step labels as catalog keys; buildSteps resolves them when called. */
+export const DEFAULT_BUILD_STEPS = [
+  'clone.building.steps.read',
+  'clone.building.steps.style',
+  'clone.building.steps.samples',
+  'clone.building.steps.save',
+] as const satisfies readonly MessageKey[]
 
-export function buildSteps(progress: { done: number; total: number; step: string }, labels: readonly string[] = DEFAULT_BUILD_STEPS): BuildStep[] {
+export function buildSteps(
+  progress: { done: number; total: number; step: string },
+  labels: readonly string[] = DEFAULT_BUILD_STEPS.map((key) => t(key)),
+): BuildStep[] {
   const total = Math.max(progress.total, labels.length)
   const out: BuildStep[] = []
   for (let i = 0; i < total; i++) {
-    const label = i === progress.done && progress.step ? progress.step : labels[Math.min(i, labels.length - 1)] ?? `第 ${i + 1} 步`
+    const label =
+      i === progress.done && progress.step
+        ? progress.step
+        : (labels[Math.min(i, labels.length - 1)] ?? t('clone.building.steps.nth', { n: i + 1 }))
     out.push({ id: `step-${i}`, label, status: i < progress.done ? 'done' : i === progress.done ? 'doing' : 'todo' })
   }
   return out

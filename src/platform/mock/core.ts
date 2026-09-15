@@ -21,7 +21,9 @@ export const CONFIG_KEY = 'aiwc.mock.config'
 /** Every InvokeMap channel must be implemented — the compiler enforces completeness. */
 export type Handlers = { [K in InvokeChannel]: (req: InvokeReq<K>) => Promise<InvokeRes<K>> | InvokeRes<K> }
 /** Subset of handlers whose channel starts with `${P}:`. */
-export type HandlersFor<P extends string> = { [K in InvokeChannel as K extends `${P}:${string}` ? K : never]: Handlers[K] }
+export type HandlersFor<P extends string> = {
+  [K in InvokeChannel as K extends `${P}:${string}` ? K : never]: Handlers[K]
+}
 
 export type Emit = <K extends EventChannel>(channel: K, payload: EventMap[K]) => void
 
@@ -130,7 +132,7 @@ function createKv(storage: Storage | null): KV {
 }
 
 export function detectPlatform(): AiwcBridge['platform'] {
-  const ua = typeof navigator !== 'undefined' ? `${navigator.platform} ${navigator.userAgent}` : ''
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   if (/Win/i.test(ua)) return 'win32'
   if (/Linux|X11/i.test(ua) && !/Mac/i.test(ua)) return 'linux'
   return 'darwin'
@@ -160,7 +162,8 @@ function detectOnboardingParam(): boolean {
 export function createMockContext(opts: MockOptions): MockContext {
   const timeScale = opts.timeScale ?? 1
   const now = opts.now ?? (() => Date.now())
-  const storage = opts.storage === undefined ? (typeof localStorage !== 'undefined' ? localStorage : null) : opts.storage
+  const storage =
+    opts.storage === undefined ? (typeof localStorage !== 'undefined' ? localStorage : null) : opts.storage
   const kv = createKv(storage)
   const listeners = new Map<EventChannel, Set<(payload: unknown) => void>>()
   let counter = 0
@@ -196,10 +199,13 @@ export function createMockContext(opts: MockOptions): MockContext {
     delay(ms, signal) {
       return new Promise<void>((resolve, reject) => {
         if (signal?.aborted) return reject(new AbortedError())
-        const t = setTimeout(() => {
-          signal?.removeEventListener('abort', onAbort)
-          resolve()
-        }, Math.round(ms * timeScale))
+        const t = setTimeout(
+          () => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve()
+          },
+          Math.round(ms * timeScale),
+        )
         function onAbort() {
           clearTimeout(t)
           reject(new AbortedError())

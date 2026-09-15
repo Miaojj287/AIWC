@@ -14,10 +14,6 @@ import { searchMessages, semanticSearch } from './search'
 import { searchMedia } from './searchMedia'
 import { transcribeVoiceMessage } from './transcribeVoiceMessage'
 
-export type { SubstrateTool, SubstrateToolServices, CompactMessage, CompactSession, CompactContact, CompactHit, Coverage } from './shared'
-export { compactMessage, compactSession, compactContact, compactHit, fmtTime, clampLimit, describeCoverage, MessageAnchorSchema } from './shared'
-export { assertReadOnlySql } from './querySql'
-
 export {
   listSessions,
   listContacts,

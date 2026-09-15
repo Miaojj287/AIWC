@@ -5,6 +5,7 @@
 import { ExternalLink, Link as LinkIcon } from 'lucide-react'
 import type { WxMessage } from '@aiwc/protocol'
 import { ICON_STROKE, cn } from '@/kit'
+import { useT, type MessageKey } from '@/i18n'
 import { openTarget } from '@/platform/openExternal'
 import { wechatEmoji } from './wechatEmoji'
 import { RichCard } from './RichCard'
@@ -18,12 +19,23 @@ export interface MessageBodyProps {
   onOpenImage(src: string, alt: string): void
 }
 
-function openExternal(href: string) {
+function openExternal(href: string, what: string) {
   // Links leave the app through the shell (main decides how to open); never navigate the renderer.
-  void openTarget(href, '链接')
+  void openTarget(href, what)
 }
 
-export function RichText({ text, self, highlight, className }: { text: string; self: boolean; highlight?: string; className?: string }) {
+export function RichText({
+  text,
+  self,
+  highlight,
+  className,
+}: {
+  text: string
+  self: boolean
+  highlight?: string
+  className?: string
+}) {
+  const t = useT()
   const segments = segmentText(text, highlight)
   return (
     <span className={cn('select-text whitespace-pre-wrap break-words', className)}>
@@ -38,9 +50,12 @@ export function RichText({ text, self, highlight, className }: { text: string; s
               href={href}
               onClick={(e) => {
                 e.preventDefault()
-                openExternal(href)
+                openExternal(href, t('chat.openTarget.link'))
               }}
-              className={cn('underline decoration-current/40 underline-offset-2 hover:decoration-current', self ? 'text-white' : 'text-accent')}
+              className={cn(
+                'underline decoration-current/40 underline-offset-2 hover:decoration-current',
+                self ? 'text-white' : 'text-accent',
+              )}
             >
               {content}
             </a>
@@ -53,7 +68,8 @@ export function RichText({ text, self, highlight, className }: { text: string; s
 }
 
 export function MessageBody({ message, self, highlight, onOpenImage }: MessageBodyProps) {
-  if (message.rich) return <RichCard rich={message.rich} />
+  const t = useT()
+  if (message.rich) return <RichCard rich={message.rich} self={self} />
   switch (message.kind) {
     case 'text':
       return <RichText text={message.text} self={self} highlight={highlight} />
@@ -61,8 +77,15 @@ export function MessageBody({ message, self, highlight, onOpenImage }: MessageBo
       return (
         <div className="flex flex-col gap-1.5">
           {message.quote ? (
-            <div className={cn('rounded-control border-l-2 px-2 py-1 text-caption leading-[18px]', self ? 'border-white/40 bg-white/10 text-white/80' : 'border-(--line-25) bg-hover-5 text-fg-2')}>
-              {message.quote.senderName ? <span className="font-medium">{message.quote.senderName}：</span> : null}
+            <div
+              className={cn(
+                'rounded-control border-l-2 px-2 py-1 text-caption leading-[18px]',
+                self ? 'border-white/40 bg-white/10 text-white/80' : 'border-(--line-25) bg-hover-5 text-fg-2',
+              )}
+            >
+              {message.quote.senderName ? (
+                <span className="font-medium">{t('chat.message.quoteSender', { name: message.quote.senderName })}</span>
+              ) : null}
               <span className="select-text break-words">{message.quote.text}</span>
             </div>
           ) : null}
@@ -83,7 +106,7 @@ export function MessageBody({ message, self, highlight, onOpenImage }: MessageBo
       return (
         <span className={cn('flex items-start gap-2', self ? 'text-white' : 'text-fg')}>
           <LinkIcon size={14} strokeWidth={ICON_STROKE} aria-hidden className="mt-1 shrink-0 opacity-70" />
-          <RichText text={message.text || '[链接]'} self={self} highlight={highlight} />
+          <RichText text={message.text || t('chat.placeholder.link')} self={self} highlight={highlight} />
         </span>
       )
     case 'card':
@@ -94,10 +117,19 @@ export function MessageBody({ message, self, highlight, onOpenImage }: MessageBo
       return (
         <span className={cn('flex items-center gap-1.5', self ? 'text-white/85' : 'text-fg-2')}>
           <ExternalLink size={13} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 opacity-70" />
-          <RichText text={message.text || KIND_FALLBACK[message.kind] || '[消息]'} self={self} highlight={highlight} />
+          <RichText
+            text={message.text || t(KIND_FALLBACK[message.kind] ?? 'chat.placeholder.message')}
+            self={self}
+            highlight={highlight}
+          />
         </span>
       )
   }
 }
 
-const KIND_FALLBACK: Partial<Record<WxMessage['kind'], string>> = { card: '[名片]', location: '[位置]', transfer: '[转账]', other: '[暂不支持的消息类型]' }
+const KIND_FALLBACK: Partial<Record<WxMessage['kind'], MessageKey>> = {
+  card: 'chat.placeholder.card',
+  location: 'chat.placeholder.location',
+  transfer: 'chat.placeholder.transfer',
+  other: 'chat.placeholder.unsupported',
+}

@@ -1,5 +1,3 @@
-import { SubstrateError } from './errors'
-
 export interface Debounced<A extends unknown[]> {
   (...args: A): void
   cancel(): void
@@ -41,22 +39,6 @@ export function debounce<A extends unknown[], S>(
   }
   Object.defineProperty(fn, 'pending', { get: () => timer !== undefined })
   return fn
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** Reject after `ms` with a SubstrateError('timeout'). */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  if (!Number.isFinite(ms) || ms <= 0) return promise
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new SubstrateError('timeout', `${label} 超时（${Math.round(ms / 1000)} 秒）`)), ms)
-  })
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer)
-  }) as Promise<T>
 }
 
 /** Split an array into fixed-size batches. */

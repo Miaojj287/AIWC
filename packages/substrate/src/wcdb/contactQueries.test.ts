@@ -16,7 +16,11 @@ describe('local avatar fallback', () => {
     expect(get).toHaveBeenCalledTimes(2)
   })
   it('tolerates unavailable optional databases', () => {
-    const q = { get: () => { throw new Error('unavailable') } } as unknown as WcdbQuery
+    const q = {
+      get: () => {
+        throw new Error('unavailable')
+      },
+    } as unknown as WcdbQuery
     expect(new ContactDirectory(q, null, '/head.db').avatar('x')).toBeUndefined()
   })
 })

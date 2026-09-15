@@ -21,9 +21,22 @@ export interface StatsOverview {
   lastAt: number
 }
 
-const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : 0)
+const num = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v)
+    ? v
+    : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))
+      ? Number(v)
+      : 0
 
-const EMPTY: StatsOverview = { total: 0, imageCount: 0, fileCount: 0, voiceCount: 0, videoCount: 0, firstAt: 0, lastAt: 0 }
+const EMPTY: StatsOverview = {
+  total: 0,
+  imageCount: 0,
+  fileCount: 0,
+  voiceCount: 0,
+  videoCount: 0,
+  firstAt: 0,
+  lastAt: 0,
+}
 
 /** undefined when the result is missing or is not an overview; never a partially-filled object. */
 export function readStatsOverview(stats: StatsResult | undefined): StatsOverview | undefined {

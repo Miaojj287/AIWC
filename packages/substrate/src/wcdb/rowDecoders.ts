@@ -79,7 +79,10 @@ export function extractXmlValue(xml: string, tagName: string): string {
   const regex = new RegExp(`<${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)</${tagName}>`, 'i')
   const match = regex.exec(xml)
   if (!match) return ''
-  return (match[1] ?? '').replace(/<!\[CDATA\[/g, '').replace(/\]\]>/g, '').trim()
+  return (match[1] ?? '')
+    .replace(/<!\[CDATA\[/g, '')
+    .replace(/\]\]>/g, '')
+    .trim()
 }
 
 export function decodeHtmlEntities(content: string): string {
@@ -126,9 +129,13 @@ export function cleanSystemMessage(content: string): string {
   return cleaned || '[系统消息]'
 }
 
-/** Group text messages are stored as `wxid_xxx:\ntext`; strip the sender prefix. */
+/**
+ * Group text messages are stored as `<sender username>:\n<text>`; strip that prefix. The newline is required:
+ * without it a direct message such as `10:30 开会` or `Note: …` would lose its first word. Usernames start with a
+ * letter (wxid_…, custom WeChat ids, …@openim).
+ */
 export function stripSenderPrefix(content: string): string {
-  return content.replace(/^[\s]*([a-zA-Z0-9_@.-]+):(?!\/\/)\s*/, '')
+  return content.replace(/^\s*[A-Za-z][A-Za-z0-9_.@-]{2,63}:\r?\n/, '')
 }
 
 export function looksLikeHex(s: string): boolean {
@@ -167,27 +174,27 @@ export function decodeBinaryContent(data: Buffer): string {
 }
 
 /**
- * Decode a column that may be a Buffer, a hex/base64 encoded blob or plain text.
- * Short strings (≤16 chars) are never treated as encodings — "123456" is text, not hex.
+ * Decode a column that may be a BLOB (Buffer) or text. The WCDB bridge returns BLOBs as Buffers, so a string is
+ * text and is returned unchanged — unless it is the hex or base64 spelling of a zstd frame. Text that merely looks
+ * like an encoding (an 18-digit ID number, an order code, a commit hash) must never be reinterpreted.
  */
 export function decodeMaybeCompressed(raw: unknown): string {
   if (!raw) return ''
   if (Buffer.isBuffer(raw)) return decodeBinaryContent(raw)
   if (raw instanceof Uint8Array) return decodeBinaryContent(Buffer.from(raw))
   if (typeof raw !== 'string') return ''
-  if (raw.length === 0) return ''
-  if (raw.length > 16 && looksLikeHex(raw)) {
-    const bytes = Buffer.from(raw, 'hex')
-    if (bytes.length > 0) return decodeBinaryContent(bytes)
-  }
-  if (raw.length > 16 && looksLikeBase64(raw)) {
-    try {
-      return decodeBinaryContent(Buffer.from(raw, 'base64'))
-    } catch {
-      // not base64 after all
-    }
-  }
-  return raw
+  const frame = encodedZstdFrame(raw)
+  return frame ? decodeBinaryContent(frame) : raw
+}
+
+/** Short strings (≤16 chars) are never treated as encodings. */
+function encodedZstdFrame(text: string): Buffer | undefined {
+  if (text.length <= 16) return undefined
+  const candidates = [
+    looksLikeHex(text) ? Buffer.from(text, 'hex') : undefined,
+    looksLikeBase64(text) ? Buffer.from(text, 'base64') : undefined,
+  ]
+  return candidates.find((bytes) => bytes !== undefined && bytes.length >= 4 && bytes.readUInt32LE(0) === ZSTD_MAGIC)
 }
 
 /** compress_content wins over message_content when present (WeChat 4.x zstd-compresses long bodies). */

@@ -29,7 +29,16 @@ import {
 const TWO_POW_32 = 4_294_967_296
 
 const TYPE_FIELDS = [
-  'local_type', 'localType', 'type', 'Type', 'msg_type', 'msgType', 'MsgType', 'message_type', 'messageType', 'WCDB_CT_local_type',
+  'local_type',
+  'localType',
+  'type',
+  'Type',
+  'msg_type',
+  'msgType',
+  'MsgType',
+  'message_type',
+  'messageType',
+  'WCDB_CT_local_type',
 ]
 const CONTENT_FIELDS = ['message_content', 'messageContent', 'content', 'Content', 'raw_content', 'rawContent']
 const COMPRESS_FIELDS = ['compress_content', 'compressContent', 'compressedContent', 'CompressContent']
@@ -77,9 +86,6 @@ export function deriveSeq(sortSeq: number, createTime: number, localId: number):
   if (Number.isFinite(sortSeq) && sortSeq > 0) return sortSeq
   return Math.max(0, Math.floor(createTime)) * 1000 + Math.max(0, Math.floor(localId))
 }
-
-/** SQL expression equivalent to deriveSeq (kept next to it so both stay in sync). */
-export const SEQ_SQL_EXPR = 'CASE WHEN sort_seq > 0 THEN sort_seq ELSE create_time * 1000 + local_id END'
 
 function looksLikeXml(content: string): boolean {
   const trimmed = content.trimStart()
@@ -204,7 +210,9 @@ function buildMedia(kind: MessageKind, content: string): WxMedia | undefined {
 }
 
 /** Stable identity used to de-duplicate rows that appear in several shards. */
-export function messageIdentityKey(raw: Pick<MessageRawInfo, 'serverId' | 'localId' | 'createTime' | 'sortSeq'>): string {
+export function messageIdentityKey(
+  raw: Pick<MessageRawInfo, 'serverId' | 'localId' | 'createTime' | 'sortSeq'>,
+): string {
   return `${raw.serverId}-${raw.localId}-${raw.createTime}-${raw.sortSeq}`
 }
 
@@ -215,7 +223,11 @@ export function rowToWxMessage(row: Row, ctx: MessageRowContext): WxMessage {
   const rich = parseRichContent(raw.content, raw.baseType)
   const classified = classifyKind(raw.baseType, raw.content)
   const kind = rich?.type === 'article' ? 'link' : classified.kind
-  const text = isPatMessage(raw.content) ? patText(raw.content) : rich?.type === 'article' ? rich.title : parseMessageContent(raw.content, raw.baseType)
+  const text = isPatMessage(raw.content)
+    ? patText(raw.content)
+    : rich?.type === 'article'
+      ? rich.title
+      : parseMessageContent(raw.content, raw.baseType)
   const seq = deriveSeq(raw.sortSeq, raw.createTime, raw.localId)
   const createdAt = raw.createTime * 1000
   // local_id restarts in each shard; it is not a session-wide identity.

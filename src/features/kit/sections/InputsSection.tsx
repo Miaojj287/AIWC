@@ -48,13 +48,21 @@ export function InputsSection() {
               mono
               className="w-[220px]"
               aria-label="密钥"
-              trailing={<IconButton size="xs" icon={Copy} iconSize={14} label="复制" tabIndex={-1} className="text-fg-3" />}
+              trailing={
+                <IconButton size="xs" icon={Copy} iconSize={14} label="复制" tabIndex={-1} className="text-fg-3" />
+              }
             />
           </State>
         </Row>
       </Item>
       <Item label="错误态 + 行内提示">
-        <Input defaultValue="wxid_example_9f21" mono error="该目录缺少 db_storage" className="w-[220px]" aria-label="账号" />
+        <Input
+          defaultValue="wxid_example_9f21"
+          mono
+          error="该目录缺少 db_storage"
+          className="w-[220px]"
+          aria-label="账号"
+        />
       </Item>
       <Item label="尺寸 sm · 带提示">
         <Input size="sm" placeholder="h28" hint="一句话帮助文字" className="w-[220px]" aria-label="sm" />
@@ -65,10 +73,24 @@ export function InputsSection() {
             <Textarea placeholder="一段多行文本…" className="w-[260px]" rows={3} aria-label="默认" />
           </State>
           <State name="focus">
-            <Textarea defaultValue="一段多行文本，用作示例。" className="w-[260px] border-accent/80" rows={3} aria-label="focus" />
+            <Textarea
+              defaultValue="一段多行文本，用作示例。"
+              className="w-[260px] border-accent/80"
+              rows={3}
+              aria-label="focus"
+            />
           </State>
           <State name="autosize">
-            <Textarea autosize minRows={2} maxRows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder="输入多行会自动长高" className="w-[260px]" aria-label="autosize" />
+            <Textarea
+              autosize
+              minRows={2}
+              maxRows={6}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="输入多行会自动长高"
+              className="w-[260px]"
+              aria-label="autosize"
+            />
           </State>
         </Row>
       </Item>
@@ -94,14 +116,32 @@ export function InputsSection() {
             <Select options={SELECT_OPTIONS} value="a" disabled aria-label="禁用" />
           </State>
           <State name="占位 · lg · 满宽">
-            <Select options={SELECT_OPTIONS} value={null} placeholder="请选择" size="lg" fullWidth className="w-[200px]" aria-label="占位" />
+            <Select
+              options={SELECT_OPTIONS}
+              value={null}
+              placeholder="请选择"
+              size="lg"
+              fullWidth
+              className="w-[200px]"
+              aria-label="占位"
+            />
           </State>
         </Row>
       </Item>
       <Item label="分段控件 · hover / 选中 / 默认">
         <Row>
           <SegmentedControl aria-label="主题" options={THEME_OPTIONS} value={theme} onValueChange={setTheme} />
-          <SegmentedControl aria-label="尺寸 sm" size="sm" options={[{ value: 'all', label: '全部' }, { value: 'on', label: '已开启' }, { value: 'off', label: '已暂停' }]} value="all" onValueChange={() => {}} />
+          <SegmentedControl
+            aria-label="尺寸 sm"
+            size="sm"
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'on', label: '已开启' },
+              { value: 'off', label: '已暂停' },
+            ]}
+            value="all"
+            onValueChange={() => {}}
+          />
           <SegmentedControl aria-label="禁用" options={THEME_OPTIONS} value="dark" onValueChange={() => {}} disabled />
         </Row>
       </Item>
@@ -111,7 +151,12 @@ export function InputsSection() {
             <SearchBox placeholder="搜索会话" shortcut="⌘K" wrapperClassName="w-[240px]" aria-label="默认" />
           </State>
           <State name="focus + 清除">
-            <SearchBox value={search || '示例'} onValueChange={setSearch} wrapperClassName="w-[240px] border-accent/80" aria-label="focus" />
+            <SearchBox
+              value={search || '示例'}
+              onValueChange={setSearch}
+              wrapperClassName="w-[240px] border-accent/80"
+              aria-label="focus"
+            />
           </State>
           <State name="sm">
             <SearchBox size="sm" placeholder="搜索设置" wrapperClassName="w-[200px]" aria-label="sm" />

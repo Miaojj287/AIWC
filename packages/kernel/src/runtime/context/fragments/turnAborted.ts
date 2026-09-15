@@ -12,5 +12,10 @@ const REASON_LABEL: Record<TurnAbortedItem['reason'], string> = {
 
 /** Tells the model why the previous turn ended abruptly so it does not assume its tool calls completed. */
 export function turnAbortedFragment(reason: TurnAbortedItem['reason']): ContextFragment {
-  return createFragment('turn_aborted', '<turn_aborted>', 200, () => `${REASON_LABEL[reason]}；未完成的工具调用不应视为已执行。`)
+  return createFragment(
+    'turn_aborted',
+    '<turn_aborted>',
+    200,
+    () => `${REASON_LABEL[reason]}；未完成的工具调用不应视为已执行。`,
+  )
 }

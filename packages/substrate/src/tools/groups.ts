@@ -5,11 +5,14 @@
  */
 import type { StatsQuery, WxSession } from '@aiwc/protocol'
 import { z } from 'zod'
+import { isGroupUsername } from '../normalize/kinds'
 import { refuseForBot, scopeBotSession } from './botScope'
 import {
   READ_PROFILES,
   READ_PROFILES_NO_BOT,
   TimeRangeRefinement,
+  timeFrom,
+  timeTo,
   compactContact,
   compactSession,
   defineSubstrateTool,
@@ -18,12 +21,6 @@ import {
   fmtTime,
   ok,
 } from './shared'
-
-const GROUP_SUFFIX = '@chatroom'
-
-function looksLikeGroup(id: string): boolean {
-  return id.endsWith(GROUP_SUFFIX)
-}
 
 // ---------------------------------------------------------------------------------------------
 // list_groups
@@ -63,7 +60,14 @@ export const listGroups = defineSubstrateTool({
         const contacts = await substrate.listContacts({ query: input.query, kind: 'group', limit: input.limit })
         for (const c of contacts.items) {
           if (seen.has(c.username) || groups.length >= input.limit) continue
-          const asSession: WxSession = { id: c.username, kind: 'group', title: c.remark || c.nickname || c.username, unread: 0, pinned: false, muted: false }
+          const asSession: WxSession = {
+            id: c.username,
+            kind: 'group',
+            title: c.remark || c.nickname || c.username,
+            unread: 0,
+            pinned: false,
+            muted: false,
+          }
           if (typeof c.lastContactAt === 'number') asSession.lastMessageAt = c.lastContactAt
           groups.push(compactSession(asSession))
           seen.add(c.username)
@@ -75,7 +79,9 @@ export const listGroups = defineSubstrateTool({
         groups,
         total: Math.max(sessions.total, groups.length),
         ...(supplemented > 0 ? { note: `其中 ${supplemented} 个群来自通讯录、暂无会话记录。` } : {}),
-        ...(groups.length === 0 ? { note: input.query ? `没有名称匹配「${input.query}」的群。` : '本地索引里还没有群聊。' } : {}),
+        ...(groups.length === 0
+          ? { note: input.query ? `没有名称匹配「${input.query}」的群。` : '本地索引里还没有群聊。' }
+          : {}),
       })
     } catch (error) {
       return fail(describeToolError(error, 'list_groups 执行失败'))
@@ -98,7 +104,7 @@ export const groupMembers = defineSubstrateTool({
   name: 'group_members',
   description:
     '列出某个群的成员（username + 昵称 / 备注），用于「这个群有哪些人 / 某人在不在群里 / 群有多少人」。groupId 是群的 username（以 @chatroom 结尾）。只读本地数据。\n' +
-    'List members of a group (username, nickname, remark). groupId is the group\'s username ending in @chatroom.',
+    "List members of a group (username, nickname, remark). groupId is the group's username ending in @chatroom.",
   inputSchema: GroupMembersInput,
   profiles: READ_PROFILES,
   risk: 'read',
@@ -116,8 +122,12 @@ export const groupMembers = defineSubstrateTool({
         total: res.total,
         hasMore: res.total > members.length,
         members,
-        ...(!looksLikeGroup(input.groupId) ? { note: 'groupId 不以 @chatroom 结尾，可能不是群；请用 list_groups 确认。' } : {}),
-        ...(members.length === 0 && looksLikeGroup(input.groupId) ? { note: '没有成员数据：群可能尚未同步，或 groupId 无效。' } : {}),
+        ...(!isGroupUsername(input.groupId)
+          ? { note: 'groupId 不以 @chatroom 结尾，可能不是群；请用 list_groups 确认。' }
+          : {}),
+        ...(members.length === 0 && isGroupUsername(input.groupId)
+          ? { note: '没有成员数据：群可能尚未同步，或 groupId 无效。' }
+          : {}),
       })
     } catch (error) {
       return fail(describeToolError(error, 'group_members 执行失败'))
@@ -132,8 +142,8 @@ export const groupMembers = defineSubstrateTool({
 const GroupMemberRankingInput = z
   .object({
     groupId: z.string().trim().min(1).describe('群 id（username，以 @chatroom 结尾）'),
-    from: z.number().int().nonnegative().optional().describe('起始时间，毫秒时间戳'),
-    to: z.number().int().nonnegative().optional().describe('结束时间，毫秒时间戳'),
+    from: timeFrom().optional(),
+    to: timeTo().optional(),
     limit: z.number().int().min(1).max(30).default(20).describe('返回排行条数（≤30）'),
   })
   .refine(TimeRangeRefinement.check, { message: TimeRangeRefinement.message, path: ['from'] })

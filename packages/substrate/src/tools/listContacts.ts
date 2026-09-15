@@ -28,11 +28,17 @@ export const listContacts = defineSubstrateTool({
     const refused = refuseForBot(ctx)
     if (refused) return refused
     try {
-      const res = await ctx.services.substrate.listContacts({ query: input.query, kind: input.kind, limit: input.limit })
+      const res = await ctx.services.substrate.listContacts({
+        query: input.query,
+        kind: input.kind,
+        limit: input.limit,
+      })
       return ok({
         contacts: res.items.map(compactContact),
         total: res.total,
-        ...(res.items.length === 0 ? { note: `没有匹配「${input.query}」的联系人；可尝试更短的关键词，或用 list_sessions 按会话标题查找。` } : {}),
+        ...(res.items.length === 0
+          ? { note: `没有匹配「${input.query}」的联系人；可尝试更短的关键词，或用 list_sessions 按会话标题查找。` }
+          : {}),
       })
     } catch (error) {
       return fail(describeToolError(error, 'list_contacts 执行失败'))

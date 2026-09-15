@@ -13,6 +13,7 @@ import { createSubstrateClient, type SourceOpenOptions, type SubstrateClient } f
 import type { SubstrateHostMessage } from '../../hosts/substrateHost'
 import type { Broadcast, SubstrateHost, SubstrateHostInit, SubstrateMode } from '../contracts'
 import type { Logger } from '../log'
+import { t } from '../i18n'
 
 export interface SubstrateHostDeps {
   /** dist-electron/substrateHost.js */
@@ -31,6 +32,10 @@ export interface SubstrateHostDeps {
 }
 
 const IDLE_SYNC: SyncStatus = { phase: 'idle' }
+/** A host that stays up this long is considered stable again: the restart back-off resets. */
+const STABLE_AFTER_MS = 60_000
+/** How long shutdown waits for the host to close its databases before moving on. */
+const CLOSE_GRACE_MS = 2_000
 
 export function restartDelay(attempt: number, maxMs = 30_000): number {
   return Math.min(1000 * 2 ** Math.max(0, attempt - 1), maxMs)
@@ -70,12 +75,12 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
   }
 
   function current(): SubstrateClient {
-    if (!live) throw new Error('数据基座尚未就绪，请稍后再试')
+    if (!live) throw new Error(t('main.substrate.hostNotReady'))
     return live.client
   }
 
   function fork(): Live {
-    if (!existsSync(deps.entry)) throw new Error(`substrate host 入口不存在: ${deps.entry}`)
+    if (!existsSync(deps.entry)) throw new Error(t('main.substrate.hostEntryMissing', { path: deps.entry }))
     const init = deps.resolveInit()
     mode = init.mode
     const channel = new MessageChannelMain()
@@ -119,7 +124,7 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
       if (stableTimer) clearTimeout(stableTimer)
       stableTimer = setTimeout(() => {
         restartAttempts = 0
-      }, 60_000)
+      }, STABLE_AFTER_MS)
     })
     proc.on('exit', (code) => {
       rejectReady(new Error(`substrate host exited (code ${code})`))
@@ -174,7 +179,11 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
     if (stopping) return
     restartAttempts += 1
     const delay = restartDelay(restartAttempts, deps.maxRestartDelayMs)
-    emit({ type: 'connection', state: 'error', detail: `数据基座进程退出（code ${code}），${Math.round(delay / 1000)} 秒后重启` })
+    emit({
+      type: 'connection',
+      state: 'error',
+      detail: t('main.substrate.hostExited', { code: String(code), seconds: Math.round(delay / 1000) }),
+    })
     restartTimer = setTimeout(() => {
       restartTimer = undefined
       try {
@@ -190,7 +199,10 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
   async function awaitReady(target: Live): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`数据基座 ${readyTimeoutMs / 1000} 秒内未就绪`)), readyTimeoutMs)
+      timer = setTimeout(
+        () => reject(new Error(t('main.substrate.hostReadyTimeout', { seconds: readyTimeoutMs / 1000 }))),
+        readyTimeoutMs,
+      )
     })
     try {
       await Promise.race([target.ready, timeout])
@@ -201,19 +213,19 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
 
   async function open(): Promise<{ ok: boolean; error?: string }> {
     const target = live
-    if (!target) return { ok: false, error: '数据基座进程未启动' }
+    if (!target) return { ok: false, error: t('main.substrate.hostNotStarted') }
     const opts = deps.resolveOpen(mode)
     if (!opts) {
       log.info('no account configured; substrate stays in no_config')
       emit({ type: 'connection', state: 'no_config' })
-      return { ok: false, error: '尚未配置微信账号' }
+      return { ok: false, error: t('main.substrate.noAccount') }
     }
     try {
       await awaitReady(target)
       await target.client.openWith(opts)
       const status = await target.client.refreshStatus()
       if (status.connection !== 'ready' || status.account?.wxid !== opts.wxid) {
-        throw new Error('实际连接账号与所选账号不一致')
+        throw new Error(t('main.substrate.accountMismatch'))
       }
       log.info('substrate opened', { mode, wxid: opts.wxid })
       return { ok: true }
@@ -228,9 +240,9 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
   async function closeQuietly(target: Live | undefined): Promise<void> {
     if (!target) return
     try {
-      await Promise.race([target.client.close(), new Promise((r) => setTimeout(r, 2000))])
+      await Promise.race([target.client.close(), new Promise((r) => setTimeout(r, CLOSE_GRACE_MS))])
     } catch {
-      // ignore
+      // The host may already be gone; shutdown continues either way.
     }
   }
 
@@ -288,7 +300,7 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
     resolveMedia: (s, m) => current().resolveMedia(s, m),
     transcribeVoice: (s, m, o) => {
       const c = current()
-      if (!c.transcribeVoice) return Promise.reject(new Error('当前数据基座不支持语音转文字'))
+      if (!c.transcribeVoice) return Promise.reject(new Error(t('main.substrate.sttUnsupported')))
       return c.transcribeVoice(s, m, o)
     },
     sync: (o) => current().sync(o),
@@ -298,7 +310,7 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
     },
     querySql: (req) => {
       const c = current()
-      if (!c.querySql) return Promise.reject(new Error('当前数据基座不支持 SQL 查询'))
+      if (!c.querySql) return Promise.reject(new Error(t('main.substrate.sqlUnsupported')))
       return c.querySql(req)
     },
     setSessionFlags: (id, flags) => current().setSessionFlags(id, flags),

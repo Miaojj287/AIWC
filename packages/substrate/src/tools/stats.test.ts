@@ -24,7 +24,10 @@ describe('chat_stats', () => {
   it('time_distribution defaults groupBy to hour and passes the range', async () => {
     const sub = sampleWorld()
     const out = body(await runTool(chatStats, { metric: 'time_distribution', from: T0, to: T0 + 3_600_000 }, sub))
-    expect(sub.calls[0]).toEqual({ method: 'stats', args: [{ metric: 'time_distribution', from: T0, to: T0 + 3_600_000, groupBy: 'hour' }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'stats',
+      args: [{ metric: 'time_distribution', from: T0, to: T0 + 3_600_000, groupBy: 'hour' }],
+    })
     expect(out.groupBy).toBe('hour')
     expect(out.rows.length).toBeGreaterThan(0)
     expect(out.range.from).toMatch(/^\d{4}-/)

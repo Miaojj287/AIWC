@@ -1,13 +1,24 @@
 /**
- * 回复方式 card — the entire rule. 回复来源 (segmented) swaps the rows below:
+ * 回复方式 card — the entire rule. 发送方式 (segmented) decides whether a reply waits for 确认发送
+ * or counts down; 回复来源 (segmented) swaps the rows below:
  *   固定文案 → the text that gets sent, with variable chips
  *   AI 生成  → the system prompt, and how many past messages the model reads
  */
 import { Plus } from 'lucide-react'
 import { useRef } from 'react'
-import type { AutoReplyRule, ReplySource } from '@aiwc/protocol'
+import type { AutoReplyRule, ReplySendMode, ReplySource } from '@aiwc/protocol'
+import { useT, type MessageKey } from '@/i18n'
 import { Card, Chip, InlineHint, Input, SegmentedControl, SettingRow, Textarea } from '@/kit'
-import { HISTORY_COUNT_OPTIONS, RULE_VARIABLES, SOURCE_OPTIONS, insertAtCursor, type RuleErrors } from '../ruleModel'
+import { useConfig } from '@/platform/configStore'
+import {
+  HISTORY_COUNT_OPTIONS,
+  RULE_VARIABLES,
+  RULE_VARIABLE_LABELS,
+  SEND_MODE_OPTIONS,
+  SOURCE_OPTIONS,
+  insertAtCursor,
+  type RuleErrors,
+} from '../ruleModel'
 
 export interface ReplyCardProps {
   draft: AutoReplyRule
@@ -15,16 +26,24 @@ export interface ReplyCardProps {
   patch: (p: Partial<AutoReplyRule>) => void
 }
 
-const SOURCE_DESCRIPTION: Record<ReplySource, string> = {
-  fixed: '对方每条消息都回同一段文案，不调用模型',
-  ai: '按下面的设定，参考这个会话的历史记录现写一条',
+const SOURCE_DESCRIPTION: Record<ReplySource, MessageKey> = {
+  fixed: 'autoreply.reply.sourceDescription.fixed',
+  ai: 'autoreply.reply.sourceDescription.ai',
 }
 
-const PROMPT_PLACEHOLDER = '例如：你就是我本人。用我平时的语气回消息，短句、口语、别用书面语。涉及具体金额、时间和承诺时不要答，改说「我等下确认一下」。'
-
 export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
+  const t = useT()
   const textRef = useRef<HTMLTextAreaElement>(null)
   const historyCount = draft.historyCount
+  const countdownMs = useConfig((c) => c.autoReply.countdownMs) ?? 5000
+  const sendMode: ReplySendMode = draft.sendMode ?? 'auto'
+  const sendModeDescriptionKey = SEND_MODE_OPTIONS.find((o) => o.value === sendMode)?.descriptionKey
+  const sendModeDescription =
+    sendMode === 'auto' && countdownMs > 0
+      ? t('autoreply.reply.autoCountdown', { n: Math.round(countdownMs / 1000) })
+      : sendModeDescriptionKey
+        ? t(sendModeDescriptionKey)
+        : undefined
 
   const insertVariable = (token: string) => {
     const el = textRef.current
@@ -39,21 +58,33 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
 
   return (
     <Card variant="rows">
-      <SettingRow title="回复方式" description={SOURCE_DESCRIPTION[draft.source]}>
+      <SettingRow title={t('autoreply.reply.sendMode')} description={sendModeDescription}>
+        <SegmentedControl<ReplySendMode>
+          aria-label={t('autoreply.reply.sendMode')}
+          value={sendMode}
+          options={SEND_MODE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+          onValueChange={(mode) => patch({ sendMode: mode })}
+        />
+      </SettingRow>
+      <SettingRow title={t('autoreply.reply.source')} description={t(SOURCE_DESCRIPTION[draft.source])}>
         <SegmentedControl<ReplySource>
-          aria-label="回复方式"
+          aria-label={t('autoreply.reply.source')}
           value={draft.source}
-          options={SOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          options={SOURCE_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
           onValueChange={(source) => patch({ source })}
         />
       </SettingRow>
 
       {draft.source === 'fixed' ? (
         <SettingRow
-          title="回复文案"
-          description="原样发送；变量在发送时替换成真实的昵称、时间和群名"
+          title={t('autoreply.reply.fixedText')}
+          description={t('autoreply.reply.fixedTextDescription')}
           stacked
-          footer={errors.fixedText && (draft.fixedText ?? '') !== '' ? <InlineHint kind="error">{errors.fixedText}</InlineHint> : null}
+          footer={
+            errors.fixedText && (draft.fixedText ?? '') !== '' ? (
+              <InlineHint kind="error">{errors.fixedText}</InlineHint>
+            ) : null
+          }
         >
           <div className="flex flex-col gap-2">
             <Textarea
@@ -61,55 +92,71 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
               autosize
               minRows={3}
               maxRows={8}
-              aria-label="回复文案"
+              aria-label={t('autoreply.reply.fixedText')}
               value={draft.fixedText ?? ''}
-              placeholder="例如：{昵称} 你好，我现在不在电脑旁，看到后会尽快回复你。"
+              placeholder={t('autoreply.reply.fixedTextPlaceholder', { nickname: RULE_VARIABLES[0] })}
               onChange={(e) => patch({ fixedText: e.target.value })}
               error={Boolean(errors.fixedText) && (draft.fixedText ?? '') !== '' ? true : undefined}
             />
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-micro text-fg-3">插入变量</span>
+              <span className="text-micro text-fg-3">{t('autoreply.reply.insertVariable')}</span>
               {RULE_VARIABLES.map((v) => (
-                <Chip key={v} label={v} icon={Plus} onClick={() => insertVariable(v)} className="font-mono" />
+                <Chip
+                  key={v}
+                  label={t(RULE_VARIABLE_LABELS[v], { token: v })}
+                  icon={Plus}
+                  onClick={() => insertVariable(v)}
+                  className="font-mono"
+                />
               ))}
             </div>
           </div>
         </SettingRow>
       ) : (
         <>
-          <SettingRow title="System Prompt" description="AI 以什么身份、什么语气、什么边界来替你回复" stacked>
+          <SettingRow
+            title={t('autoreply.reply.systemPrompt')}
+            description={t('autoreply.reply.systemPromptDescription')}
+            stacked
+          >
             <Textarea
               autosize
               minRows={4}
               maxRows={14}
-              aria-label="System Prompt"
+              aria-label={t('autoreply.reply.systemPrompt')}
               value={draft.prompt ?? ''}
-              placeholder={PROMPT_PLACEHOLDER}
+              placeholder={t('autoreply.reply.promptPlaceholder')}
               onChange={(e) => patch({ prompt: e.target.value })}
             />
           </SettingRow>
           <SettingRow
-            title="参考历史条数"
-            description="每次回复前读取这个会话最近多少条消息作为上下文"
+            title={t('autoreply.reply.historyCount')}
+            description={t('autoreply.reply.historyCountDescription')}
             footer={errors.historyCount ? <InlineHint kind="error">{errors.historyCount}</InlineHint> : null}
           >
             <div className="flex items-center gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 {HISTORY_COUNT_OPTIONS.map((n) => (
-                  <Chip key={n} label={String(n)} selected={historyCount === n} onClick={() => patch({ historyCount: n })} aria-label={`参考 ${n} 条`} />
+                  <Chip
+                    key={n}
+                    label={String(n)}
+                    selected={historyCount === n}
+                    onClick={() => patch({ historyCount: n })}
+                    aria-label={t('autoreply.rule.historyCount', { n })}
+                  />
                 ))}
               </div>
               <Input
                 size="sm"
                 type="number"
                 mono
-                aria-label="参考历史条数"
+                aria-label={t('autoreply.reply.historyCount')}
                 value={String(historyCount ?? '')}
                 onChange={(e) => patch({ historyCount: Number(e.target.value) })}
                 error={Boolean(errors.historyCount) || undefined}
                 wrapperClassName="w-[84px]"
               />
-              <span className="text-micro text-fg-3">条</span>
+              <span className="text-micro text-fg-3">{t('autoreply.reply.historyCountUnit')}</span>
             </div>
           </SettingRow>
         </>

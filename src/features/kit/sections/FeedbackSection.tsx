@@ -1,5 +1,16 @@
 import { Plus, RefreshCw } from 'lucide-react'
-import { Badge, Button, IconButton, InlineHint, ProgressBar, SkeletonListRows, Spinner, ToastView, Tooltip, toast } from '@/kit'
+import {
+  Badge,
+  Button,
+  IconButton,
+  InlineHint,
+  ProgressBar,
+  SkeletonListRows,
+  Spinner,
+  ToastView,
+  Tooltip,
+  toast,
+} from '@/kit'
 import { Item, Row, Section, State } from '../gallery'
 
 export function FeedbackSection() {
@@ -8,15 +19,34 @@ export function FeedbackSection() {
       <Item label="Toast · 右下角出现，4s 自动消失，带操作时不自动消失">
         <div className="flex flex-col items-start gap-2">
           <ToastView toast={{ kind: 'success', text: '已保存' }} onDismiss={() => {}} />
-          <ToastView toast={{ kind: 'info', text: '已把 2 条消息加入 Agent 上下文', action: { label: '撤销', onClick: () => {} } }} onDismiss={() => {}} />
+          <ToastView
+            toast={{
+              kind: 'info',
+              text: '已把 2 条消息加入 Agent 上下文',
+              action: { label: '撤销', onClick: () => {} },
+            }}
+            onDismiss={() => {}}
+          />
           <ToastView toast={{ kind: 'warning', text: '磁盘空间不足，建议更换缓存目录' }} onDismiss={() => {}} />
-          <ToastView toast={{ kind: 'error', text: '连接失败 · 401 Unauthorized', action: { label: '重试', onClick: () => {} } }} onDismiss={() => {}} />
-          <ToastView toast={{ kind: 'progress', text: '正在同步…', detail: '1,240 / 14,238 条' }} onDismiss={() => {}} />
+          <ToastView
+            toast={{ kind: 'error', text: '连接失败 · 401 Unauthorized', action: { label: '重试', onClick: () => {} } }}
+            onDismiss={() => {}}
+          />
+          <ToastView
+            toast={{ kind: 'progress', text: '正在同步…', detail: '1,240 / 14,238 条' }}
+            onDismiss={() => {}}
+          />
           <Row className="mt-1 gap-2">
             <Button size="sm" variant="ghost" onClick={() => toast.success('已保存')}>
               触发 success
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => toast.error('连接失败', { action: { label: '重试', onClick: () => toast.info('已重试') } })}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                toast.error('连接失败', { action: { label: '重试', onClick: () => toast.info('已重试') } })
+              }
+            >
               触发 error + 操作
             </Button>
             <Button

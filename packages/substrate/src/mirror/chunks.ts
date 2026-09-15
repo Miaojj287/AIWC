@@ -37,7 +37,10 @@ export function buildChunks(messages: readonly ChunkInput[]): BuiltChunk[] {
     const last = group[group.length - 1]
     if (!first || !last) return
     const mid = group[Math.floor(group.length / 2)] ?? first
-    const joined = group.map((m) => m.text.trim()).filter(Boolean).join('\n')
+    const joined = group
+      .map((m) => m.text.trim())
+      .filter(Boolean)
+      .join('\n')
     chunks.push({
       startSeq: first.seq,
       endSeq: last.seq,

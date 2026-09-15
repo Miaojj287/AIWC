@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ConfigPatch } from '@aiwc/protocol'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { toast } from '@/kit'
+import { t } from '@/i18n'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
 
@@ -17,7 +18,7 @@ export async function saveConfig(patch: ConfigPatch): Promise<boolean> {
     await useConfigStore.getState().set(patch)
     return true
   } catch (e) {
-    toast.error('保存设置失败', { detail: errorMessage(e) })
+    toast.error(t('settings.nav.config.saveFailed'), { detail: errorMessage(e) })
     return false
   }
 }
@@ -28,7 +29,7 @@ export async function refreshConfig(): Promise<void> {
     const config = await invoke('config:get', undefined)
     useConfigStore.setState({ config, hydrated: true, error: undefined })
   } catch (e) {
-    toast.error('读取配置失败', { detail: errorMessage(e) })
+    toast.error(t('settings.nav.config.loadFailed'), { detail: errorMessage(e) })
   }
 }
 
@@ -59,12 +60,12 @@ export function useSecretPresence(ref: string, version = 0): SecretPresence {
 }
 
 /** Copy text to the clipboard with a toast either way. */
-export async function copyText(text: string, what = '内容'): Promise<void> {
+export async function copyText(text: string, what?: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
-    toast.success(`${what}已复制到剪贴板`)
+    toast.success(t('common.copied', { what: what ?? t('common.content') }))
   } catch (e) {
-    toast.error('复制失败', { detail: errorMessage(e) })
+    toast.error(t('common.copyFailed'), { detail: errorMessage(e) })
   }
 }
 
@@ -72,12 +73,12 @@ export async function copyText(text: string, what = '内容'): Promise<void> {
 export async function activateAccount(account: NonNullable<ConfigPatch['account']>): Promise<boolean> {
   try {
     const previous = await invoke('substrate:status', undefined)
-    if (!account.wxid || !account.dbRoot) throw new Error('请先选择微信账号和数据库目录')
+    if (!account.wxid || !account.dbRoot) throw new Error(t('settings.account.switchAccount.selectFirst'))
     const result = await invoke('substrate:connect', { wxid: account.wxid, dbRoot: account.dbRoot })
-    if (!result.ok) throw new Error(result.error ?? '数据库连接失败')
+    if (!result.ok) throw new Error(result.error ?? t('settings.account.switchAccount.connectFailed'))
     const connected = await invoke('substrate:status', undefined)
     if (connected.connection !== 'ready' || connected.account?.wxid !== account.wxid) {
-      throw new Error('实际连接账号与所选账号不一致')
+      throw new Error(t('settings.account.switchAccount.mismatch'))
     }
     if (previous.account?.wxid !== account.wxid || previous.account?.dbRoot !== account.dbRoot) {
       const store = useTabsStore.getState()
@@ -88,7 +89,7 @@ export async function activateAccount(account: NonNullable<ConfigPatch['account'
     return true
   } catch (e) {
     await refreshConfig()
-    toast.error('切换账号失败', { detail: errorMessage(e) })
+    toast.error(t('settings.account.switchAccount.failed'), { detail: errorMessage(e) })
     return false
   }
 }

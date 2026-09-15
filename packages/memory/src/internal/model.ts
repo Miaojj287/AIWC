@@ -1,10 +1,11 @@
 /**
  * Thin helpers over the stream-based ModelClient port:
- *  - sampleText(): one system + one user message, no tools, collects `text.delta` parts
+ *  - sampleText(): one system + one user message, no tools, collects `text.delta` parts; every call has a
+ *    deadline (MODEL_CALL_TIMEOUT_MS unless the caller passes one) combined with the caller's signal
  *  - extractJson(): first balanced {...} block from free-form model output (fences, prefixes tolerated)
  *  - generateValidated(): sampleText + extractJson + zod parse, one retry with a stricter nudge
  */
-import type { ModelClient, ModelError, SamplingRequest, UserMessageItem } from '@aiwc/protocol'
+import type { ModelClient, ModelError, SamplingPart, SamplingRequest, UserMessageItem } from '@aiwc/protocol'
 import { newItemId, newTurnId } from '@aiwc/protocol'
 import type { z } from 'zod'
 
@@ -17,15 +18,72 @@ export class ModelSampleError extends Error {
   }
 }
 
+/**
+ * Deadline for one model call (diary summary / synthesis, clone extraction / merge, reflection). Generous
+ * enough for a slow local model writing ~2k tokens; a stream still open after it is a failure, not a hang.
+ */
+export const MODEL_CALL_TIMEOUT_MS = 5 * 60_000
+
 export interface SampleTextOptions {
   signal?: AbortSignal
+  /** Deadline for this call; defaults to MODEL_CALL_TIMEOUT_MS. Whichever of it and `signal` fires first stops the call. */
+  timeoutMs?: number
   maxOutputTokens?: number
   temperature?: number
   cacheKey?: string
 }
 
-/** Collect the text of one model call. Throws ModelSampleError on an `error` part; aborts surface as errors too. */
-export async function sampleText(model: ModelClient, system: string, user: string, opts: SampleTextOptions = {}): Promise<string> {
+const abortedError = () => new ModelSampleError({ code: 'unknown', message: 'aborted', retryable: false })
+
+const timeoutError = (ms: number) =>
+  new ModelSampleError({
+    code: 'network',
+    message: `model call timed out after ${Math.round(ms / 1000)}s`,
+    retryable: true,
+  })
+
+/** Stop switch for one call: trips on the caller's signal or at the deadline, whichever comes first. */
+function callDeadline(callerSignal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController()
+  let reason: ModelSampleError | undefined
+  const stop = (error: ModelSampleError) => {
+    if (controller.signal.aborted) return
+    reason = error
+    controller.abort()
+  }
+  /** Rejects with the reason once tripped; raced against every read of the stream. */
+  const stopped = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => reject(reason ?? abortedError()), { once: true })
+  })
+  // The race handles the rejection; this branch only keeps a trip between two reads from being reported as unhandled.
+  void stopped.catch(() => undefined)
+  const onCallerAbort = () => stop(abortedError())
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true })
+  const timer = setTimeout(() => stop(timeoutError(timeoutMs)), timeoutMs)
+  return {
+    signal: controller.signal,
+    stopped,
+    reason: () => reason,
+    dispose: () => {
+      clearTimeout(timer)
+      callerSignal?.removeEventListener('abort', onCallerAbort)
+    },
+  }
+}
+
+/**
+ * Collect the text of one model call. Throws ModelSampleError on an `error` part, on abort ('aborted') and
+ * on the deadline ('timed out'). Each read is raced against the stop switch, so a provider stream that
+ * ignores `req.signal` still cannot keep the call alive.
+ */
+export async function sampleText(
+  model: ModelClient,
+  system: string,
+  user: string,
+  opts: SampleTextOptions = {},
+): Promise<string> {
+  if (opts.signal?.aborted) throw abortedError()
+  const deadline = callDeadline(opts.signal, opts.timeoutMs ?? MODEL_CALL_TIMEOUT_MS)
   const userItem: UserMessageItem = {
     type: 'user_message',
     id: newItemId(),
@@ -39,20 +97,32 @@ export async function sampleText(model: ModelClient, system: string, user: strin
     history: [userItem],
     tools: [],
     toolChoice: 'none',
-    signal: opts.signal ?? new AbortController().signal,
+    signal: deadline.signal,
     ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
     ...(opts.cacheKey !== undefined ? { cacheKey: opts.cacheKey } : {}),
   }
-  let text = ''
-  for await (const part of model.sample(req)) {
-    if (part.type === 'text.delta') text += part.delta
-    else if (part.type === 'error') throw new ModelSampleError(part.error)
-    else if (part.type === 'finish' && part.reason === 'aborted') {
-      throw new ModelSampleError({ code: 'unknown', message: 'aborted', retryable: false })
+  let iterator: AsyncIterator<SamplingPart> | undefined
+  let finished = false
+  try {
+    iterator = model.sample(req)[Symbol.asyncIterator]()
+    let text = ''
+    for (;;) {
+      const step = await Promise.race([iterator.next(), deadline.stopped])
+      if (step.done) {
+        finished = true
+        return text
+      }
+      const part = step.value
+      if (part.type === 'text.delta') text += part.delta
+      else if (part.type === 'error') throw new ModelSampleError(part.error)
+      else if (part.type === 'finish' && part.reason === 'aborted') throw deadline.reason() ?? abortedError()
     }
+  } finally {
+    deadline.dispose()
+    // Let the provider run its cleanup. Not awaited: a stalled stream may never settle, and its outcome is moot.
+    if (!finished) void iterator?.return?.().catch(() => undefined)
   }
-  return text
 }
 
 /**
@@ -89,7 +159,8 @@ export function extractJson(text: string): unknown {
   throw new Error('unbalanced JSON object')
 }
 
-const RETRY_NUDGE = '\n\n注意：上一次输出无法解析为 JSON。请严格只输出一个合法的 JSON 对象，不要任何解释、前后缀或代码围栏。'
+const RETRY_NUDGE =
+  '\n\n注意：上一次输出无法解析为 JSON。请严格只输出一个合法的 JSON 对象，不要任何解释、前后缀或代码围栏。'
 
 /** Text generation + lenient JSON extraction + zod validation; one retry, then throws with a raw excerpt. */
 export async function generateValidated<T>(

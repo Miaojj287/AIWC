@@ -49,7 +49,7 @@ export function parseMarkdown(src: string): Block[] {
       const lang = fence[2] || undefined
       const code: string[] = []
       i++
-      while (i < lines.length && !(lines[i] as string).trimEnd().startsWith(marker) ) {
+      while (i < lines.length && !(lines[i] as string).trimEnd().startsWith(marker)) {
         code.push(lines[i] as string)
         i++
       }
@@ -74,7 +74,11 @@ export function parseMarkdown(src: string): Block[] {
     const heading = HEADING.exec(line)
     if (heading) {
       flushPara()
-      blocks.push({ type: 'heading', level: Math.min(6, (heading[1] as string).length) as HeadingLevel, children: parseInline(heading[2] as string) })
+      blocks.push({
+        type: 'heading',
+        level: Math.min(6, (heading[1] as string).length) as HeadingLevel,
+        children: parseInline(heading[2] as string),
+      })
       i++
       continue
     }
@@ -165,7 +169,9 @@ export function parseInline(src: string): Inline[] {
       if (close > i + marker.length) {
         flush()
         const inner = src.slice(i + marker.length, close)
-        out.push(double ? { type: 'bold', children: parseInline(inner) } : { type: 'italic', children: parseInline(inner) })
+        out.push(
+          double ? { type: 'bold', children: parseInline(inner) } : { type: 'italic', children: parseInline(inner) },
+        )
         i = close + marker.length
         continue
       }
@@ -212,7 +218,11 @@ function findClosing(src: string, from: number, marker: string): number {
       i = close + 1
       continue
     }
-    if (src.startsWith(marker, i) && !/\s/.test(src[i - 1] as string) && (i + marker.length >= src.length || src[i + marker.length] !== marker[0])) {
+    if (
+      src.startsWith(marker, i) &&
+      !/\s/.test(src[i - 1] as string) &&
+      (i + marker.length >= src.length || src[i + marker.length] !== marker[0])
+    ) {
       if (marker[0] === '_' && isWordChar(src[i + marker.length])) {
         i++
         continue
@@ -226,5 +236,7 @@ function findClosing(src: string, from: number, marker: string): number {
 
 /** Plain text of a block list (clipboard, tests). */
 export function inlineToText(inlines: Inline[]): string {
-  return inlines.map((n) => (n.type === 'text' || n.type === 'code' || n.type === 'link' ? n.text : inlineToText(n.children))).join('')
+  return inlines
+    .map((n) => (n.type === 'text' || n.type === 'code' || n.type === 'link' ? n.text : inlineToText(n.children)))
+    .join('')
 }

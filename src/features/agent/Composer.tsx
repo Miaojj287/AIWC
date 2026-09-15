@@ -4,8 +4,18 @@
  * `@` opens the mention popover, `/` the skills popover; ↑↓ ↵ esc drive them from the textarea.
  * ↵ sends, ⇧↵ newline, ⌘↵ sends. Reused by the clone page with its own toolbar / sources.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import type { Mention, MentionKind, SkillSummary } from '@aiwc/protocol'
+import { useT, type MessageKey } from '@/i18n'
 import { cn, Popover, PopoverAnchor, PopoverContent, Textarea } from '@/kit'
 import { addMention, applyTrigger, detectTrigger, matchesQuery, removeMention, type Trigger } from './mentions'
 import { MENTION_TABS, type MentionCandidate, type MentionSources } from './mentionSources'
@@ -41,7 +51,7 @@ export interface ComposerProps {
   'data-testid'?: string
 }
 
-export const COMPOSER_PLACEHOLDER = '今天帮你做些什么？ @ 引用对话，/ 调用技能'
+export const COMPOSER_PLACEHOLDER_KEY: MessageKey = 'agent.composer.placeholder'
 
 export function Composer({
   value,
@@ -52,7 +62,7 @@ export function Composer({
   onStop,
   streaming = false,
   disabled = false,
-  placeholder = COMPOSER_PLACEHOLDER,
+  placeholder,
   mentionSources,
   skills,
   toolbarLeft,
@@ -63,6 +73,7 @@ export function Composer({
   className,
   ...rest
 }: ComposerProps) {
+  const t = useT()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingCaret = useRef<number | undefined>(undefined)
   const [trigger, setTrigger] = useState<Trigger | undefined>(undefined)
@@ -71,25 +82,39 @@ export function Composer({
   const [candidates, setCandidates] = useState<MentionCandidate[]>([])
   const [loading, setLoading] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
-  const requestSeq = useRef(0)
 
   const mentionsEnabled = Boolean(mentionSources)
   const skillsEnabled = Boolean(skills && skills.length > 0)
 
-  const isOpen = trigger !== undefined && ((trigger.kind === 'mention' && mentionsEnabled) || (trigger.kind === 'skill' && skillsEnabled))
-  const skillMatches = useMemo(() => (trigger?.kind === 'skill' && skills ? skills.filter((s) => matchesQuery(trigger.query, s.command, s.name, s.description)) : []), [skills, trigger])
+  const isOpen =
+    trigger !== undefined &&
+    ((trigger.kind === 'mention' && mentionsEnabled) || (trigger.kind === 'skill' && skillsEnabled))
+  const skillMatches = useMemo(
+    () =>
+      trigger?.kind === 'skill' && skills
+        ? skills.filter((s) => matchesQuery(trigger.query, s.command, s.name, s.description))
+        : [],
+    [skills, trigger],
+  )
   const listLength = trigger?.kind === 'skill' ? skillMatches.length : candidates.length
 
   /* ---- trigger detection ------------------------------------------------------------- */
-  const syncTrigger = useCallback(
-    (text: string, caret: number) => {
-      const next = detectTrigger(text, caret)
-      if (next && suppressed.current && suppressed.current.kind === next.kind && suppressed.current.start === next.start) return setTrigger(undefined)
-      if (!next) suppressed.current = undefined
-      setTrigger((prev) => (prev && next && prev.kind === next.kind && prev.start === next.start && prev.query === next.query && prev.end === next.end ? prev : next))
-    },
-    [],
-  )
+  const syncTrigger = useCallback((text: string, caret: number) => {
+    const next = detectTrigger(text, caret)
+    if (next && suppressed.current && suppressed.current.kind === next.kind && suppressed.current.start === next.start)
+      return setTrigger(undefined)
+    if (!next) suppressed.current = undefined
+    setTrigger((prev) =>
+      prev &&
+      next &&
+      prev.kind === next.kind &&
+      prev.start === next.start &&
+      prev.query === next.query &&
+      prev.end === next.end
+        ? prev
+        : next,
+    )
+  }, [])
 
   const close = (suppress = true) => {
     if (suppress && trigger) suppressed.current = { kind: trigger.kind, start: trigger.start }
@@ -103,30 +128,34 @@ export function Composer({
 
   /* ---- candidates ------------------------------------------------------------------- */
   useEffect(() => {
-    const seq = ++requestSeq.current
     if (!trigger || trigger.kind !== 'mention' || !mentionSources) {
       setCandidates([])
       setLoading(false)
       return
     }
+    // A newer trigger (or unmount) cancels this run, so a slow search can never overwrite fresher results.
+    let cancelled = false
     setCandidates([])
     setLoading(true)
     const timer = setTimeout(() => {
       mentionSources
         .search(mentionKind, trigger.query)
         .then((items) => {
-          if (seq !== requestSeq.current) return
+          if (cancelled) return
           setCandidates(items)
           setActiveIndex(0)
         })
         .catch(() => {
-          if (seq === requestSeq.current) setCandidates([])
+          if (!cancelled) setCandidates([])
         })
         .finally(() => {
-          if (seq === requestSeq.current) setLoading(false)
+          if (!cancelled) setLoading(false)
         })
     }, 120)
-    return () => { clearTimeout(timer); requestSeq.current++ }
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [trigger, mentionKind, mentionSources])
 
   useEffect(() => {
@@ -168,6 +197,9 @@ export function Composer({
   const canSend = !disabled && (value.trim().length > 0 || mentions.length > 0)
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME confirm: some engines fire the Enter keydown after compositionend with isComposing=false, and only
+    // the legacy keyCode 229 still marks it (covered by Composer.test "does not send while confirming Chinese input").
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
     if (isOpen && trigger) {
       switch (e.key) {
@@ -182,7 +214,7 @@ export function Composer({
         case 'Tab':
           if (trigger.kind === 'mention') {
             e.preventDefault()
-            const idx = MENTION_TABS.findIndex((t) => t.value === mentionKind)
+            const idx = MENTION_TABS.findIndex((tab) => tab.value === mentionKind)
             const next = MENTION_TABS[(idx + (e.shiftKey ? -1 : 1) + MENTION_TABS.length) % MENTION_TABS.length]
             if (next) setMentionKind(next.value)
           }
@@ -254,10 +286,14 @@ export function Composer({
             }
           }}
         >
-          <MentionChips mentions={mentions} onRemove={(m) => onMentionsChange(removeMention(mentions, m))} className="flex flex-wrap items-center gap-1.5" />
+          <MentionChips
+            mentions={mentions}
+            onRemove={(m) => onMentionsChange(removeMention(mentions, m))}
+            className="flex flex-wrap items-center gap-1.5"
+          />
           <Textarea
             ref={textareaRef}
-            aria-label="给 Agent 的消息"
+            aria-label={t('agent.composer.inputLabel')}
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -266,7 +302,7 @@ export function Composer({
               const el = e.currentTarget
               syncTrigger(el.value, el.selectionStart ?? el.value.length)
             }}
-            placeholder={placeholder}
+            placeholder={placeholder ?? t(COMPOSER_PLACEHOLDER_KEY)}
             disabled={disabled}
             autoFocus={autoFocus}
             autosize
@@ -275,7 +311,11 @@ export function Composer({
             spellCheck={false}
             aria-expanded={isOpen || undefined}
             aria-controls={isOpen ? 'agent-composer-popover' : undefined}
-            aria-activedescendant={isOpen && listLength > 0 ? `${trigger?.kind === 'skill' ? 'skill' : 'mention'}-opt-${activeIndex}` : undefined}
+            aria-activedescendant={
+              isOpen && listLength > 0
+                ? `${trigger?.kind === 'skill' ? 'skill' : 'mention'}-opt-${activeIndex}`
+                : undefined
+            }
             className="min-h-0 resize-none rounded-none border-0 bg-transparent px-0 py-0 text-body leading-5 text-fg hover:border-0 focus:border-0 focus:hover:border-0"
             wrapperClassName="gap-0"
           />
@@ -298,9 +338,23 @@ export function Composer({
           onCloseAutoFocus={(e) => e.preventDefault()}
         >
           {trigger.kind === 'skill' ? (
-            <SkillList items={skillMatches} activeIndex={activeIndex} onActiveIndexChange={setActiveIndex} onPick={pickSkill} />
+            <SkillList
+              items={skillMatches}
+              activeIndex={activeIndex}
+              onActiveIndexChange={setActiveIndex}
+              onPick={pickSkill}
+            />
           ) : (
-            <MentionList kind={mentionKind} onKindChange={setMentionKind} items={candidates} loading={loading} activeIndex={activeIndex} onActiveIndexChange={setActiveIndex} onPick={pickMention} query={trigger.query} />
+            <MentionList
+              kind={mentionKind}
+              onKindChange={setMentionKind}
+              items={candidates}
+              loading={loading}
+              activeIndex={activeIndex}
+              onActiveIndexChange={setActiveIndex}
+              onPick={pickMention}
+              query={trigger.query}
+            />
           )}
         </PopoverContent>
       ) : null}

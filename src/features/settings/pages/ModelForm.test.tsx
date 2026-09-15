@@ -53,7 +53,15 @@ afterEach(() => {
 })
 
 const renderForm = (props: Partial<Parameters<typeof ModelForm>[0]> = {}) =>
-  render(<ModelForm provider={newProvider('openai', 'p1')} onSave={async () => {}} purpose="agent" rowIds={ROW_IDS} {...props} />)
+  render(
+    <ModelForm
+      provider={newProvider('openai', 'p1')}
+      onSave={async () => {}}
+      purpose="agent"
+      rowIds={ROW_IDS}
+      {...props}
+    />,
+  )
 
 const saveButton = () => screen.getByRole('button', { name: '保存' })
 const modelInput = () => screen.getByLabelText('模型 ID') as HTMLInputElement
@@ -100,7 +108,9 @@ describe('ModelForm 模型 ID suggestions', () => {
   })
 
   it('shows the kit empty state when the endpoint returns no models', async () => {
-    invokeMock.mockImplementation(async (channel) => (channel === 'ai:listRemoteModels' ? [] : channel === 'secret:has' ? false : undefined))
+    invokeMock.mockImplementation(async (channel) =>
+      channel === 'ai:listRemoteModels' ? [] : channel === 'secret:has' ? false : undefined,
+    )
     renderForm()
     fireEvent.click(screen.getByRole('button', { name: '从接口拉取模型列表' }))
     expect(await screen.findByText('接口未返回模型')).toBeTruthy()

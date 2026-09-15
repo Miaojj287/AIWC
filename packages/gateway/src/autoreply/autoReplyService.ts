@@ -1,11 +1,13 @@
 /**
- * Auto-reply service: turns a gated inbound event into a reply draft, counts down, and sends it
- * unless the user cancels it or a newer message in the same chat supersedes it (ARCHITECTURE §7).
+ * Auto-reply service: turns a gated inbound event into a reply draft and either counts down and
+ * sends it (rule.sendMode 'auto', 全自动回复) or parks it until the user presses 确认发送
+ * (rule.sendMode 'confirm', 自动回复) — unless the user cancels it or a newer message in the same
+ * chat supersedes it (ARCHITECTURE §7).
  *
- * A rule has exactly one behaviour — reply automatically. There is no per-rule "confirm first"
- * escape hatch: the countdown IS the confirmation window, and it is visible while it runs. Drafts
- * in 'confirm'/'suggest' mode still exist, but only for things the user asked for by hand (the
- * Agent's draft_reply handoff, a manual retry from the reply desk).
+ * The send mode is the rule's own, visible setting; nothing else may hold a reply back. A parked
+ * 'confirm' draft never expires on its own: it is replaced when the peer writes again and refused
+ * by canSend() when the chat has moved on, so the button the user sees is always for the latest
+ * unanswered message. Drafts in 'suggest' mode exist only for the Agent's draft_reply handoff.
  *
  * Every decision is written to the record store; the halt latch stops everything until resume().
  */
@@ -47,7 +49,11 @@ export interface AutoReplyServiceDeps {
   queueGapMs?: () => number
   onDraft: (draft: ReplyDraft) => void
   /** Model call for rules with source 'ai'. Receives the gated event and the rule. */
-  generate: (event: MessageEvent, rule: AutoReplyRule, ctx: GenerateContext) => Promise<string | { text: string; suggestions?: string[] }>
+  generate: (
+    event: MessageEvent,
+    rule: AutoReplyRule,
+    ctx: GenerateContext,
+  ) => Promise<string | { text: string; suggestions?: string[] }>
   onRecord?: (record: AutoReplyRecord) => void
   /** Resolve {昵称} / {群名} when the adapter did not supply display names. */
   resolveNames?: (event: MessageEvent) => Promise<{ nickname?: string; groupName?: string }>
@@ -114,7 +120,13 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
 
   // The draft carries its own target (draft.source); recordId is absent for drafts without an audit
   // record of their own (handoffs — the gateway 'outbound' event still audits the send).
-  type Live = { draft: ReplyDraft; contextToken?: string; recordId?: string; triggerKey?: string; timer?: ReturnType<typeof setTimeout> }
+  type Live = {
+    draft: ReplyDraft
+    contextToken?: string
+    recordId?: string
+    triggerKey?: string
+    timer?: ReturnType<typeof setTimeout>
+  }
   const live = new Map<string, Live>()
   const bySession = new Map<string, string>()
   /**
@@ -185,8 +197,11 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
   async function processSend(entry: Live, text: string): Promise<void> {
     if (!live.has(entry.draft.id)) return
     let blocked: string | undefined
-    try { blocked = halted ? haltReason ?? '已熔断' : await deps.canSend?.(entry.draft) }
-    catch (error) { blocked = errorMessage(error) }
+    try {
+      blocked = halted ? (haltReason ?? '已熔断') : await deps.canSend?.(entry.draft)
+    } catch (error) {
+      blocked = errorMessage(error)
+    }
     if (blocked) {
       updateDraft(entry, { state: 'failed', error: blocked })
       updateRecord(entry.recordId, { status: 'failed', error: blocked })
@@ -262,28 +277,56 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
   const finishGeneration = (sessionId: string) => {
     generations.delete(sessionId)
     const name = generatingNames.get(sessionId)
-    if (name) { generatingNames.delete(sessionId); emit({ type: 'autoreply.generating', sessionId, name, active: false }) }
+    if (name) {
+      generatingNames.delete(sessionId)
+      emit({ type: 'autoreply.generating', sessionId, name, active: false })
+    }
   }
 
   // ── inbound ──────────────────────────────────────────────────────────────────────────────────
-  function handle(event: MessageEvent, decision: ReplyDecision, sessionKey: SessionKey, opts: HandleOptions = {}): Promise<void> {
+  function handle(
+    event: MessageEvent,
+    decision: ReplyDecision,
+    sessionKey: SessionKey,
+    opts: HandleOptions = {},
+  ): Promise<void> {
     const task = generateDraft(event, decision, sessionKey, opts)
     pendingGenerations.add(task)
-    void task.then(() => pendingGenerations.delete(task), () => pendingGenerations.delete(task))
+    void task.then(
+      () => pendingGenerations.delete(task),
+      () => pendingGenerations.delete(task),
+    )
     return task
   }
-  async function generateDraft(event: MessageEvent, decision: ReplyDecision, sessionKey: SessionKey, opts: HandleOptions): Promise<void> {
+  async function generateDraft(
+    event: MessageEvent,
+    decision: ReplyDecision,
+    sessionKey: SessionKey,
+    opts: HandleOptions,
+  ): Promise<void> {
     if (!decision.reply || halted || stopped) return
     const rule = deps.records.getRule(event.source.chatId)
     if (!rule || !rule.enabled) return
     const triggerKey = `${event.source.channel}:${event.id}`
     if (seenTriggers.has(triggerKey) && !opts.force) return
+    // A parked reply for this very message already waits for the user's click (typically restored
+    // after a restart, then re-offered by the monitor's catch-up): regenerating would only replace
+    // the text they may be reading. The manual trigger (force) is the way to ask for a fresh one.
+    const parked = live.get(bySession.get(event.source.chatId) ?? '')
+    if (
+      !opts.force &&
+      parked &&
+      parked.draft.state === 'pending' &&
+      parked.draft.mode === 'confirm' &&
+      parked.draft.triggerMessageId === event.id
+    )
+      return
     seenTriggers.add(triggerKey)
     if (seenTriggers.size > 2000) seenTriggers.delete(seenTriggers.values().next().value!)
 
-    // A manual retry from the reply desk is the user asking to look at it first; everything the
-    // monitor brings in is an auto-reply, because that is the only thing a rule can be.
-    const effective: ReplyDraft['mode'] = opts.manualRetry ? 'confirm' : 'auto'
+    // A manual retry from the reply desk is the user asking to look at it first; otherwise the
+    // rule's own send mode decides between the countdown and the 确认发送 button.
+    const effective: ReplyDraft['mode'] = opts.manualRetry || rule.sendMode === 'confirm' ? 'confirm' : 'auto'
 
     // A newer message from the same chat makes any pending draft stale — real people answer the latest one.
     service.invalidate(event.source.chatId, '被同一会话的新消息取代')
@@ -291,18 +334,31 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
     generations.set(event.source.chatId, controller)
     if (rule.source === 'ai') {
       generatingNames.set(event.source.chatId, event.source.displayName ?? event.source.chatId)
-      emit({ type: 'autoreply.generating', sessionId: event.source.chatId, name: event.source.displayName ?? event.source.chatId, active: true })
+      emit({
+        type: 'autoreply.generating',
+        sessionId: event.source.chatId,
+        name: event.source.displayName ?? event.source.chatId,
+        active: true,
+      })
     }
 
     const recordId = `rec_${nanoid(10)}`
+    const localId = (event.raw as { localMessageId?: string } | undefined)?.localMessageId
     const record: AutoReplyRecord = {
       id: recordId,
       ruleId: rule.id,
       sessionId: event.source.chatId,
-      triggerMessage: { id: event.id, text: event.text, senderName: (event.raw as { senderName?: string } | undefined)?.senderName ?? event.source.displayName, at: event.timestamp },
+      triggerMessage: {
+        id: event.id,
+        ...(localId ? { localId } : {}),
+        text: event.text,
+        senderName: (event.raw as { senderName?: string } | undefined)?.senderName ?? event.source.displayName,
+        at: event.timestamp,
+      },
       replyText: '',
       at: now(),
       status: 'pending',
+      sendMode: effective === 'auto' ? 'auto' : 'confirm',
     }
     deps.records.addRecord(record)
     deps.onRecord?.(record)
@@ -319,7 +375,11 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
         suggestions = typeof result === 'string' ? undefined : result.suggestions
       }
     } catch (err) {
-      if (controller.signal.aborted) { releaseTrigger(triggerKey); updateRecord(recordId, { status: 'rejected', error: '生成已取消' }); return }
+      if (controller.signal.aborted) {
+        releaseTrigger(triggerKey)
+        updateRecord(recordId, { status: 'rejected', error: '生成已取消' })
+        return
+      }
       finishGeneration(event.source.chatId)
       releaseTrigger(triggerKey)
       const error = errorMessage(err)
@@ -330,6 +390,7 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
         ruleId: rule.id,
         source: event.source,
         triggerMessageId: event.id,
+        triggerLocalId: localId,
         triggerText: event.text,
         draft: '',
         recordId,
@@ -341,9 +402,14 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
         error,
       }
       persistDraft(failed)
+      updateRecord(recordId, { draftId: failed.id })
       return
     }
-    if (controller.signal.aborted) { releaseTrigger(triggerKey); updateRecord(recordId, { status: 'rejected', error: '生成已取消' }); return }
+    if (controller.signal.aborted) {
+      releaseTrigger(triggerKey)
+      updateRecord(recordId, { status: 'rejected', error: '生成已取消' })
+      return
+    }
     finishGeneration(event.source.chatId)
     text = text.trim()
     if (!text) {
@@ -358,6 +424,7 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
       ruleId: rule.id,
       source: event.source,
       triggerMessageId: event.id,
+      triggerLocalId: localId,
       triggerText: event.text,
       draft: text,
       suggestions,
@@ -366,14 +433,15 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
       contextToken: (event.raw as { context_token?: string } | undefined)?.context_token,
       state: 'pending',
       createdAt,
-      expiresAt: effective === 'auto' ? undefined : createdAt + draftTtl,
+      // Only a reply-desk retry times out; a rule's parked reply waits for the click (see header).
+      expiresAt: opts.manualRetry ? createdAt + draftTtl : undefined,
       mode: effective,
       countdownEndsAt: effective === 'auto' ? createdAt + Math.max(0, deps.countdownMs()) : undefined,
     }
     const raw = event.raw as { context_token?: string } | undefined
     const entry = track(draft, { contextToken: raw?.context_token, recordId, triggerKey })
     persistDraft(draft)
-    updateRecord(recordId, { replyText: text })
+    updateRecord(recordId, { replyText: text, draftId: draft.id })
     emit({ type: 'autoreply.queued', draftId: draft.id })
 
     if (effective === 'auto') scheduleCountdown(entry)
@@ -383,7 +451,9 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
     if (draft.state !== 'pending') throw new Error(`只能加入待处理的草稿（当前状态 ${draft.state}）`)
     if (live.has(draft.id)) return
     const next: ReplyDraft =
-      draft.mode === 'auto' && draft.countdownEndsAt === undefined ? { ...draft, countdownEndsAt: now() + Math.max(0, deps.countdownMs()) } : { ...draft }
+      draft.mode === 'auto' && draft.countdownEndsAt === undefined
+        ? { ...draft, countdownEndsAt: now() + Math.max(0, deps.countdownMs()) }
+        : { ...draft }
     if (halted && next.mode === 'auto') {
       // Same fate halt() gives pending auto drafts: never let one fire while the latch is closed.
       persistDraft({ ...next, state: 'expired', error: `已熔断：${haltReason ?? '已熔断'}` })
@@ -401,15 +471,18 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
     start() {
       if (unsubscribe) return
       stopped = false
-      unsubscribe = deps.gateway.onInbound((event, decision, key) => { void handle(event, decision, key).catch((error) => log('error', 'auto-reply inbound failed', errorMessage(error))) })
+      unsubscribe = deps.gateway.onInbound((event, decision, key) => {
+        void handle(event, decision, key).catch((error) =>
+          log('error', 'auto-reply inbound failed', errorMessage(error)),
+        )
+      })
       // Restore, oldest first so the newest draft of a chat ends up as its live one: confirm/suggest
       // drafts re-enter the queue; stale auto drafts must never fire after a restart.
       for (const draft of deps.records.listDrafts(['pending']).reverse()) {
         if (draft.mode === 'auto') {
           persistDraft({ ...draft, state: 'expired', error: '应用重启，未自动发送' })
           updateRecord(draft.recordId, { status: 'rejected', error: '应用重启，未自动发送' })
-        }
-        else if (!live.has(draft.id)) {
+        } else if (!live.has(draft.id)) {
           supersede(draft.source.chatId, '被较新的草稿取代')
           track(draft, { recordId: draft.recordId, contextToken: draft.contextToken })
         }
@@ -436,7 +509,9 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
     },
     handle,
     enqueueDraft,
-    listGenerating() { return [...generatingNames].map(([sessionId, name]) => ({ sessionId, name })) },
+    listGenerating() {
+      return [...generatingNames].map(([sessionId, name]) => ({ sessionId, name }))
+    },
     listDrafts() {
       const t = now()
       const drafts = deps.records.listDrafts()
@@ -473,6 +548,8 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
       if (!finalText) throw new Error('回复内容不能为空')
       updateDraft(entry, { state: 'approved', draft: finalText })
       await send(entry, finalText)
+      // send() mutates entry.draft; the cast discards TypeScript's narrowing from before the await.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       if ((entry.draft as ReplyDraft).state !== 'sent') throw new Error(entry.draft.error ?? '发送未完成')
     },
     invalidate(sessionId, reason) {
@@ -493,7 +570,10 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
       const blocked = await deps.canSend?.(draft)
       if (blocked) throw new Error(blocked)
       if (draft.draft && draft.state === 'failed') {
-        const entry = track({ ...draft, state: 'pending', mode: 'confirm', error: undefined }, { recordId: draft.recordId, contextToken: draft.contextToken })
+        const entry = track(
+          { ...draft, state: 'pending', mode: 'confirm', error: undefined },
+          { recordId: draft.recordId, contextToken: draft.contextToken },
+        )
         persistDraft(entry.draft)
         await service.resolveDraft(draft.id, 'approve')
       } else {
@@ -501,7 +581,15 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
         if (!rule?.enabled) throw new Error('规则已暂停或删除')
         service.invalidate(draft.source.chatId, '正在重新生成候选')
         persistDraft({ ...draft, state: 'rejected' })
-        const event: MessageEvent = { id: `retry_${nanoid(10)}`, source: draft.source, kind: 'text', text: draft.triggerText, timestamp: now(), addressed: true, raw: { accountId: draft.accountId, context_token: draft.contextToken } }
+        const event: MessageEvent = {
+          id: `retry_${nanoid(10)}`,
+          source: draft.source,
+          kind: 'text',
+          text: draft.triggerText,
+          timestamp: now(),
+          addressed: true,
+          raw: { accountId: draft.accountId, context_token: draft.contextToken, localMessageId: draft.triggerLocalId },
+        }
         await handle(event, { reply: true, reason: 'ok' }, draft.source.chatId as SessionKey, { manualRetry: true })
       }
     },

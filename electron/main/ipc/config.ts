@@ -1,6 +1,7 @@
 import type { AppContext } from '../contracts'
 import { customCacheDir, validateCacheDir } from '../security/cacheDirPolicy'
 import type { Handle, HostBridge } from './register'
+import { t } from '../i18n'
 
 export function registerConfigIpc(ctx: AppContext, _host: HostBridge, handle: Handle): void {
   handle('config:get', () => ctx.config.get())
@@ -16,7 +17,7 @@ export function registerConfigIpc(ctx: AppContext, _host: HostBridge, handle: Ha
   })
 
   handle('secret:set', ({ ref, value }) => {
-    if (typeof value !== 'string' || value.length === 0) throw new Error('密钥不能为空')
+    if (typeof value !== 'string' || value.length === 0) throw new Error(t('main.config.secretEmpty'))
     ctx.secrets.set(ref, value)
   })
   handle('secret:has', ({ ref }) => ctx.secrets.has(ref))

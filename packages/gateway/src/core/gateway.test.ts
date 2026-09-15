@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AutoReplyRule, GatewayEvent, GatewayOutbound, MessageEvent, ReplyDecision, SendRequest, SendResult } from '@aiwc/protocol'
+import type {
+  AutoReplyRule,
+  GatewayEvent,
+  GatewayOutbound,
+  MessageEvent,
+  ReplyDecision,
+  SendRequest,
+  SendResult,
+} from '@aiwc/protocol'
 import { createGateway } from './gateway'
 import { withOriginGuard } from './originGuard'
 import { createFakeAdapter, fakeEvent } from '../testing/fakeAdapter'
@@ -13,13 +21,19 @@ const rule = (sessionId: string, over: Partial<AutoReplyRule> = {}): AutoReplyRu
   source: 'fixed',
   fixedText: '收到',
   historyCount: 30,
+  sendMode: 'auto',
   updatedAt: 0,
   ...over,
 })
 
-function setup(opts: { rules?: AutoReplyRule[] | (() => AutoReplyRule[]); isAllowed?: (s: { channel: string; peerId: string }) => boolean } = {}) {
+function setup(
+  opts: {
+    rules?: AutoReplyRule[] | (() => AutoReplyRule[])
+    isAllowed?: (s: { channel: string; peerId: string }) => boolean
+  } = {},
+) {
   const gw = createGateway({
-    rules: async () => (typeof opts.rules === 'function' ? opts.rules() : opts.rules ?? []),
+    rules: async () => (typeof opts.rules === 'function' ? opts.rules() : (opts.rules ?? [])),
     isAllowed: opts.isAllowed,
   })
   const ilink = createFakeAdapter('wechat-ilink', { mentionPatterns: ['@AIWC'], supportsQr: true })
@@ -42,11 +56,19 @@ describe('gateway core', () => {
     const { gw, ilink, events } = setup()
     await gw.connect('wechat-ilink')
     expect(ilink.state).toBe('connected')
-    expect(gw.status()).toEqual(expect.arrayContaining([{ channel: 'wechat-ilink', state: 'connected', detail: undefined }]))
+    expect(gw.status()).toEqual(
+      expect.arrayContaining([{ channel: 'wechat-ilink', state: 'connected', detail: undefined }]),
+    )
     ilink.setState('error', '断线')
-    expect(gw.status().find((s) => s.channel === 'wechat-ilink')).toEqual({ channel: 'wechat-ilink', state: 'error', detail: '断线' })
+    expect(gw.status().find((s) => s.channel === 'wechat-ilink')).toEqual({
+      channel: 'wechat-ilink',
+      state: 'error',
+      detail: '断线',
+    })
     await gw.disconnect('wechat-ilink')
-    expect(events.filter((e) => e.type === 'adapter.state').map((e) => (e.type === 'adapter.state' ? e.state : ''))).toEqual(['connected', 'error', 'disconnected'])
+    expect(
+      events.filter((e) => e.type === 'adapter.state').map((e) => (e.type === 'adapter.state' ? e.state : '')),
+    ).toEqual(['connected', 'error', 'disconnected'])
     await expect(gw.connect('cron')).rejects.toThrow(/通道未注册/)
   })
 
@@ -92,8 +114,22 @@ describe('gateway core', () => {
     let rules: AutoReplyRule[] = []
     const { gw, ilink, inbound } = setup({ rules: () => rules })
     const group = { channel: 'wechat-ilink' as const, chatId: 'g1@chatroom', chatType: 'group' as const }
-    ilink.emitMessage(fakeEvent({ id: '1', text: '今天开会吗', addressed: false, source: { ...group, peerId: 'u1', displayName: '王伟' } }))
-    ilink.emitMessage(fakeEvent({ id: '2', text: '下午三点', addressed: false, source: { ...group, peerId: 'u2', displayName: '张明' } }))
+    ilink.emitMessage(
+      fakeEvent({
+        id: '1',
+        text: '今天开会吗',
+        addressed: false,
+        source: { ...group, peerId: 'u1', displayName: '王伟' },
+      }),
+    )
+    ilink.emitMessage(
+      fakeEvent({
+        id: '2',
+        text: '下午三点',
+        addressed: false,
+        source: { ...group, peerId: 'u2', displayName: '张明' },
+      }),
+    )
     await flush()
     expect(inbound.map((i) => i.decision)).toEqual([
       { reply: false, observe: true, reason: 'no_rule' },
@@ -104,7 +140,9 @@ describe('gateway core', () => {
     expect(frag?.render()).toContain('[王伟|u1] 今天开会吗\n[张明|u2] 下午三点')
 
     rules = [rule('g1@chatroom')]
-    ilink.emitMessage(fakeEvent({ id: '3', text: '@AIWC 帮我总结', addressed: false, source: { ...group, peerId: 'u1' } }))
+    ilink.emitMessage(
+      fakeEvent({ id: '3', text: '@AIWC 帮我总结', addressed: false, source: { ...group, peerId: 'u1' } }),
+    )
     await flush()
     expect(inbound[2]?.decision).toEqual({ reply: true, reason: 'ok' })
     expect(inbound[2]?.key).toBe('agent:wechat-ilink:group:g1@chatroom:u1')
@@ -136,7 +174,11 @@ describe('gateway core', () => {
     expect(ok.ok).toBe(true)
     expect(ilink.sent).toHaveLength(1)
 
-    const unknown = await gw.outbound.send({ to: { ...to, channel: 'cron' }, parts: [{ type: 'text', text: 'x' }], reason: 'cron' })
+    const unknown = await gw.outbound.send({
+      to: { ...to, channel: 'cron' },
+      parts: [{ type: 'text', text: 'x' }],
+      reason: 'cron',
+    })
     expect(unknown).toMatchObject({ ok: false, error: expect.stringContaining('通道未注册') })
 
     const empty = await gw.outbound.send({ to, parts: [], reason: 'agent_tool' })
@@ -186,10 +228,18 @@ describe('withOriginGuard', () => {
   it('forces the target to the origin chat on wechat channels regardless of `to`', async () => {
     const { outbound, calls } = sendSpy()
     const guarded = withOriginGuard(outbound, { channel: 'wechat-ilink', chatId: 'u_owner' })
-    await guarded.send({ to: { channel: 'wechat-ilink', chatId: 'u_victim', peerId: 'u_victim', chatType: 'dm' }, parts: [{ type: 'text', text: 'secret' }], reason: 'agent_tool' })
+    await guarded.send({
+      to: { channel: 'wechat-ilink', chatId: 'u_victim', peerId: 'u_victim', chatType: 'dm' },
+      parts: [{ type: 'text', text: 'secret' }],
+      reason: 'agent_tool',
+    })
     expect(calls[0]?.to).toEqual({ channel: 'wechat-ilink', chatId: 'u_owner', peerId: 'u_owner', chatType: 'dm' })
     // a different channel is also rewritten back to the origin channel
-    await guarded.send({ to: { channel: 'wechat-ui', chatId: 'x', peerId: 'x', chatType: 'dm' }, parts: [{ type: 'text', text: 'y' }], reason: 'agent_tool' })
+    await guarded.send({
+      to: { channel: 'wechat-ui', chatId: 'x', peerId: 'x', chatType: 'dm' },
+      parts: [{ type: 'text', text: 'y' }],
+      reason: 'agent_tool',
+    })
     expect(calls[1]?.to.channel).toBe('wechat-ilink')
     expect(calls[1]?.to.chatId).toBe('u_owner')
   })
@@ -197,7 +247,13 @@ describe('withOriginGuard', () => {
   it('keeps the richer source when the request already targets the origin', async () => {
     const { outbound, calls } = sendSpy()
     const guarded = withOriginGuard(outbound, { channel: 'wechat-ilink', chatId: 'g1@chatroom' })
-    const to = { channel: 'wechat-ilink' as const, chatId: 'g1@chatroom', peerId: 'u1', chatType: 'group' as const, displayName: '产品群' }
+    const to = {
+      channel: 'wechat-ilink' as const,
+      chatId: 'g1@chatroom',
+      peerId: 'u1',
+      chatType: 'group' as const,
+      displayName: '产品群',
+    }
     await guarded.send({ to, parts: [{ type: 'text', text: 'ok' }], reason: 'auto_reply' })
     expect(calls[0]?.to).toEqual(to)
   })
@@ -205,14 +261,22 @@ describe('withOriginGuard', () => {
   it('infers group chat type from the @chatroom suffix', async () => {
     const { outbound, calls } = sendSpy()
     const guarded = withOriginGuard(outbound, { channel: 'wechat-ilink', chatId: 'g1@chatroom' })
-    await guarded.send({ to: { channel: 'wechat-ilink', chatId: 'other', peerId: 'other', chatType: 'dm' }, parts: [{ type: 'text', text: 'x' }], reason: 'agent_tool' })
+    await guarded.send({
+      to: { channel: 'wechat-ilink', chatId: 'other', peerId: 'other', chatType: 'dm' },
+      parts: [{ type: 'text', text: 'x' }],
+      reason: 'agent_tool',
+    })
     expect(calls[0]?.to.chatType).toBe('group')
   })
 
   it('refuses to send when the wechat origin has no chatId', async () => {
     const { outbound } = sendSpy()
     const guarded = withOriginGuard(outbound, { channel: 'wechat-ilink' })
-    const res = await guarded.send({ to: { channel: 'wechat-ilink', chatId: 'x', peerId: 'x', chatType: 'dm' }, parts: [{ type: 'text', text: 'x' }], reason: 'agent_tool' })
+    const res = await guarded.send({
+      to: { channel: 'wechat-ilink', chatId: 'x', peerId: 'x', chatType: 'dm' },
+      parts: [{ type: 'text', text: 'x' }],
+      reason: 'agent_tool',
+    })
     expect(res.ok).toBe(false)
     expect(outbound.send).not.toHaveBeenCalled()
   })
@@ -229,14 +293,28 @@ describe('withOriginGuard', () => {
   it("treats an 'observed' origin as a bot origin: `to` is rewritten to the origin chat on the UI channel", async () => {
     const { outbound, calls } = sendSpy()
     const guarded = withOriginGuard(outbound, { channel: 'observed', chatId: 'wxid_owner' })
-    await guarded.send({ to: { channel: 'wechat-ilink', chatId: 'u_victim', peerId: 'u_victim', chatType: 'dm' }, parts: [{ type: 'text', text: 'secret' }], reason: 'agent_tool' })
+    await guarded.send({
+      to: { channel: 'wechat-ilink', chatId: 'u_victim', peerId: 'u_victim', chatType: 'dm' },
+      parts: [{ type: 'text', text: 'secret' }],
+      reason: 'agent_tool',
+    })
     expect(calls[0]?.to).toEqual({ channel: 'wechat-ui', chatId: 'wxid_owner', peerId: 'wxid_owner', chatType: 'dm' })
     // 'observed' has no adapter of its own: a request already aimed at the origin chat on the UI channel is kept as-is
-    const to = { channel: 'wechat-ui' as const, chatId: 'wxid_owner', peerId: 'wxid_owner', chatType: 'dm' as const, displayName: 'Owner' }
+    const to = {
+      channel: 'wechat-ui' as const,
+      chatId: 'wxid_owner',
+      peerId: 'wxid_owner',
+      chatType: 'dm' as const,
+      displayName: 'Owner',
+    }
     await guarded.send({ to, parts: [{ type: 'text', text: 'ok' }], reason: 'agent_tool' })
     expect(calls[1]?.to).toEqual(to)
     // without a chatId the observed origin refuses, exactly like a wechat origin
-    const res = await withOriginGuard(outbound, { channel: 'observed' }).send({ to, parts: [{ type: 'text', text: 'x' }], reason: 'agent_tool' })
+    const res = await withOriginGuard(outbound, { channel: 'observed' }).send({
+      to,
+      parts: [{ type: 'text', text: 'x' }],
+      reason: 'agent_tool',
+    })
     expect(res.ok).toBe(false)
     expect(calls).toHaveLength(2)
   })

@@ -10,9 +10,10 @@ import {
   type JsonValue,
   type PermissionMode,
   type ToolArtifact,
+  type ToolCallPolicy,
   type ToolCallStatus,
   type ToolContext,
-  type ToolDefinition,
+  type AnyToolDefinition,
   type ToolProfile,
   type ToolResult,
   type ToolRisk,
@@ -66,8 +67,7 @@ export interface ToolRouterFactoryDeps {
   policy?: ToolRouterPolicy
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTool = ToolDefinition<any, any>
+type AnyTool = AnyToolDefinition
 
 export const USER_DENIED_MESSAGE = '用户拒绝了此操作'
 export const POLICY_DENIED_MESSAGE = '当前权限模式或通道不允许此操作'
@@ -122,11 +122,16 @@ async function dispatch(args: DispatchArgs): Promise<ToolDispatchOutcome> {
   const { deps, opts, tools, call, ctx } = args
   const startedAt = Date.now()
   const tool = tools.get(call.toolName)
-  const risk: ToolRisk = tool?.risk ?? 'read'
+  // The definition's static risk until the input is validated; `classify` may then replace it.
+  let risk: ToolRisk = tool?.risk ?? 'read'
+  let allowKeyForEvent: string | undefined = undefined
   let input: unknown = call.input
   let summary = safeSummary(args.summarize, call.toolName, input)
 
-  const emitCall = (status: ToolCallStatus, extra?: { output?: JsonValue | string; isError?: boolean; artifacts?: ToolArtifact[] }): void => {
+  const emitCall = (
+    status: ToolCallStatus,
+    extra?: { output?: JsonValue | string; isError?: boolean; artifacts?: ToolArtifact[] },
+  ): void => {
     const event: Event = {
       type: 'tool.call',
       threadId: ctx.threadId,
@@ -138,8 +143,11 @@ async function dispatch(args: DispatchArgs): Promise<ToolDispatchOutcome> {
       input: toJsonValue(input),
       status,
       risk,
+      ...(allowKeyForEvent ? { allowKey: allowKeyForEvent } : {}),
       startedAt,
-      ...(status === 'pending' || status === 'awaiting_approval' || status === 'running' ? {} : { durationMs: Date.now() - startedAt }),
+      ...(status === 'pending' || status === 'awaiting_approval' || status === 'running'
+        ? {}
+        : { durationMs: Date.now() - startedAt }),
       ...extra,
     }
     safeEmit(ctx, event)
@@ -174,23 +182,63 @@ async function dispatch(args: DispatchArgs): Promise<ToolDispatchOutcome> {
   input = parsed.data
   summary = safeSummary(args.summarize, call.toolName, input)
 
-  // (c) approval
+  // (c) approval — per-call policy first (a shell command's risk depends on the command), then the matrix.
+  const policy = safeClassify(tool, input)
+  if (policy) risk = policy.risk
+  const allowKey = policy?.allowKey ?? tool.name
+  allowKeyForEvent = allowKey
   const mode = opts.permissionMode?.() ?? 'ask'
   const allowAlways = opts.allowAlways?.() ?? []
-  const verdict = deps.approvals.decide({ toolName: tool.name, risk, mode, channel: ctx.channel, allowAlways })
-  if (verdict === 'denied') return fail('denied', POLICY_DENIED_MESSAGE)
+  const verdict = deps.approvals.decide({
+    toolName: tool.name,
+    allowKey,
+    risk,
+    mode,
+    channel: ctx.channel,
+    allowAlways,
+  })
+  // "总是允许" is offered only where the gate honours it: saving this key must turn the same call into 'approved'.
+  // Derived from the gate's own decision, so it follows the matrix (a send or destructive call asks every time).
+  const canAllowAlways =
+    policy?.canAllowAlways !== false &&
+    deps.approvals.decide({
+      toolName: tool.name,
+      allowKey,
+      risk,
+      mode,
+      channel: ctx.channel,
+      allowAlways: [...allowAlways, allowKey],
+    }) === 'approved'
+  if (verdict === 'denied')
+    return fail('denied', ctx.channel === 'cron' ? cronDeniedMessage(tool.name, allowKey) : POLICY_DENIED_MESSAGE)
   if (verdict === 'ask') {
     emitCall('awaiting_approval')
-    const decision = await askApproval({ deps, opts, tool, ctx, call, summary, input, risk })
+    const decision = await askApproval({
+      deps,
+      opts,
+      tool,
+      ctx,
+      call,
+      summary,
+      input,
+      risk,
+      canAllowAlways,
+      detail: policy?.note,
+    })
     if (decision === 'deny') return fail('denied', USER_DENIED_MESSAGE)
-    if (decision === 'allow_always') safeCall(() => opts.onAllowAlways?.(tool.name))
+    if (decision === 'allow_always') safeCall(() => opts.onAllowAlways?.(allowKey))
   }
   if (ctx.signal.aborted) return fail('error', '已中断')
 
   emitCall('running')
 
   // (d) PreToolUse
-  const pre = await deps.hooks.run('PreToolUse', { threadId: ctx.threadId, turnId: ctx.turnId, toolName: tool.name, input })
+  const pre = await deps.hooks.run('PreToolUse', {
+    threadId: ctx.threadId,
+    turnId: ctx.turnId,
+    toolName: tool.name,
+    input,
+  })
   if (pre.block) return fail('error', `工具调用被 hook 拦截：${pre.block.reason}`)
   if (pre.updatedInput !== undefined) {
     const reparsed = tool.inputSchema.safeParse(pre.updatedInput)
@@ -235,11 +283,28 @@ interface AskArgs {
   summary: string
   input: unknown
   risk: ToolRisk
+  canAllowAlways: boolean
+  detail?: string
+}
+
+/** A tool's classifier must never break dispatch: a throwing classifier leaves the static risk in place. */
+function safeClassify(tool: AnyTool, input: unknown): ToolCallPolicy | undefined {
+  if (!tool.classify) return undefined
+  try {
+    return tool.classify(input)
+  } catch {
+    return undefined
+  }
+}
+
+/** What the model reads when a scheduled run hits a tool the task was not granted. */
+function cronDeniedMessage(toolName: string, allowKey: string): string {
+  return `定时任务的权限模式不允许此操作（${allowKey === toolName ? toolName : `${toolName}：${allowKey}`}），已跳过。用户可以在任务设置里调高权限模式后重新运行；请说明这一点并继续完成其余部分。`
 }
 
 async function askApproval(a: AskArgs): Promise<ApprovalDecision> {
   const approvalId = newApprovalId()
-  const canAllowAlways = a.risk !== 'destructive'
+  const { canAllowAlways } = a
   const inputJson = toJsonValue(a.input)
   safeEmit(a.ctx, {
     type: 'approval.requested',
@@ -249,6 +314,7 @@ async function askApproval(a: AskArgs): Promise<ApprovalDecision> {
     callId: a.call.callId,
     toolName: a.tool.name,
     summary: a.summary,
+    ...(a.detail ? { detail: a.detail } : {}),
     input: inputJson,
     risk: a.risk,
     canAllowAlways,
@@ -278,10 +344,7 @@ async function askApproval(a: AskArgs): Promise<ApprovalDecision> {
 }
 
 type ExecOutcome =
-  | { kind: 'ok'; result: ToolResult }
-  | { kind: 'timeout' }
-  | { kind: 'aborted' }
-  | { kind: 'threw'; message: string }
+  { kind: 'ok'; result: ToolResult } | { kind: 'timeout' } | { kind: 'aborted' } | { kind: 'threw'; message: string }
 
 async function executeWithTimeout(a: {
   deps: ToolRouterFactoryDeps
@@ -313,7 +376,8 @@ async function executeWithTimeout(a: {
     callId: a.call.callId,
     channel: a.ctx.channel,
     profile: a.ctx.profile,
-    origin: a.ctx.origin?.chatId !== undefined ? { channel: a.ctx.origin.channel, chatId: a.ctx.origin.chatId } : undefined,
+    origin:
+      a.ctx.origin?.chatId !== undefined ? { channel: a.ctx.origin.channel, chatId: a.ctx.origin.chatId } : undefined,
     signal: ac.signal,
     services: a.deps.services,
     progress: (message, fraction) =>

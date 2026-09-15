@@ -3,7 +3,11 @@ export type WechatKeyKind = 'db_key' | 'image_xor' | 'image_aes'
 export type WechatKeyValidation = { ok: true; hex: string } | { ok: false; error: string }
 
 export function normalizeWechatHex(input: string): string {
-  return String(input ?? '').trim().replace(/^0x/i, '').replace(/\s+/g, '').toLowerCase()
+  return String(input ?? '')
+    .trim()
+    .replace(/^0x/i, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
 }
 
 export function validateWechatKey(kind: WechatKeyKind, input: string): WechatKeyValidation {
@@ -17,7 +21,8 @@ export function validateWechatKey(kind: WechatKeyKind, input: string): WechatKey
   const length = { db_key: 64, image_xor: 2, image_aes: 32 }[kind]
   if (!length) return { ok: false, error: '不支持的密钥类型' }
   const hex = normalizeWechatHex(raw)
-  if (kind === 'image_aes' && !/^[0-9a-f]{32}$/.test(hex)) return { ok: false, error: 'AES 密钥应为 16 个字符或 32 位十六进制' }
+  if (kind === 'image_aes' && !/^[0-9a-f]{32}$/.test(hex))
+    return { ok: false, error: 'AES 密钥应为 16 个字符或 32 位十六进制' }
   if (!/^[0-9a-f]+$/.test(hex)) return { ok: false, error: '密钥只能包含 0-9 和 a-f' }
   if (hex.length !== length) return { ok: false, error: `密钥应为 ${length} 位十六进制字符，当前 ${hex.length} 位` }
   return { ok: true, hex }

@@ -21,7 +21,7 @@ import type {
   ThreadOrigin,
   ThreadSettings,
   ToolArtifact,
-  ToolDefinition,
+  AnyToolDefinition,
   ToolProfile,
   ToolResult,
   ToolRisk,
@@ -34,12 +34,12 @@ import type {
 // ---------------------------------------------------------------------------------------------
 
 export interface ToolRegistry {
-  register(tool: ToolDefinition<any, any>): void
+  register(tool: AnyToolDefinition): void
   unregister(name: string): void
-  get(name: string): ToolDefinition<any, any> | undefined
-  list(): ToolDefinition<any, any>[]
+  get(name: string): AnyToolDefinition | undefined
+  list(): AnyToolDefinition[]
   /** Tools visible for a profile, excluding names in `deny`. */
-  forProfile(profile: ToolProfile, opts?: { deny?: readonly string[]; depth?: number }): ToolDefinition<any, any>[]
+  forProfile(profile: ToolProfile, opts?: { deny?: readonly string[]; depth?: number }): AnyToolDefinition[]
 }
 
 export interface ToolCallRequest {
@@ -119,7 +119,15 @@ export interface ApprovalRequest {
 
 export interface ApprovalGate {
   /** Pure policy decision: mode × risk × allow-list × channel. Never blocks. */
-  decide(input: { toolName: string; risk: ToolRisk; mode: PermissionMode; channel: ChannelKind; allowAlways: readonly string[] }): ApprovalVerdict
+  decide(input: {
+    toolName: string
+    /** Allow-list key for this call (a command prefix for `shell`); defaults to the tool name. */
+    allowKey?: string
+    risk: ToolRisk
+    mode: PermissionMode
+    channel: ChannelKind
+    allowAlways: readonly string[]
+  }): ApprovalVerdict
   /** Blocks until resolved or aborted. Emits approval.requested via the dispatcher. */
   ask(req: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision>
   /**
@@ -152,10 +160,16 @@ export interface HookPayload {
   input?: unknown
   output?: unknown
   text?: string
+  /** Stop: where the thread came from and which tool profile it runs, so host hooks can scope themselves. */
+  origin?: ThreadOrigin
+  profile?: ToolProfile
 }
 
 export interface HookResult {
-  /** block the action (PreToolUse: tool not run; UserPromptSubmit: turn not started) */
+  /**
+   * block the action (PreToolUse: tool not run; UserPromptSubmit: turn not started; Stop: the reason is
+   * handed to the model as a fragment and the turn runs one more step — at most once per turn)
+   */
   block?: { reason: string }
   /** extra bounded context appended as a fragment */
   additionalContext?: string
@@ -181,11 +195,25 @@ export interface HookRunner {
 // ---------------------------------------------------------------------------------------------
 
 export type RolloutLine =
-  | { ts: number; type: 'thread_meta'; threadId: ThreadId; origin: ThreadOrigin; settings: ThreadSettings; title?: string }
+  | {
+      ts: number
+      type: 'thread_meta'
+      threadId: ThreadId
+      origin: ThreadOrigin
+      settings: ThreadSettings
+      title?: string
+    }
   | { ts: number; type: 'settings'; settings: ThreadSettings }
   | { ts: number; type: 'item'; item: HistoryItem }
   | { ts: number; type: 'compacted'; summaryItemId: ItemId; foldedThroughId: ItemId }
-  | { ts: number; type: 'turn_context'; turnId: TurnId; modelId: string; profile: ToolProfile; permissionMode: PermissionMode }
+  | {
+      ts: number
+      type: 'turn_context'
+      turnId: TurnId
+      modelId: string
+      profile: ToolProfile
+      permissionMode: PermissionMode
+    }
   | { ts: number; type: 'world_state'; snapshot: Record<string, JsonValue> }
   | { ts: number; type: 'event'; event: Event }
 
@@ -209,6 +237,8 @@ export interface ResumeState {
   /** last compaction checkpoint, when present */
   lastCompactedThroughId?: ItemId
   worldState?: Record<string, JsonValue>
+  /** Lines the replay could not use (torn or of the wrong shape); skipped, never repaired. Absent when none. */
+  skippedLines?: number
 }
 
 export interface RolloutStore {
@@ -217,17 +247,38 @@ export interface RolloutStore {
   /** Barrier: everything appended so far is durable. */
   flush(threadId: ThreadId): Promise<void>
   resume(threadId: ThreadId): Promise<ResumeState | undefined>
-  list(opts?: { query?: string; limit?: number; channel?: ChannelKind; includeArchived?: boolean }): Promise<ThreadRecord[]>
-  updateMeta(threadId: ThreadId, patch: Partial<Pick<ThreadRecord, 'title' | 'pinned' | 'archived' | 'settings'>>): Promise<void>
+  list(opts?: {
+    query?: string
+    limit?: number
+    channel?: ChannelKind
+    includeArchived?: boolean
+    /** Leave out threads whose settings run one of these profiles; applied before `limit`. */
+    excludeProfiles?: readonly ToolProfile[]
+  }): Promise<ThreadRecord[]>
+  updateMeta(
+    threadId: ThreadId,
+    patch: Partial<Pick<ThreadRecord, 'title' | 'pinned' | 'archived' | 'settings'>>,
+  ): Promise<void>
   remove(threadId: ThreadId): Promise<void>
   /** Zero-LLM keyword search over stored user/assistant text (FTS). */
-  search(query: string, opts?: { limit?: number; threadId?: ThreadId }): Promise<Array<{ threadId: ThreadId; itemId: ItemId; snippet: string; ts: number }>>
+  search(
+    query: string,
+    opts?: { limit?: number; threadId?: ThreadId },
+  ): Promise<Array<{ threadId: ThreadId; itemId: ItemId; snippet: string; ts: number }>>
   /**
    * Atomically replace a thread's rollout with the given live history (rollback / clear), preserving
    * thread meta (createdAt, pinned, archived, title) and writing a fresh 'compacted' checkpoint when
    * lastCompactedThroughId is present. Implementations write tmp + rename.
    */
-  rewrite?(threadId: ThreadId, state: { items: HistoryItem[]; settings: ThreadSettings; lastCompactedThroughId?: ItemId; worldState?: Record<string, JsonValue> }): Promise<void>
+  rewrite?(
+    threadId: ThreadId,
+    state: {
+      items: HistoryItem[]
+      settings: ThreadSettings
+      lastCompactedThroughId?: ItemId
+      worldState?: Record<string, JsonValue>
+    },
+  ): Promise<void>
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -259,8 +310,12 @@ export interface SkillIndex {
 
 export interface ModelResolver {
   resolve(selection?: { providerId: string; modelId: string }): Promise<ModelClient>
-  /** Cheap/fast model for summaries & compaction; may equal the main model. */
-  resolveAuxiliary(): Promise<ModelClient>
+  /**
+   * Model for internal calls made on a thread's behalf (title, compaction). `primary` is the thread's own model
+   * selection. The result must keep its locality: when `primary` runs locally, the auxiliary model is local too,
+   * so nothing from a local-only thread reaches an online provider.
+   */
+  resolveAuxiliary(primary?: { providerId: string; modelId: string }): Promise<ModelClient>
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -280,4 +335,4 @@ export interface KernelServices {
 }
 
 /** Re-exported from @aiwc/protocol so kernel, memory and the host share one definition. */
-export type { FragmentProvider, FragmentProviderContext } from '@aiwc/protocol'
+export type { FragmentProvider } from '@aiwc/protocol'

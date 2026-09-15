@@ -105,7 +105,7 @@ export function SegmentedControl<T extends string = string>({
             onClick={() => onValueChange(opt.value)}
             onKeyDown={(e) => handleKeyDown(e, i)}
             className={cn(
-              'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 text-caption leading-none',
+              'inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 text-caption leading-none',
               'transition-colors duration-(--dur-fast) outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
               'disabled:pointer-events-none disabled:opacity-40',
               size === 'sm' ? 'h-[22px] px-2' : 'h-[22px]',
@@ -115,8 +115,8 @@ export function SegmentedControl<T extends string = string>({
                 : 'border border-transparent text-fg-3 hover:bg-line-6 hover:text-fg',
             )}
           >
-            {opt.icon ? <opt.icon size={iconSize} strokeWidth={ICON_STROKE} aria-hidden /> : null}
-            {opt.label}
+            {opt.icon ? <opt.icon size={iconSize} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" /> : null}
+            <span className="min-w-0 truncate">{opt.label}</span>
           </button>
         )
       })}

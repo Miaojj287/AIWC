@@ -9,19 +9,18 @@ import type { ChannelKind } from './gateway'
 import type { TokenUsage, ModelError } from './model'
 
 /**
- * Ask = 高危动作（对外发送 / 破坏性）才确认，读写照常；Bypass = 读写全部放行，仍然只在高危动作前确认。
- * 对外发送和破坏性操作永远要人确认（CLAUDE.md §4.4），任何模式都不能跳过。
+ * Ask (default): reads run; writes ask first unless the user chose 总是允许 for that tool; sends and destructive
+ * actions ask every time. Bypass: reads and writes run; sends and destructive actions still ask every time
+ * (CLAUDE.md §4.4) — no mode skips them. The authoritative table is APPROVAL_MATRIX in @aiwc/kernel.
  */
-export type PermissionMode = 'ask' | 'bypass'
-
-export const PERMISSION_MODES: readonly PermissionMode[] = ['ask', 'bypass']
+export type PermissionMode = 'ask' | 'bypass' | 'autopilot'
 
 /**
  * Coerce anything stored by an older build (notably the removed 'plan' mode) back to a mode that
  * still exists, so an old config.json or thread row degrades instead of being thrown away.
  */
 export function normalizePermissionMode(value: unknown): PermissionMode {
-  return value === 'bypass' ? 'bypass' : 'ask'
+  return value === 'bypass' || value === 'autopilot' ? value : 'ask'
 }
 
 export interface ThreadSettings {
@@ -75,7 +74,14 @@ export type Event =
   | { type: 'thread.settings'; threadId: ThreadId; settings: ThreadSettings }
   | { type: 'turn.started'; threadId: ThreadId; turnId: TurnId; at: Millis }
   | { type: 'step.started'; threadId: ThreadId; turnId: TurnId; stepId: StepId; index: number }
-  | { type: 'item.user'; threadId: ThreadId; turnId: TurnId; itemId: ItemId; content: ContentPart[]; mentions: Mention[] }
+  | {
+      type: 'item.user'
+      threadId: ThreadId
+      turnId: TurnId
+      itemId: ItemId
+      content: ContentPart[]
+      mentions: Mention[]
+    }
   | { type: 'text.start'; threadId: ThreadId; turnId: TurnId; itemId: ItemId }
   | { type: 'text.delta'; threadId: ThreadId; turnId: TurnId; itemId: ItemId; delta: string }
   | { type: 'text.end'; threadId: ThreadId; turnId: TurnId; itemId: ItemId; text: string }
@@ -92,6 +98,8 @@ export type Event =
       input: JsonValue
       status: ToolCallStatus
       risk: ToolRisk
+      /** Allow-list key this call was judged by (a command prefix for `shell`); absent before validation. */
+      allowKey?: string
       startedAt: Millis
       durationMs?: number
       output?: JsonValue | string
@@ -116,12 +124,33 @@ export type Event =
   | { type: 'approval.resolved'; threadId: ThreadId; approvalId: ApprovalId; decision: ApprovalDecision }
   | { type: 'context.usage'; threadId: ThreadId; usage: ContextUsage }
   | { type: 'context.compacted'; threadId: ThreadId; summaryItemId: ItemId; freedTokens: number }
-  | { type: 'plan.updated'; threadId: ThreadId; steps: Array<{ title: string; status: 'todo' | 'doing' | 'done' | 'failed' }> }
-  | { type: 'turn.completed'; threadId: ThreadId; turnId: TurnId; finalText: string; usage: TokenUsage; steps: number; at: Millis }
-  | { type: 'turn.aborted'; threadId: ThreadId; turnId: TurnId; reason: 'interrupted' | 'replaced' | 'step_cap' | 'loop_guard' | 'timeout' | 'error' }
-  | { type: 'error'; threadId: ThreadId; turnId?: TurnId; error: ModelError | { code: string; message: string; retryable?: boolean }; actions: ErrorAction[] }
+  | {
+      type: 'plan.updated'
+      threadId: ThreadId
+      steps: Array<{ title: string; status: 'todo' | 'doing' | 'done' | 'failed' }>
+    }
+  | {
+      type: 'turn.completed'
+      threadId: ThreadId
+      turnId: TurnId
+      finalText: string
+      usage: TokenUsage
+      steps: number
+      at: Millis
+    }
+  | {
+      type: 'turn.aborted'
+      threadId: ThreadId
+      turnId: TurnId
+      reason: 'interrupted' | 'replaced' | 'step_cap' | 'loop_guard' | 'timeout' | 'error'
+    }
+  | {
+      type: 'error'
+      threadId: ThreadId
+      turnId?: TurnId
+      error: ModelError | { code: string; message: string; retryable?: boolean }
+      actions: ErrorAction[]
+    }
   | { type: 'memory.written'; threadId: ThreadId; file: string; count: number }
   | { type: 'thread.title'; threadId: ThreadId; title: string }
   | { type: 'subagent'; threadId: ThreadId; childId: string; status: 'started' | 'done' | 'failed'; label: string }
-
-export type EventType = Event['type']

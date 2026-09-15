@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { KeyAcquireStep } from '@aiwc/protocol'
-import { EMPTY_KEYS, activeStepIndex, applyKeySteps, mergeKeyStep, needsPermission, nextStepGate, normaliseHex, summariseKeys, validateKeyHex } from './gating'
+import { __resetLanguageForTests, setLanguage } from '@/i18n'
+import {
+  EMPTY_KEYS,
+  activeStepIndex,
+  applyKeySteps,
+  mergeKeyStep,
+  needsPermission,
+  nextStepGate,
+  normaliseHex,
+  summariseKeys,
+  validateKeyHex,
+} from './gating'
 
 describe('validateKeyHex', () => {
   it('accepts 64 hex for the db key, with 0x and whitespace tolerated', () => {
@@ -9,7 +20,10 @@ describe('validateKeyHex', () => {
     expect(normaliseHex(' 0xAB cd ')).toBe('abcd')
   })
   it('reports the Figma error copy for wrong lengths and characters', () => {
-    expect(validateKeyHex('db_key', 'a'.repeat(42))).toEqual({ ok: false, error: '密钥应为 64 位十六进制字符，当前 42 位' })
+    expect(validateKeyHex('db_key', 'a'.repeat(42))).toEqual({
+      ok: false,
+      error: '密钥应为 64 位十六进制字符，当前 42 位',
+    })
     expect(validateKeyHex('image_aes', 'zz')).toEqual({ ok: false, error: 'AES 密钥应为 16 个字符或 32 位十六进制' })
     expect(validateKeyHex('image_xor', '')).toEqual({ ok: false, error: '请输入密钥' })
     expect(validateKeyHex('image_xor', '0x53')).toEqual({ ok: true, hex: '53' })
@@ -26,11 +40,33 @@ describe('nextStepGate', () => {
     })
   })
   it('asks to verify a chosen but unverified account', () => {
-    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: false, dbKeyPresent: false }).reason).toBe('请先验证账号并获取解密密钥')
-    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: true, dbKeyPresent: false }).reason).toBe('请先获取解密密钥')
+    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: false, dbKeyPresent: false }).reason).toBe(
+      '请先验证账号并获取解密密钥',
+    )
+    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: true, dbKeyPresent: false }).reason).toBe(
+      '请先获取解密密钥',
+    )
   })
   it('passes when verified and the db key is present', () => {
-    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: true, dbKeyPresent: true })).toEqual({ ok: true, missing: [] })
+    expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: true, dbKeyPresent: true })).toEqual({
+      ok: true,
+      missing: [],
+    })
+  })
+  describe('in English', () => {
+    afterEach(() => __resetLanguageForTests())
+    it('joins the missing items into one sentence', () => {
+      setLanguage('en-US')
+      expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: true, dbKeyPresent: false }).reason).toBe(
+        'To continue, get the decryption key',
+      )
+      expect(nextStepGate({ dbRoot: '/x', wxid: 'wxid_a', verified: false, dbKeyPresent: false }).reason).toBe(
+        'To continue, verify the account and get the decryption key',
+      )
+      expect(nextStepGate({ dbRoot: '', wxid: '', verified: false, dbKeyPresent: false }).reason).toBe(
+        'To continue, choose the WeChat database folder, select a WeChat account, and get the decryption key',
+      )
+    })
   })
 })
 
@@ -55,8 +91,20 @@ describe('key steps', () => {
   })
   it('keeps manual keys and detects permission failures', () => {
     const prev = { ...EMPTY_KEYS, image_aes: { status: 'manual' as const, hex: 'f'.repeat(32) } }
-    const denied: KeyAcquireStep[] = [{ id: 'db_key', label: 'db', status: 'failed', detail: '需要「完全磁盘访问」权限' }]
+    const denied: KeyAcquireStep[] = [
+      { id: 'db_key', label: 'db', status: 'failed', detail: '需要「完全磁盘访问」权限' },
+    ]
     expect(needsPermission(denied)).toBe(true)
+    expect(
+      needsPermission([
+        {
+          id: 'db_key',
+          label: 'db',
+          status: 'failed',
+          detail: "Can't read WeChat process memory (administrator rights may be required)",
+        },
+      ]),
+    ).toBe(true)
     const keys = applyKeySteps(prev, denied)
     expect(keys.image_aes.status).toBe('manual')
     expect(keys.db_key).toMatchObject({ status: 'failed', needsPermission: true })

@@ -64,11 +64,15 @@ export function loadMacNative(): Native | null {
     const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
     const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
     const app = koffi.load('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
-    const CFStringCreateWithCString = cf.func('void* CFStringCreateWithCString(void* alloc, const char* cStr, uint32 encoding)')
+    const CFStringCreateWithCString = cf.func(
+      'void* CFStringCreateWithCString(void* alloc, const char* cStr, uint32 encoding)',
+    )
     const key = (name: string) => CFStringCreateWithCString(null, name, CF_STRING_ENCODING_UTF8)
     cached = {
       koffi,
-      CGEventCreateKeyboardEvent: cg.func('void* CGEventCreateKeyboardEvent(void* source, uint16 virtualKey, bool keyDown)'),
+      CGEventCreateKeyboardEvent: cg.func(
+        'void* CGEventCreateKeyboardEvent(void* source, uint16 virtualKey, bool keyDown)',
+      ),
       CGEventPost: cg.func('void CGEventPost(uint32 tap, void* event)'),
       CGEventSetFlags: cg.func('void CGEventSetFlags(void* event, uint64 flags)'),
       AXIsProcessTrusted: app.func('bool AXIsProcessTrusted()'),
@@ -78,7 +82,9 @@ export function loadMacNative(): Native | null {
       CFArrayGetCount: cf.func('long CFArrayGetCount(void* theArray)'),
       CFArrayGetValueAtIndex: cf.func('void* CFArrayGetValueAtIndex(void* theArray, long idx)'),
       CFDictionaryGetValue: cf.func('void* CFDictionaryGetValue(void* dict, void* key)'),
-      CFStringGetCString: cf.func('bool CFStringGetCString(void* string, void* buffer, long bufferSize, uint32 encoding)'),
+      CFStringGetCString: cf.func(
+        'bool CFStringGetCString(void* string, void* buffer, long bufferSize, uint32 encoding)',
+      ),
       CFNumberGetValue: cf.func('bool CFNumberGetValue(void* number, int32 theType, void* valuePtr)'),
       CFBooleanGetValue: cf.func('bool CFBooleanGetValue(void* boolean)'),
       CFRelease: cf.func('void CFRelease(void* cf)'),
@@ -130,7 +136,11 @@ export function tap(keyCode: number, withCommand = false): void {
       n.CGEventSetFlags(event, BigInt(withCommand ? FLAG_COMMAND : 0))
       n.CGEventPost(HID_EVENT_TAP, event)
     } finally {
-      try { n.CFRelease(event) } catch { /* ignore */ }
+      try {
+        n.CFRelease(event)
+      } catch {
+        /* ignore */
+      }
     }
   }
 }
@@ -202,21 +212,33 @@ function readWindow(n: Native, dict: Any): WindowInfo | null {
   }
 }
 
-const isWeChat = (w: WindowInfo): boolean => w.ownerName === 'WeChat' || w.ownerName === '微信' || w.ownerName === 'Weixin'
+const isWeChat = (w: WindowInfo): boolean =>
+  w.ownerName === 'WeChat' || w.ownerName === '微信' || w.ownerName === 'Weixin'
 
 const near = (a: WindowInfo['bounds'], b: WindowInfo['bounds']): boolean =>
-  Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2 && Math.abs(a.width - b.width) <= 2 && Math.abs(a.height - b.height) <= 2
+  Math.abs(a.x - b.x) <= 2 &&
+  Math.abs(a.y - b.y) <= 2 &&
+  Math.abs(a.width - b.width) <= 2 &&
+  Math.abs(a.height - b.height) <= 2
 
 /** Window z-order is not keyboard focus (overlays and other displays can lead the list). */
 export function classifyWeChatWindows(windows: WindowInfo[], foregroundPid: number): WeChatWindowState {
   const wechat = windows.filter(isWeChat)
   const score = (w: WindowInfo) => w.area + (['微信', 'WeChat', 'Weixin'].includes(w.title) ? 1_000_000_000 : 0)
-  const main = wechat.reduce<WindowInfo | undefined>((best, w) => !best || score(w) > score(best) ? w : best, undefined)
+  const main = wechat.reduce<WindowInfo | undefined>(
+    (best, w) => (!best || score(w) > score(best) ? w : best),
+    undefined,
+  )
   if (!main) return { found: false, frontmost: false, foregroundPid }
   // Keep rejecting a viewer/settings window above the main WeChat window. Never ignore our own app
   // when deciding keyboard focus: doing so can paste into AIWC while it is still active.
   const front = wechat[0]
-  return { found: true, frontmost: foregroundPid === main.ownerPid && !!front && near(main.bounds, front.bounds), foregroundPid, wechatPid: main.ownerPid }
+  return {
+    found: true,
+    frontmost: foregroundPid === main.ownerPid && !!front && near(main.bounds, front.bounds),
+    foregroundPid,
+    wechatPid: main.ownerPid,
+  }
 }
 
 /** Carbon's front process is the keyboard recipient; querying it requires no Apple Events. */
@@ -247,7 +269,9 @@ export function probeWeChatWindow(): WeChatWindowState {
     if (list) {
       try {
         n.CFRelease(list)
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

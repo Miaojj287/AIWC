@@ -1,7 +1,8 @@
-import { Bot, MessageSquare, Reply, UserRound } from 'lucide-react'
+import { Bot, CalendarClock, MessageSquare, Reply, UserRound } from 'lucide-react'
 import { forwardRef, type ButtonHTMLAttributes, type CSSProperties } from 'react'
 import { runCommand } from '@/app/commands'
 import { shortcutLabel } from '@/app/shortcuts'
+import { useT, type MessageKey } from '@/i18n'
 import { Avatar, cn, ICON_STROKE, Tooltip, type IconComponent } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { useAccountStatus } from '@/platform/useAccountStatus'
@@ -12,15 +13,16 @@ import './shell.css'
 
 export interface RailFunctionMeta {
   fn: RailFunction
-  label: string
+  labelKey: MessageKey
   icon: IconComponent
 }
 
-/** The three functions, in rail order (CLAUDE.md §1). */
+/** The functions, in rail order (CLAUDE.md §1; 定时任务 joined the original three). */
 export const RAIL_FUNCTIONS: readonly RailFunctionMeta[] = [
-  { fn: 'chat', label: '聊天', icon: MessageSquare },
-  { fn: 'autoreply', label: '自动回复', icon: Reply },
-  { fn: 'clone', label: 'AI 克隆', icon: Bot },
+  { fn: 'chat', labelKey: 'shell.rail.chat', icon: MessageSquare },
+  { fn: 'autoreply', labelKey: 'shell.rail.autoreply', icon: Reply },
+  { fn: 'clone', labelKey: 'shell.rail.clone', icon: Bot },
+  { fn: 'tasks', labelKey: 'shell.rail.tasks', icon: CalendarClock },
 ]
 
 export interface IconRailProps {
@@ -28,13 +30,14 @@ export interface IconRailProps {
 }
 
 /**
- * IconRail — 64px shell-ground column (Figma 115:428): three 40×40 gradient tiles (r10, icon 20 in on-accent
- * white). Selected = 1px accent-30 ring + 3×22 fg indicator bar at the rail's left edge; Figma's orange
+ * IconRail — 64px shell-ground column (Figma 115:428): four 40×40 gradient tiles (r10, icon 20 in on-accent
+ * white). Selected = 1px accent-30 ring + 3×22 fg indicator bar at the rail's left edge; the accent
  * drop-shadow glow is deliberately dropped (shadows are for floating layers only, CLAUDE.md §2.1) and the
  * white 55% / 14% borders are replaced by tokens. Others = 1px line-10 ring. Bottom: the current account
  * tile → 设置 Tab (same accent ring while that tab is active).
  */
 export function IconRail({ mac }: IconRailProps) {
+  const t = useT()
   const selected = useShellStore((s) => s.railFunction)
   const settingsActive = useTabsStore((s) => s.activeId === 'settings:settings')
   const wxid = useConfig((c) => c.account.wxid)
@@ -43,12 +46,23 @@ export function IconRail({ mac }: IconRailProps) {
   const accountName = account?.nickname?.trim() || account?.wxid || wxid || ''
 
   return (
-    <nav aria-label="功能" className="relative flex h-full w-16 shrink-0 flex-col items-center gap-2.5 border-r border-line-6 bg-shell py-3.5">
-      {RAIL_FUNCTIONS.map(({ fn, label, icon: Icon }) => {
+    <nav
+      aria-label={t('shell.rail.nav')}
+      data-testid="icon-rail"
+      className="shell-rail relative flex h-full w-16 shrink-0 flex-col items-center gap-2.5 border-r border-line-6 bg-shell py-3.5"
+    >
+      {RAIL_FUNCTIONS.map(({ fn, labelKey, icon: Icon }) => {
+        const label = t(labelKey)
         const active = fn === selected
         return (
           <div key={fn} className="relative flex w-full justify-center">
-            {active ? <span aria-hidden data-testid="rail-indicator" className="absolute left-0 top-1/2 h-[22px] w-[3px] -translate-y-1/2 rounded-r-sm bg-fg" /> : null}
+            {active ? (
+              <span
+                aria-hidden
+                data-testid="rail-indicator"
+                className="absolute left-0 top-1/2 h-[22px] w-[3px] -translate-y-1/2 rounded-r-sm bg-fg"
+              />
+            ) : null}
             <Tooltip content={label} kbd={shortcutLabel('rail.select', mac, { fn })} side="right">
               <RailTile
                 aria-label={label}
@@ -64,16 +78,23 @@ export function IconRail({ mac }: IconRailProps) {
         )
       })}
       <div className="flex-1" />
-      <Tooltip content="设置" kbd={shortcutLabel('tab.openSettings', mac)} side="right">
+      <Tooltip content={t('shell.rail.settings')} kbd={shortcutLabel('tab.openSettings', mac)} side="right">
         <RailTile
-          aria-label={accountName ? `${accountName} · 设置` : '设置'}
+          aria-label={accountName ? t('shell.rail.accountSettings', { name: accountName }) : t('shell.rail.settings')}
           active={settingsActive}
           style={{ backgroundImage: 'var(--rail-tile-user)' }}
           onClick={() => runCommand('tab.openSettings', {})}
           data-testid="rail-account"
         >
           {accountName ? (
-            <Avatar id={account?.wxid ?? wxid ?? ''} name={accountName} src={toMediaUrl(account?.avatarPath)} size={36} style={{ width: 40, height: 40 }} className="rounded-window" />
+            <Avatar
+              id={account?.wxid ?? wxid ?? ''}
+              name={accountName}
+              src={toMediaUrl(account?.avatarPath)}
+              size={36}
+              style={{ width: 40, height: 40 }}
+              className="rounded-window"
+            />
           ) : (
             <UserRound size={18} strokeWidth={ICON_STROKE} aria-hidden className="text-fg-2" />
           )}
@@ -89,7 +110,10 @@ interface RailTileProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /** 40×40 r10 gradient tile — the rail is the one place (besides avatars) gradients are allowed. */
-const RailTile = forwardRef<HTMLButtonElement, RailTileProps>(function RailTile({ active = false, className, children, ...rest }, ref) {
+const RailTile = forwardRef<HTMLButtonElement, RailTileProps>(function RailTile(
+  { active = false, className, children, ...rest },
+  ref,
+) {
   return (
     <button
       ref={ref}

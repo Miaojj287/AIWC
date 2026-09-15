@@ -2,7 +2,14 @@
  * Desktop adapter: the renderer composer treated as a channel. Inbound events are injected by the
  * host; send() succeeds immediately because the renderer renders replies from kernel events.
  */
-import type { AdapterState, MessageEvent, PlatformAdapter, SendRequest, SendResult, SessionSource } from '@aiwc/protocol'
+import type {
+  AdapterState,
+  MessageEvent,
+  PlatformAdapter,
+  SendRequest,
+  SendResult,
+  SessionSource,
+} from '@aiwc/protocol'
 import { createEmitter } from '../../core/emitter'
 
 export interface DesktopAdapter extends PlatformAdapter {
@@ -18,7 +25,14 @@ export const DESKTOP_SELF_PEER = 'me'
 
 export function desktopSource(opts: { chatId?: string; threadId?: string } = {}): SessionSource {
   const chatId = opts.chatId ?? DESKTOP_SELF_PEER
-  return { channel: 'desktop', peerId: DESKTOP_SELF_PEER, chatId, chatType: 'dm', threadId: opts.threadId, displayName: '我' }
+  return {
+    channel: 'desktop',
+    peerId: DESKTOP_SELF_PEER,
+    chatId,
+    chatType: 'dm',
+    threadId: opts.threadId,
+    displayName: '我',
+  }
 }
 
 export function createDesktopAdapter(opts: { now?: () => number } = {}): DesktopAdapter {

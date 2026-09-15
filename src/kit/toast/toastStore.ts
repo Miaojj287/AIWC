@@ -141,16 +141,13 @@ export function subscribeToasts(listener: Listener): () => void {
 }
 
 /** Convenience: one function per kind. */
-export const toast = Object.assign(
-  (input: ToastInput) => addToast(input),
-  {
-    success: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'success', text, ...opts }),
-    info: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'info', text, ...opts }),
-    warning: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'warning', text, ...opts }),
-    error: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'error', text, ...opts }),
-    progress: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'progress', text, ...opts }),
-    update: updateToast,
-    dismiss: dismissToast,
-    clear: clearToasts,
-  },
-)
+export const toast = Object.assign((input: ToastInput) => addToast(input), {
+  success: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'success', text, ...opts }),
+  info: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'info', text, ...opts }),
+  warning: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'warning', text, ...opts }),
+  error: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'error', text, ...opts }),
+  progress: (text: string, opts?: Omit<ToastInput, 'kind' | 'text'>) => addToast({ kind: 'progress', text, ...opts }),
+  update: updateToast,
+  dismiss: dismissToast,
+  clear: clearToasts,
+})

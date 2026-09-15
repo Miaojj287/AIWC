@@ -2,9 +2,15 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WxMessage } from '@aiwc/protocol'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryStore } from '../store/memoryStore'
-import { createFakeSubstrate, createScriptedModel, fakeMessage, fakeSession } from '../testing/fakes'
+import {
+  createFakeSubstrate,
+  createScriptedModel,
+  fakeMessage,
+  fakeSession,
+  type ScriptedHandler,
+} from '../testing/fakes'
 import { createDiaryStore } from './diaryStore'
 import { createDiaryPipeline } from './pipeline'
 import { parseSynthesis } from './prompts'
@@ -27,16 +33,45 @@ function buildData() {
   let seq = 1
   for (let i = 0; i < 12; i++) {
     messages.push(
-      fakeMessage({ sessionId: 'wxid_lina', seq: seq++, createdAt: W.start + 3_600_000 * 4 + i * 60_000, isSelf: i % 2 === 0, text: i % 2 === 0 ? `我说第 ${i} 句` : `李娜回第 ${i} 句，周一评审记得来` }),
+      fakeMessage({
+        sessionId: 'wxid_lina',
+        seq: seq++,
+        createdAt: W.start + 3_600_000 * 4 + i * 60_000,
+        isSelf: i % 2 === 0,
+        text: i % 2 === 0 ? `我说第 ${i} 句` : `李娜回第 ${i} 句，周一评审记得来`,
+      }),
     )
   }
   for (let i = 0; i < 60; i++) {
     messages.push(
-      fakeMessage({ sessionId: 'g1@chatroom', seq: seq++, createdAt: W.start + 3_600_000 * 7 + i * 30_000, senderId: `u${i % 4}`, senderName: `群友${i % 4}`, text: `讨论第 ${i} 条，${'很长的内容'.repeat(60)}` }),
+      fakeMessage({
+        sessionId: 'g1@chatroom',
+        seq: seq++,
+        createdAt: W.start + 3_600_000 * 7 + i * 30_000,
+        senderId: `u${i % 4}`,
+        senderName: `群友${i % 4}`,
+        text: `讨论第 ${i} 条，${'很长的内容'.repeat(60)}`,
+      }),
     )
   }
-  messages.push(fakeMessage({ sessionId: 'g1@chatroom', seq: seq++, createdAt: W.start + 3_600_000 * 7, kind: 'voice', media: { kind: 'voice', transcript: '这是语音转写' } }))
-  messages.push(fakeMessage({ sessionId: 'g1@chatroom', seq: seq++, createdAt: W.start + 3_600_000 * 7, kind: 'system', text: '某人加入群聊' }))
+  messages.push(
+    fakeMessage({
+      sessionId: 'g1@chatroom',
+      seq: seq++,
+      createdAt: W.start + 3_600_000 * 7,
+      kind: 'voice',
+      media: { kind: 'voice', transcript: '这是语音转写' },
+    }),
+  )
+  messages.push(
+    fakeMessage({
+      sessionId: 'g1@chatroom',
+      seq: seq++,
+      createdAt: W.start + 3_600_000 * 7,
+      kind: 'system',
+      text: '某人加入群聊',
+    }),
+  )
   // outside the window → must be ignored
   messages.push(fakeMessage({ sessionId: 'wxid_quiet', seq: seq++, createdAt: W.end + 1000, text: '窗口外' }))
   messages.push(fakeMessage({ sessionId: 'wxid_old', seq: seq++, createdAt: W.start - 1000, text: '窗口前' }))
@@ -81,7 +116,11 @@ describe('diary window & helpers', () => {
     expect(sampleEvenly([1, 2], 5)).toEqual([1, 2])
     expect(messageText(fakeMessage({ sessionId: 'a', seq: 1, createdAt: 0, kind: 'voice' }))).toBe('[语音]')
     expect(messageText(fakeMessage({ sessionId: 'a', seq: 1, createdAt: 0, kind: 'system', text: 'x' }))).toBe('')
-    expect(messageText(fakeMessage({ sessionId: 'a', seq: 1, createdAt: 0, kind: 'file', media: { kind: 'file', fileName: 'a.pdf' } }))).toBe('[文件 a.pdf]')
+    expect(
+      messageText(
+        fakeMessage({ sessionId: 'a', seq: 1, createdAt: 0, kind: 'file', media: { kind: 'file', fileName: 'a.pdf' } }),
+      ),
+    ).toBe('[文件 a.pdf]')
   })
   it('parses synthesis output into body / cues / facts', () => {
     const p = parseSynthesis('```markdown\n' + GOOD_DIARY + '\n```')
@@ -94,7 +133,7 @@ describe('diary window & helpers', () => {
 })
 
 describe('createDiaryPipeline', () => {
-  const setup = (handler: (system: string, user: string) => string, opts: { rollout?: boolean; noModel?: boolean } = {}) => {
+  const setup = (handler: ScriptedHandler, opts: { rollout?: boolean; noModel?: boolean } = {}) => {
     const substrate = createFakeSubstrate(buildData())
     const memory = createMemoryStore({ dir: tmp('mem') })
     const diaries = createDiaryStore({ dir: tmp('diary') })
@@ -119,10 +158,13 @@ describe('createDiaryPipeline', () => {
   }
 
   it('produces a synthesised entry, respects bounds and feeds stable facts into MEMORY', async () => {
-    const { substrate, memory, diaries, model, pipeline } = setup((system, user) => {
-      if (system.includes('私人日记助手')) return `${user.slice(1, user.indexOf('】'))}：聊了些事，情绪平稳。`
-      return GOOD_DIARY
-    }, { rollout: true })
+    const { substrate, memory, diaries, model, pipeline } = setup(
+      (system, user) => {
+        if (system.includes('私人日记助手')) return `${user.slice(1, user.indexOf('】'))}：聊了些事，情绪平稳。`
+        return GOOD_DIARY
+      },
+      { rollout: true },
+    )
     const steps: string[] = []
     const entry = await pipeline.run(DATE, { onProgress: (s) => steps.push(s) })
     expect(entry.degraded).toBeUndefined()
@@ -193,6 +235,62 @@ describe('createDiaryPipeline', () => {
     expect(entry.cues.length).toBeGreaterThanOrEqual(3)
     expect(model.calls).toHaveLength(0)
     await expect(pipeline.run('2020-1-1')).rejects.toThrow(/YYYY-MM-DD/)
+  })
+
+  it('generates a date once when runs for it overlap (scheduled + catch-up + manual), forced or not', async () => {
+    const { model, pipeline, diaries } = setup((system) => (system.includes('私人日记助手') ? '小结' : GOOD_DIARY))
+    const [a, b, c] = await Promise.all([pipeline.run(DATE), pipeline.run(DATE), pipeline.runCatchUp()])
+    expect(model.calls).toHaveLength(3) // 2 session summaries + 1 synthesis, once
+    expect(b).toEqual(a)
+    expect(c).toEqual(a)
+    expect(await diaries.get(DATE)).toMatchObject({ generatedAt: a.generatedAt })
+    // a double-clicked 「重新生成」: both requests are answered by the one regeneration they overlapped with
+    const [d, e] = await Promise.all([pipeline.run(DATE, { force: true }), pipeline.run(DATE, { force: true })])
+    expect(model.calls).toHaveLength(6)
+    expect(e).toEqual(d)
+    // a later forced run is a new request and regenerates
+    await pipeline.run(DATE, { force: true })
+    expect(model.calls).toHaveLength(9)
+  })
+
+  describe('model calls that never finish', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('stop() aborts the in-flight run without writing anything, and later runs are not blocked', async () => {
+      let hang = true
+      let started: () => void = () => {}
+      const modelStarted = new Promise<void>((resolve) => (started = resolve))
+      const { diaries, pipeline } = setup((system) => {
+        started()
+        if (hang) return new Promise<string>(() => {})
+        return system.includes('私人日记助手') ? '小结' : GOOD_DIARY
+      })
+      const stuck = pipeline.run(DATE).then(
+        () => 'resolved',
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      )
+      await modelStarted
+      pipeline.stop()
+      expect(await stuck).toBe('aborted')
+      expect(await diaries.get(DATE)).toBeUndefined()
+      hang = false
+      const entry = await pipeline.run(DATE)
+      expect(entry.degraded).toBeUndefined()
+      expect(entry.markdown).toContain('## 一句话')
+    })
+
+    it('a stalled provider times out into a degraded entry instead of holding the date forever', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const { model, pipeline } = setup(() => new Promise<string>(() => {}))
+      const run = pipeline.run(DATE)
+      await vi.runAllTimersAsync()
+      const entry = await run
+      expect(entry.degraded).toBe(true)
+      expect(entry.markdown).toContain('timed out')
+      expect(model.calls).toHaveLength(3)
+    })
   })
 
   it('schedules with croner and catches up on start', async () => {

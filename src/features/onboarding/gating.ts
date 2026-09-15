@@ -2,7 +2,8 @@
  * Pure logic of the onboarding wizard (DESIGN-SPEC §5): the 下一步 gate and its disabled tooltip, key
  * hex validation, step-list merging for the key acquisition dialog, and the steps-bar state.
  */
-import type { KeyAcquireStep } from '@aiwc/protocol'
+import { validateWechatKey, type KeyAcquireStep } from '@aiwc/protocol'
+import { localizeKnownText, t, type MessageKey } from '@/i18n'
 
 export type KeyKind = KeyAcquireStep['id'] extends infer T ? Exclude<T, 'verify'> : never
 
@@ -16,17 +17,40 @@ export type KeyStates = Record<KeyKind, KeyState>
 
 export const KEY_KINDS: readonly KeyKind[] = ['db_key', 'image_xor', 'image_aes']
 
-export const KEY_META: Record<KeyKind, { label: string; description: string; hexLength: number }> = {
-  db_key: { label: '解密密钥', description: '64 位数据库解密密钥', hexLength: 64 },
-  image_xor: { label: '图片 XOR 密钥', description: '用于还原微信图片资源', hexLength: 2 },
-  image_aes: { label: '图片 AES 密钥', description: '用于解密图片资源索引', hexLength: 32 },
+/** `label` / `description` are catalog keys — resolve them with t() at render. */
+export const KEY_META: Record<KeyKind, { label: MessageKey; description: MessageKey; hexLength: number }> = {
+  db_key: {
+    label: 'onboarding.keys.kinds.dbKey.label',
+    description: 'onboarding.keys.kinds.dbKey.description',
+    hexLength: 64,
+  },
+  image_xor: {
+    label: 'onboarding.keys.kinds.imageXor.label',
+    description: 'onboarding.keys.kinds.imageXor.description',
+    hexLength: 2,
+  },
+  image_aes: {
+    label: 'onboarding.keys.kinds.imageAes.label',
+    description: 'onboarding.keys.kinds.imageAes.description',
+    hexLength: 32,
+  },
 }
 
-export const EMPTY_KEYS: KeyStates = { db_key: { status: 'missing' }, image_xor: { status: 'missing' }, image_aes: { status: 'missing' } }
+export const EMPTY_KEYS: KeyStates = {
+  db_key: { status: 'missing' },
+  image_xor: { status: 'missing' },
+  image_aes: { status: 'missing' },
+}
 
 export const hasKey = (k: KeyState): boolean => k.status === 'acquired' || k.status === 'manual'
 
-export { validateWechatKey as validateKeyHex, normalizeWechatHex as normaliseHex } from '@aiwc/protocol'
+export { normalizeWechatHex as normaliseHex } from '@aiwc/protocol'
+
+/** Protocol's key validation, with its error text (computed in the package) shown in the UI language. */
+export function validateKeyHex(...args: Parameters<typeof validateWechatKey>): ReturnType<typeof validateWechatKey> {
+  const v = validateWechatKey(...args)
+  return v.ok ? v : { ...v, error: localizeKnownText(v.error) }
+}
 
 export interface GateInput {
   dbRoot: string
@@ -45,12 +69,13 @@ export interface GateResult {
 /** 下一步 is enabled only when the account is verified and the DB key is present (DESIGN-SPEC §5 门禁). */
 export function nextStepGate(input: GateInput): GateResult {
   const missing: string[] = []
-  if (!input.dbRoot.trim()) missing.push('选择微信数据库目录')
-  if (!input.wxid.trim()) missing.push('选择微信账号')
-  else if (!input.verified) missing.push('验证账号')
-  if (!input.dbKeyPresent) missing.push('获取解密密钥')
+  if (!input.dbRoot.trim()) missing.push(t('onboarding.gate.selectDbRoot'))
+  if (!input.wxid.trim()) missing.push(t('onboarding.gate.selectAccount'))
+  else if (!input.verified) missing.push(t('onboarding.gate.verifyAccount'))
+  if (!input.dbKeyPresent) missing.push(t('onboarding.gate.getDbKey'))
   if (missing.length === 0) return { ok: true, missing }
-  return { ok: false, missing, reason: `请先${missing.join('并')}` }
+  const [a, b, c] = missing
+  return { ok: false, missing, reason: t('onboarding.gate.reason', { n: missing.length, a, b, c }) }
 }
 
 /** Replace a step by id (or append) — used while `substrate:keyStep` events stream in. */
@@ -60,14 +85,23 @@ export function mergeKeyStep(steps: readonly KeyAcquireStep[], step: KeyAcquireS
   return steps.map((s, i) => (i === idx ? { ...s, ...step } : s))
 }
 
+/** Placeholder rows until `substrate:keyStep` streams the real ones; an empty label renders KEY_STEP_LABELS[id]. */
 export const DEFAULT_KEY_STEPS: readonly KeyAcquireStep[] = [
-  { id: 'db_key', label: '数据库解密密钥', status: 'todo' },
-  { id: 'image_xor', label: '图片 XOR 密钥', status: 'todo' },
-  { id: 'image_aes', label: '图片 AES 密钥', status: 'todo' },
-  { id: 'verify', label: '验证账号与目录', status: 'todo' },
+  { id: 'db_key', label: '', status: 'todo' },
+  { id: 'image_xor', label: '', status: 'todo' },
+  { id: 'image_aes', label: '', status: 'todo' },
+  { id: 'verify', label: '', status: 'todo' },
 ]
 
-const PERMISSION_RE = /权限|permission|full disk|完全磁盘|eperm|eacces|operation not permitted/i
+export const KEY_STEP_LABELS: Record<KeyAcquireStep['id'], MessageKey> = {
+  db_key: 'onboarding.keys.steps.dbKey',
+  image_xor: 'onboarding.keys.steps.imageXor',
+  image_aes: 'onboarding.keys.steps.imageAes',
+  verify: 'onboarding.keys.steps.verify',
+}
+
+// Matches failure details from the OS / main process (either UI language) — detection, not UI copy.
+const PERMISSION_RE = /权限|permission|full disk|完全磁盘|eperm|eacces|operation not permitted|administrator rights/i
 
 /** Does a failed step point at a missing system permission (→ guidance dialog)? */
 export function needsPermission(steps: readonly KeyAcquireStep[]): boolean {
@@ -81,7 +115,12 @@ export function applyKeySteps(prev: KeyStates, steps: readonly KeyAcquireStep[])
   for (const s of steps) {
     if (s.id === 'verify') continue
     if (s.status === 'done') next[s.id] = { status: 'acquired', source: 'auto' }
-    else if (s.status === 'failed') next[s.id] = { status: 'failed', error: s.detail ?? '获取失败', needsPermission: permission && PERMISSION_RE.test(s.detail ?? '') }
+    else if (s.status === 'failed')
+      next[s.id] = {
+        status: 'failed',
+        error: s.detail ?? t('onboarding.keys.acquireFailed'),
+        needsPermission: permission && PERMISSION_RE.test(s.detail ?? ''),
+      }
   }
   return next
 }
@@ -102,7 +141,12 @@ export function summariseKeys(keys: KeyStates): AcquireSummary {
 
 export type WizardPage = 'welcome' | 'connect'
 
-export const STEP_LABELS = ['欢迎', '连接微信', '解锁数据', '完成'] as const
+export const STEP_LABELS: readonly MessageKey[] = [
+  'onboarding.steps.welcome',
+  'onboarding.steps.connect',
+  'onboarding.steps.unlock',
+  'onboarding.steps.done',
+]
 
 /**
  * Steps bar (Figma 91:417 bottom): 0 welcome → 1 connect (path + account) → 2 unlock (keys, once the

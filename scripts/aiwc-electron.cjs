@@ -24,8 +24,14 @@ if (process.platform !== 'darwin') {
   }
 
   const plist = readFileSync(join(sourceContents, 'Info.plist'), 'utf8')
-    .replace('<key>CFBundleDisplayName</key>\n\t<string>Electron</string>', '<key>CFBundleDisplayName</key>\n\t<string>AIWC</string>')
-    .replace('<key>CFBundleIdentifier</key>\n\t<string>com.github.Electron</string>', '<key>CFBundleIdentifier</key>\n\t<string>com.aiwc.desktop.dev</string>')
+    .replace(
+      '<key>CFBundleDisplayName</key>\n\t<string>Electron</string>',
+      '<key>CFBundleDisplayName</key>\n\t<string>AIWC</string>',
+    )
+    .replace(
+      '<key>CFBundleIdentifier</key>\n\t<string>com.github.Electron</string>',
+      '<key>CFBundleIdentifier</key>\n\t<string>com.aiwc.desktop.dev</string>',
+    )
     .replace('<key>CFBundleName</key>\n\t<string>Electron</string>', '<key>CFBundleName</key>\n\t<string>AIWC</string>')
   writeFileSync(join(wrapperContents, 'Info.plist'), plist)
 

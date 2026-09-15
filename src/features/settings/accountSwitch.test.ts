@@ -11,7 +11,9 @@ beforeEach(() => {
   __resetConfigStoreForTests()
   useTabsStore.setState({ tabs: [], activeId: null, recentlyClosed: [], lastActiveByFunction: {} })
 })
-afterEach(() => { __setBridgeForTests(undefined) })
+afterEach(() => {
+  __setBridgeForTests(undefined)
+})
 
 function setup(results: { ok: boolean; error?: string }[]) {
   let config = { ...defaultConfig(), account: { wxid: 'old', dbRoot: '/old', verifiedAt: 1 } }

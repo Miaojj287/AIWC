@@ -67,10 +67,3 @@ export function buildUserInput(text: string, mentions: Mention[]): UserInput | u
   if (!trimmed && mentions.length === 0) return undefined
   return { content: [{ type: 'text', text: trimmed }], mentions: [...mentions] }
 }
-
-export const MENTION_KIND_LABEL: Record<Mention['kind'], string> = {
-  session: '会话',
-  file: '文件',
-  contact: '联系人',
-  memory: '记忆',
-}

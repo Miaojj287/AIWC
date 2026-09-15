@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { asCallId, asThreadId, asTurnId, defineTool, newStepId, type ChannelKind, type Event, type PermissionMode, type ToolRisk } from '@aiwc/protocol'
+import {
+  asCallId,
+  asThreadId,
+  asTurnId,
+  defineTool,
+  newStepId,
+  type ChannelKind,
+  type Event,
+  type PermissionMode,
+  type ToolRisk,
+} from '@aiwc/protocol'
 import type { ToolDispatchContext } from '../ports'
 import { createApprovalGate } from './approval'
 import { createHookRunner } from './hooks'
@@ -10,7 +20,12 @@ import { TRUNCATION_MARKER } from './schema'
 
 const EchoInput = z.object({ text: z.string(), n: z.number().int().optional() })
 
-function harness(opts?: { mode?: PermissionMode; allowAlways?: string[]; channel?: ChannelKind; policy?: { defaultTimeoutMs?: number; maxOutputChars?: number } }) {
+function harness(opts?: {
+  mode?: PermissionMode
+  allowAlways?: string[]
+  channel?: ChannelKind
+  policy?: { defaultTimeoutMs?: number; maxOutputChars?: number }
+}) {
   const registry = createToolRegistry()
   const approvals = createApprovalGate()
   const hooks = createHookRunner()
@@ -36,7 +51,10 @@ function harness(opts?: { mode?: PermissionMode; allowAlways?: string[]; channel
       profiles: ['desktop-chat'],
       risk: 'write',
       parallelSafe: false,
-      execute: async (i) => ({ content: `wrote ${i.text}`, artifacts: [{ kind: 'markdown', title: 'note', content: i.text }] }),
+      execute: async (i) => ({
+        content: `wrote ${i.text}`,
+        artifacts: [{ kind: 'markdown', title: 'note', content: i.text }],
+      }),
     }),
   )
   registry.register(
@@ -70,6 +88,21 @@ function harness(opts?: { mode?: PermissionMode; allowAlways?: string[]; channel
     }),
   )
   registry.register(
+    defineTool<{ command: string }>({
+      name: 'shellish',
+      description: 'per-call policy',
+      inputSchema: z.object({ command: z.string() }),
+      profiles: ['desktop-chat', 'cron'],
+      risk: 'write',
+      classify: (i) =>
+        i.command.startsWith('rm -rf')
+          ? { risk: 'destructive', allowKey: 'shell:rm' }
+          : { risk: 'write', allowKey: `shell:${i.command.split(' ').slice(0, 2).join(' ')}` },
+      parallelSafe: false,
+      execute: async (i) => ({ content: `ran ${i.command}` }),
+    }),
+  )
+  registry.register(
     defineTool<Record<string, never>>({
       name: 'thrower',
       description: 't',
@@ -77,7 +110,9 @@ function harness(opts?: { mode?: PermissionMode; allowAlways?: string[]; channel
       profiles: ['desktop-chat'],
       risk: 'read',
       parallelSafe: true,
-      execute: async () => { throw new Error('kaboom') },
+      execute: async () => {
+        throw new Error('kaboom')
+      },
     }),
   )
   registry.register(
@@ -115,7 +150,8 @@ function harness(opts?: { mode?: PermissionMode; allowAlways?: string[]; channel
     signal: ac.signal,
     emit: (e) => events.push(e),
   }
-  const statuses = () => events.filter((e) => e.type === 'tool.call').map((e) => (e as Extract<Event, { type: 'tool.call' }>).status)
+  const statuses = () =>
+    events.filter((e) => e.type === 'tool.call').map((e) => (e as Extract<Event, { type: 'tool.call' }>).status)
   return { router, approvals, hooks, events, statuses, ctx, ac, onAllowAlways }
 }
 
@@ -124,8 +160,12 @@ const call = (toolName: string, input: unknown, id = 'cal_1') => ({ callId: asCa
 describe('router specs', () => {
   it('specs are sorted, converted to JSON Schema and exclude hidden tools; has/risk/parallelSafe/summarize', () => {
     const { router } = harness()
-    expect(router.specs.map((s) => s.name)).toEqual(['echo', 'nuke', 'slow', 'thrower', 'write_note'])
-    expect(router.specs[0]?.inputJsonSchema).toMatchObject({ type: 'object', properties: { text: { type: 'string' } }, required: ['text'] })
+    expect(router.specs.map((s) => s.name)).toEqual(['echo', 'nuke', 'shellish', 'slow', 'thrower', 'write_note'])
+    expect(router.specs[0]?.inputJsonSchema).toMatchObject({
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text'],
+    })
     expect(router.has('hidden_helper')).toBe(true)
     expect(router.has('nope')).toBe(false)
     expect(router.risk('nuke')).toBe<ToolRisk>('destructive')
@@ -160,17 +200,33 @@ describe('dispatch funnel', () => {
     const out = await router.dispatch(call('echo', { text: 'hi' }), ctx)
     expect(out).toMatchObject({ status: 'done', isError: false, result: { content: 'hi' } })
     expect(statuses()).toEqual(['pending', 'running', 'done'])
-    const done = events.find((e) => e.type === 'tool.call' && e.status === 'done') as Extract<Event, { type: 'tool.call' }>
+    const done = events.find((e) => e.type === 'tool.call' && e.status === 'done') as Extract<
+      Event,
+      { type: 'tool.call' }
+    >
     expect(done.summary).toBe('回显 hi')
     expect(done.durationMs).toBeGreaterThanOrEqual(0)
     expect(done.output).toBe('hi')
   })
 
-  it('(c) policy denied (cron channel may not write outside memory) → denied outcome', async () => {
-    const { router, ctx } = harness({ mode: 'bypass', channel: 'cron' })
+  it('(c) policy denied (an Ask-mode cron thread may not write outside memory) → denied outcome, and the model learns why', async () => {
+    const { router, ctx } = harness({ mode: 'ask', channel: 'cron' })
     const out = await router.dispatch(call('write_note', { text: 'x' }), ctx)
     expect(out.status).toBe('denied')
-    expect(out.result.content).toBe(POLICY_DENIED_MESSAGE)
+    expect(out.result.content).toMatch(/权限模式不允许此操作（write_note）/)
+    const bypass = harness({ mode: 'bypass', channel: 'cron' })
+    expect((await bypass.router.dispatch(call('write_note', { text: 'x' }), bypass.ctx)).status).toBe('done')
+    const bot = harness({ mode: 'bypass', channel: 'wechat-ui' })
+    const denied = await bot.router.dispatch(call('write_note', { text: 'x' }), bot.ctx)
+    expect(denied.result.content).toBe(POLICY_DENIED_MESSAGE)
+  })
+
+  it('(c) a granted allow key lets a cron thread run a write; per-call policy drives risk and the key', async () => {
+    const { router, ctx } = harness({ mode: 'ask', channel: 'cron', allowAlways: ['shell:git commit'] })
+    const ok = await router.dispatch(call('shellish', { command: 'git commit -m x' }), ctx)
+    expect(ok.status).toBe('done')
+    const denied = await router.dispatch(call('shellish', { command: 'rm -rf /' }), ctx)
+    expect(denied.status).toBe('denied')
   })
 
   it('(c) ask mode never interrupts a read', async () => {
@@ -283,7 +339,11 @@ describe('dispatch funnel', () => {
 
   it('(f) PostToolUse may replace output', async () => {
     const { router, ctx, hooks } = harness()
-    hooks.add({ name: 'post', events: ['PostToolUse'], run: async (_e, p) => ({ updatedOutput: `[${String(p.output)}]` }) })
+    hooks.add({
+      name: 'post',
+      events: ['PostToolUse'],
+      run: async (_e, p) => ({ updatedOutput: `[${String(p.output)}]` }),
+    })
     const out = await router.dispatch(call('echo', { text: 'x' }), ctx)
     expect(out.result.content).toBe('[x]')
   })
@@ -294,5 +354,88 @@ describe('dispatch funnel', () => {
     expect(out.result.content).toBe('abcdefghij' + TRUNCATION_MARKER(30, 10))
     const short = await router.dispatch(call('echo', { text: 'abc' }, 'cal_2'), ctx)
     expect(short.result.content).toBe('abc')
+  })
+})
+
+describe('总是允许 is offered only where the saved grant is honoured', () => {
+  /** A desktop router whose allow-list really persists what onAllowAlways receives. */
+  function setup(mode: PermissionMode) {
+    const registry = createToolRegistry()
+    registry.register(
+      defineTool<{ to: string }>({
+        name: 'notify_peer',
+        description: 'outward send',
+        inputSchema: z.object({ to: z.string() }),
+        profiles: ['desktop-chat'],
+        risk: 'send',
+        parallelSafe: false,
+        execute: async (i) => ({ content: `sent to ${i.to}` }),
+      }),
+    )
+    registry.register(
+      defineTool<{ text: string }>({
+        name: 'save_note',
+        description: 'local write',
+        inputSchema: z.object({ text: z.string() }),
+        profiles: ['desktop-chat'],
+        risk: 'write',
+        parallelSafe: false,
+        execute: async (i) => ({ content: `saved ${i.text}` }),
+      }),
+    )
+    const approvals = createApprovalGate()
+    const granted: string[] = []
+    const onAllowAlways = vi.fn((key: string) => granted.push(key))
+    const router = createToolRouterFactory({ registry, approvals, hooks: createHookRunner(), services: {} }).build({
+      profile: 'desktop-chat',
+      depth: 0,
+      permissionMode: () => mode,
+      allowAlways: () => granted,
+      onAllowAlways,
+    })
+    const events: Event[] = []
+    const ctx: ToolDispatchContext = {
+      threadId: asThreadId('thr_1'),
+      turnId: asTurnId('trn_1'),
+      stepId: newStepId(),
+      channel: 'desktop',
+      profile: 'desktop-chat',
+      depth: 0,
+      signal: new AbortController().signal,
+      emit: (e) => events.push(e),
+    }
+    /** Dispatches a call that must ask, answers the popover, and reports whether it offered 总是允许. */
+    const answerAsk = async (toolName: string, input: unknown, answer: 'allow_once' | 'allow_always') => {
+      const from = events.length
+      const pending = router.dispatch(call(toolName, input, `cal_${from}`), ctx)
+      const asked = await vi.waitFor(() => {
+        const req = events.slice(from).find((e) => e.type === 'approval.requested')
+        expect(req).toBeDefined()
+        return req as Extract<Event, { type: 'approval.requested' }>
+      })
+      approvals.resolve(asked.approvalId, answer)
+      return { offered: asked.canAllowAlways, outcome: await pending }
+    }
+    return { router, ctx, events, answerAsk, onAllowAlways }
+  }
+
+  it.each(['ask', 'bypass'] as const)('%s mode: a send never offers it and keeps asking', async (mode) => {
+    const { answerAsk, onAllowAlways } = setup(mode)
+    const first = await answerAsk('notify_peer', { to: 'a' }, 'allow_always')
+    expect(first.offered).toBe(false)
+    expect(first.outcome.status).toBe('done')
+    expect(onAllowAlways).not.toHaveBeenCalled()
+    const second = await answerAsk('notify_peer', { to: 'b' }, 'allow_once')
+    expect(second.outcome.status).toBe('done')
+  })
+
+  it('ask mode: a write offers it, and the saved grant runs the next call without asking', async () => {
+    const { router, ctx, events, answerAsk, onAllowAlways } = setup('ask')
+    const first = await answerAsk('save_note', { text: 'a' }, 'allow_always')
+    expect(first.offered).toBe(true)
+    expect(onAllowAlways).toHaveBeenCalledWith('save_note')
+    const from = events.length
+    expect((await router.dispatch(call('save_note', { text: 'b' }, 'cal_next'), ctx)).status).toBe('done')
+    expect(events.slice(from).some((e) => e.type === 'approval.requested')).toBe(false)
   })
 })

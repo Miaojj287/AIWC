@@ -70,7 +70,17 @@ function detectImageExtensionAt(buffer: Buffer, offset: number): string | null {
   if (b(0) === 0x47 && b(1) === 0x49 && b(2) === 0x46) return '.gif'
   if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) return '.png'
   if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return '.jpg'
-  if (b(0) === 0x52 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x46 && b(8) === 0x57 && b(9) === 0x45 && b(10) === 0x42 && b(11) === 0x50) return '.webp'
+  if (
+    b(0) === 0x52 &&
+    b(1) === 0x49 &&
+    b(2) === 0x46 &&
+    b(3) === 0x46 &&
+    b(8) === 0x57 &&
+    b(9) === 0x45 &&
+    b(10) === 0x42 &&
+    b(11) === 0x50
+  )
+    return '.webp'
   if (b(0) === 0x42 && b(1) === 0x4d) return '.bmp'
   return null
 }
@@ -143,7 +153,8 @@ function bytesToInt32LE(bytes: Buffer): number {
 function strictRemovePadding(data: Buffer): Buffer {
   if (!data.length) throw new Error('解密结果为空，填充非法')
   const paddingLength = data[data.length - 1] ?? 0
-  if (paddingLength === 0 || paddingLength > 16 || paddingLength > data.length) throw new Error('PKCS7 填充长度非法（AES 密钥可能不正确）')
+  if (paddingLength === 0 || paddingLength > 16 || paddingLength > data.length)
+    throw new Error('PKCS7 填充长度非法（AES 密钥可能不正确）')
   for (let i = data.length - paddingLength; i < data.length; i += 1) {
     if (data[i] !== paddingLength) throw new Error('PKCS7 填充内容非法（AES 密钥可能不正确）')
   }

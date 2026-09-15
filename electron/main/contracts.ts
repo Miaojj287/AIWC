@@ -2,17 +2,31 @@
  * Types shared across the main process: the composed AppContext handed to the IPC layer, plus the
  * small adapters the root puts around sibling packages (clone start options, substrate host façade).
  */
-import type { CloneStatus, DiaryPipeline, DiaryStore, EventChannel, EventMap, InvokeRes, MemoryStore, ModelClient, ModelSelection, ToastPayload } from '@aiwc/protocol'
+import type {
+  CloneStatus,
+  DiaryPipeline,
+  DiaryStore,
+  EventChannel,
+  EventMap,
+  InvokeRes,
+  MemoryStore,
+  ModelClient,
+  ModelSelection,
+  ToastPayload,
+} from '@aiwc/protocol'
 import type { Kernel, ModelResolver, SkillIndex } from '@aiwc/kernel'
 import type { RelationshipStoreExt } from '@aiwc/memory'
 import type { AutoReplyRecordStore, AutoReplyService, Gateway, UiInjectSender } from '@aiwc/gateway'
 import type { SubstrateClient } from '@aiwc/substrate'
+import type { OfficeService } from '@aiwc/office'
 import type { SubstrateHostInit } from '../hosts/substrateHost'
 import type { AppPaths } from './paths'
 import type { Logger } from './log'
 import type { ConfigService } from './config/configService'
 import type { SecretStore } from './config/secretStore'
 import type { AllowList } from './security/pathAllowList'
+import type { PetService } from './services/petService'
+import type { TaskScheduler } from './services/taskScheduler'
 
 export type { SubstrateClient, SubstrateHostInit }
 
@@ -70,13 +84,22 @@ export interface AppContext {
   diaries: DiaryStore
   diary: DiaryPipeline & { start(): void; stop(): void }
   gateway: Gateway
-  autoReplyMonitor: { refresh(): Promise<void>; triggerNow(sessionId: string): Promise<{ triggered: boolean; reason?: string }> }
+  autoReplyMonitor: {
+    refresh(): Promise<void>
+    triggerNow(sessionId: string): Promise<{ triggered: boolean; reason?: string }>
+  }
   autoReply: AutoReplyService
   /** records.db: rules + records + drafts (owned by @aiwc/gateway). */
   records: AutoReplyRecordStore
   /** Keyboard-injection sender for the 'wechat-ui' channel (DB read-back verified, halts on failure). */
   uiSender: UiInjectSender
   clone: CloneBuilderLike
+  /** AI 宠物: pets folder, bundled pets, codex-pets.net catalog. */
+  pets: PetService
+  /** 飞书 / 钉钉 / 企业微信 through their official CLIs. */
+  office: OfficeService
+  /** 定时任务: prompts run unattended on a schedule. */
+  tasks: TaskScheduler
   allowList: AllowList
   broadcast: Broadcast
   toast(payload: ToastPayload): void

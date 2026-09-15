@@ -1,9 +1,34 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WxSession } from '@aiwc/protocol'
-import { applyClientFilters, buildSessionRows, segmentKind, servableAvatar, sessionMenuSpec, sessionSubtitle } from './sessionListModel'
+import {
+  applyClientFilters,
+  buildSessionRows,
+  listFailureView,
+  segmentKind,
+  servableAvatar,
+  sessionMenuSpec,
+  sessionSubtitle,
+} from './sessionListModel'
 
-const base: WxSession = { id: 'wxid_a', kind: 'dm', title: '张明', unread: 3, pinned: false, muted: false, lastPreview: '好的，明天见', lastSender: '张明' }
-const group: WxSession = { ...base, id: 'g@chatroom', kind: 'group', title: '产品市场群', memberCount: 18, lastSender: '李明', lastPreview: '周会纪要已上传' }
+const base: WxSession = {
+  id: 'wxid_a',
+  kind: 'dm',
+  title: '张明',
+  unread: 3,
+  pinned: false,
+  muted: false,
+  lastPreview: '好的，明天见',
+  lastSender: '张明',
+}
+const group: WxSession = {
+  ...base,
+  id: 'g@chatroom',
+  kind: 'group',
+  title: '产品市场群',
+  memberCount: 18,
+  lastSender: '李明',
+  lastPreview: '周会纪要已上传',
+}
 
 describe('sessionListModel', () => {
   it('maps segments to query kinds', () => {
@@ -47,10 +72,27 @@ describe('sessionListModel', () => {
   })
 
   it('builds the menu in the mandated order with the danger item last', () => {
-    const actions = { setFlags: vi.fn(), openAutoReply: vi.fn(), openClone: vi.fn(), quoteToAgent: vi.fn(), hide: vi.fn(), unhide: vi.fn() }
+    const actions = {
+      setFlags: vi.fn(),
+      openAutoReply: vi.fn(),
+      openClone: vi.fn(),
+      quoteToAgent: vi.fn(),
+      hide: vi.fn(),
+      unhide: vi.fn(),
+    }
     const spec = sessionMenuSpec(base, actions, { mac: true })
     const labels = spec.map((it) => (it.type === 'separator' ? '—' : 'label' in it ? String(it.label) : '?'))
-    expect(labels).toEqual(['置顶会话', '标为已读', '静音通知', '—', '设置自动回复', '克隆此联系人', '引用到 Agent', '—', '从列表隐藏'])
+    expect(labels).toEqual([
+      '置顶会话',
+      '标为已读',
+      '静音通知',
+      '—',
+      '设置自动回复',
+      '克隆此联系人',
+      '引用到 Agent',
+      '—',
+      '从列表隐藏',
+    ])
     const last = spec[spec.length - 1]
     expect(last && 'danger' in last && last.danger).toBe(true)
     const quote = spec.find((it) => 'id' in it && it.id === 'quote')
@@ -62,7 +104,14 @@ describe('sessionListModel', () => {
   })
 
   it('flips labels for pinned / muted sessions, disables clone for groups and read when nothing is unread', () => {
-    const actions = { setFlags: vi.fn(), openAutoReply: vi.fn(), openClone: vi.fn(), quoteToAgent: vi.fn(), hide: vi.fn(), unhide: vi.fn() }
+    const actions = {
+      setFlags: vi.fn(),
+      openAutoReply: vi.fn(),
+      openClone: vi.fn(),
+      quoteToAgent: vi.fn(),
+      hide: vi.fn(),
+      unhide: vi.fn(),
+    }
     const spec = sessionMenuSpec({ ...group, pinned: true, muted: true, unread: 0 }, actions, { mac: false })
     const byId = (id: string) => spec.find((it) => 'id' in it && it.id === id)
     expect(byId('pin')).toMatchObject({ label: '取消置顶' })
@@ -73,10 +122,32 @@ describe('sessionListModel', () => {
   })
 
   it('offers 恢复到列表 instead of hiding when browsing hidden sessions', () => {
-    const actions = { setFlags: vi.fn(), openAutoReply: vi.fn(), openClone: vi.fn(), quoteToAgent: vi.fn(), hide: vi.fn(), unhide: vi.fn() }
+    const actions = {
+      setFlags: vi.fn(),
+      openAutoReply: vi.fn(),
+      openClone: vi.fn(),
+      quoteToAgent: vi.fn(),
+      hide: vi.fn(),
+      unhide: vi.fn(),
+    }
     const spec = sessionMenuSpec(base, actions, { mac: true, hidden: true })
     const last = spec[spec.length - 1]
     expect(last).toMatchObject({ id: 'unhide', label: '恢复到列表' })
     expect(last && 'danger' in last && last.danger).toBeFalsy()
+  })
+})
+
+describe('listFailureView', () => {
+  it('offers to connect only when the substrate reports a missing, locked or failed connection', () => {
+    for (const state of ['no_config', 'locked', 'error'] as const)
+      expect(listFailureView(state, false)).toBe('not_connected')
+    expect(listFailureView('ready', false)).toBe('failed')
+  })
+
+  it('keeps loading while the substrate connects or its status is still on the way', () => {
+    expect(listFailureView('connecting', false)).toBe('waiting')
+    expect(listFailureView(undefined, true)).toBe('waiting')
+    // the status call itself failed: nothing to wait for, show the retryable error
+    expect(listFailureView(undefined, false)).toBe('failed')
   })
 })

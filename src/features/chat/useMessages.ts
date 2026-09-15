@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { ListMessagesQuery, MessageAnchor, WxMessage } from '@aiwc/protocol'
+import { t } from '@/i18n'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
 import { toListQuery, type ChatFilters } from './filters'
 import { mergeMessages, type MergeMode } from './streamModel'
@@ -61,19 +62,41 @@ function reducer(s: MessagesState, a: Action): MessagesState {
     case 'reset':
       return { ...initial, windowKey: s.windowKey + 1 }
     case 'loaded':
-      return { ...s, loading: false, error: undefined, messages: mergeMessages([], a.messages, 'replace'), hasOlder: a.hasOlder, hasNewer: a.hasNewer, lastChange: 'replace', pendingFocusId: a.focusId, windowKey: s.windowKey + 1 }
+      return {
+        ...s,
+        loading: false,
+        error: undefined,
+        messages: mergeMessages([], a.messages, 'replace'),
+        hasOlder: a.hasOlder,
+        hasNewer: a.hasNewer,
+        lastChange: 'replace',
+        pendingFocusId: a.focusId,
+        windowKey: s.windowKey + 1,
+      }
     case 'error':
       return { ...s, loading: false, loadingOlder: false, loadingNewer: false, error: a.error }
     case 'older.start':
       return { ...s, loadingOlder: true }
     case 'older.done':
-      return { ...s, loadingOlder: false, hasOlder: a.hasMore, messages: mergeMessages(s.messages, a.messages, 'prepend'), lastChange: 'prepend' }
+      return {
+        ...s,
+        loadingOlder: false,
+        hasOlder: a.hasMore,
+        messages: mergeMessages(s.messages, a.messages, 'prepend'),
+        lastChange: 'prepend',
+      }
     case 'older.fail':
       return { ...s, loadingOlder: false }
     case 'newer.start':
       return { ...s, loadingNewer: true }
     case 'newer.done':
-      return { ...s, loadingNewer: false, hasNewer: a.hasMore, messages: mergeMessages(s.messages, a.messages, 'append'), lastChange: 'append' }
+      return {
+        ...s,
+        loadingNewer: false,
+        hasNewer: a.hasMore,
+        messages: mergeMessages(s.messages, a.messages, 'append'),
+        lastChange: 'append',
+      }
     case 'newer.fail':
       return { ...s, loadingNewer: false }
     case 'focus.consumed':
@@ -114,7 +137,10 @@ export function useMessages(sessionId: string, filters: ChatFilters, options: Us
   // Serialises windows: a stale response from a previous window / filters is ignored.
   const epoch = useRef(0)
 
-  const baseQuery = useCallback((limit: number): ListMessagesQuery => toListQuery(sessionId, filtersRef.current, limit), [sessionId])
+  const baseQuery = useCallback(
+    (limit: number): ListMessagesQuery => toListQuery(sessionId, filtersRef.current, limit),
+    [sessionId],
+  )
 
   const loadLatest = useCallback(async () => {
     const my = ++epoch.current
@@ -127,7 +153,6 @@ export function useMessages(sessionId: string, filters: ChatFilters, options: Us
       if (my === epoch.current) dispatch({ type: 'error', error: errText(e) })
     }
   }, [baseQuery])
-
 
   const loadOlder = useCallback(() => {
     const s = stateRef.current
@@ -161,25 +186,31 @@ export function useMessages(sessionId: string, filters: ChatFilters, options: Us
       })
   }, [baseQuery])
 
-  const jumpTo = useCallback(
-    async (anchor: MessageAnchor) => {
-      const my = ++epoch.current
-      dispatch({ type: 'reset' })
-      try {
-        const items = await invoke('substrate:getContext', { anchor, radius: CONTEXT_RADIUS })
-        if (my !== epoch.current) return
-        if (items.length === 0) {
-          dispatch({ type: 'error', error: '没有找到这条消息，它可能不在本地索引中' })
-          return
-        }
-        // Whether more exists on either side is unknown until a page comes back empty.
-        dispatch({ type: 'loaded', messages: items, hasOlder: true, hasNewer: true, focusId: items.find((m) => m.id === anchor.messageId)?.id ?? items.find((m) => m.seq === anchor.seq)?.id ?? anchor.messageId })
-      } catch (e) {
-        if (my === epoch.current) dispatch({ type: 'error', error: errText(e) })
+  const jumpTo = useCallback(async (anchor: MessageAnchor) => {
+    const my = ++epoch.current
+    dispatch({ type: 'reset' })
+    try {
+      const items = await invoke('substrate:getContext', { anchor, radius: CONTEXT_RADIUS })
+      if (my !== epoch.current) return
+      if (items.length === 0) {
+        dispatch({ type: 'error', error: t('chat.stream.jumpNotFound') })
+        return
       }
-    },
-    [],
-  )
+      // Whether more exists on either side is unknown until a page comes back empty.
+      dispatch({
+        type: 'loaded',
+        messages: items,
+        hasOlder: true,
+        hasNewer: true,
+        focusId:
+          items.find((m) => m.id === anchor.messageId)?.id ??
+          items.find((m) => m.seq === anchor.seq)?.id ??
+          anchor.messageId,
+      })
+    } catch (e) {
+      if (my === epoch.current) dispatch({ type: 'error', error: errText(e) })
+    }
+  }, [])
 
   // Filters are compared by value so an equal object from tab.state does not reload.
   const filtersKey = JSON.stringify(filters)
@@ -187,7 +218,9 @@ export function useMessages(sessionId: string, filters: ChatFilters, options: Us
     const anchor = optionsRef.current.takePendingJump?.()
     if (anchor) void jumpTo(anchor)
     else void loadLatest()
-    return () => { epoch.current += 1 }
+    return () => {
+      epoch.current += 1
+    }
   }, [loadLatest, jumpTo, filtersKey])
 
   // Drain every page: a single sync notification can contain more than PAGE_SIZE messages.
@@ -222,8 +255,9 @@ export function useMessages(sessionId: string, filters: ChatFilters, options: Us
             if (res.hasMore) request.dirty = true
           }
         } while (request.dirty)
-      } catch { /* A later change notification retries from the visible tail. */ }
-      finally {
+      } catch {
+        /* A later change notification retries from the visible tail. */
+      } finally {
         if (tailRequest.current === request) tailRequest.current = undefined
       }
     })()

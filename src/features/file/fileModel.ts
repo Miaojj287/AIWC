@@ -20,7 +20,28 @@ export function extensionOf(path: string): string {
 }
 
 const MARKDOWN_EXT = new Set(['md', 'markdown', 'mdx'])
-const TEXT_EXT = new Set(['txt', 'json', 'csv', 'log', 'yaml', 'yml', 'toml', 'xml', 'html', 'htm', 'js', 'ts', 'tsx', 'jsx', 'py', 'sh', 'sql', 'ini', 'conf', 'env'])
+const TEXT_EXT = new Set([
+  'txt',
+  'json',
+  'csv',
+  'log',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'html',
+  'htm',
+  'js',
+  'ts',
+  'tsx',
+  'jsx',
+  'py',
+  'sh',
+  'sql',
+  'ini',
+  'conf',
+  'env',
+])
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
 
 export function isMarkdownFile(path: string, mediaType?: string): boolean {
@@ -32,7 +53,13 @@ export function previewKind(path: string, mediaType?: string): PreviewKind {
   if (isMarkdownFile(path, mediaType)) return 'markdown'
   const ext = extensionOf(path)
   if (IMAGE_EXT.has(ext) || mediaType?.startsWith('image/')) return 'image'
-  if (TEXT_EXT.has(ext) || mediaType?.startsWith('text/') || mediaType === 'application/json' || mediaType === 'application/xml') return 'text'
+  if (
+    TEXT_EXT.has(ext) ||
+    mediaType?.startsWith('text/') ||
+    mediaType === 'application/json' ||
+    mediaType === 'application/xml'
+  )
+    return 'text'
   return 'unsupported'
 }
 

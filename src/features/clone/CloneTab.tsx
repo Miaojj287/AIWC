@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CloneStatus, ModelSelection, ThreadId } from '@aiwc/protocol'
+import { useT } from '@/i18n'
 import { EmptyState, toast } from '@/kit'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
 import type { TabRendererProps } from '@/workspace/tabRegistry'
@@ -14,18 +15,18 @@ import { CloneFailedDialog } from './views/CloneDialogs'
 import { IdleView, type CloneParams } from './views/IdleView'
 import { ReadyView } from './views/ReadyView'
 
-export const CLONE_TAB_PREFIX = 'AI 克隆 · '
-export const CLONE_BUILDING_PREFIX = '克隆中 · '
-
 interface CloneTabState {
   range?: TrainingRange
   model?: ModelSelection
   personaThreadId?: string
+  /** Mirrors status 'building' so the registered tab title (index.ts) can switch to 克隆中 · {name}. */
+  building?: boolean
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function CloneTab({ tab, update }: TabRendererProps) {
+  const t = useT()
   const contactId = tab.objectId
   const state = (tab.state ?? {}) as CloneTabState
   const loaded = useInvoke('clone:status', { contactId }, [contactId])
@@ -49,15 +50,26 @@ export function CloneTab({ tab, update }: TabRendererProps) {
     if (status?.state === 'none') setLastMessageCount(status.messageCount)
   }, [status])
 
-  const name = session.data?.title ?? tab.title.replace(CLONE_TAB_PREFIX, '').replace(CLONE_BUILDING_PREFIX, '')
+  // tab.title is the contact name only; the localized prefix comes from the tab registration.
+  const name = session.data?.title ?? tab.title
+  const building = status?.state === 'building'
   useEffect(() => {
-    const next = status?.state === 'building' ? `${CLONE_BUILDING_PREFIX}${name}` : `${CLONE_TAB_PREFIX}${name}`
-    if (next !== tab.title) update({ title: next })
-  }, [status?.state, name, tab.title, update])
+    if (name !== tab.title || building !== Boolean(state.building))
+      update({ title: name, state: { ...tab.state, building } })
+  }, [building, name, state.building, tab.state, tab.title, update])
 
-  const params = useMemo<CloneParams>(() => ({ range: state.range ?? 'year', model: state.model }), [state.range, state.model])
-  const setParams = useCallback((p: CloneParams) => update({ state: { ...tab.state, range: p.range, model: p.model } }), [tab.state, update])
-  const setThreadId = useCallback((id: ThreadId) => update({ state: { ...tab.state, personaThreadId: id } }), [tab.state, update])
+  const params = useMemo<CloneParams>(
+    () => ({ range: state.range ?? 'year', model: state.model }),
+    [state.range, state.model],
+  )
+  const setParams = useCallback(
+    (p: CloneParams) => update({ state: { ...tab.state, range: p.range, model: p.model } }),
+    [tab.state, update],
+  )
+  const setThreadId = useCallback(
+    (id: ThreadId) => update({ state: { ...tab.state, personaThreadId: id } }),
+    [tab.state, update],
+  )
 
   const start = useCallback(
     async (opts: { keepCorrections?: boolean; range?: TrainingRange; model?: ModelSelection } = {}) => {
@@ -65,37 +77,64 @@ export function CloneTab({ tab, update }: TabRendererProps) {
       setFailedDismissed(true)
       try {
         const range = opts.range ?? params.range
-        const model = opts.model ?? params.model ?? (models.data?.[0] ? { providerId: models.data[0].providerId, modelId: models.data[0].modelId } : undefined)
-        await invoke('clone:start', { contactId, range: rangeToQuery(range, Date.now()), model, keepCorrections: opts.keepCorrections })
+        const model =
+          opts.model ??
+          params.model ??
+          (models.data?.[0] ? { providerId: models.data[0].providerId, modelId: models.data[0].modelId } : undefined)
+        await invoke('clone:start', {
+          contactId,
+          range: rangeToQuery(range, Date.now()),
+          model,
+          keepCorrections: opts.keepCorrections,
+        })
       } catch (e) {
-        toast.error('无法开始克隆', { detail: message(e) })
+        toast.error(t('clone.toast.startFailed'), { detail: message(e) })
       } finally {
         setStarting(false)
       }
     },
-    [contactId, params, models.data],
+    [contactId, params, models.data, t],
   )
 
   const cancel = useCallback(async () => {
     try {
       await invoke('clone:cancel', { contactId })
-      toast.info(`已取消克隆「${name}」`)
+      toast.info(t('clone.toast.cancelled', { name }))
     } catch (e) {
-      toast.error('取消失败', { detail: message(e) })
+      toast.error(t('clone.toast.cancelFailed'), { detail: message(e) })
     }
-  }, [contactId, name])
+  }, [contactId, name, t])
 
-  if (loaded.error) return <EmptyState variant="error" title="读取克隆状态失败" description={loaded.error.message} action={{ label: '重试', onClick: loaded.reload }} className="h-full" />
-  if (!status) return <EmptyState variant="loading" title="读取克隆状态…" className="h-full" />
+  if (loaded.error)
+    return (
+      <EmptyState
+        variant="error"
+        title={t('clone.tabView.loadFailed')}
+        description={loaded.error.message}
+        action={{ label: t('common.retry'), onClick: loaded.reload }}
+        className="h-full"
+      />
+    )
+  if (!status) return <EmptyState variant="loading" title={t('clone.tabView.loading')} className="h-full" />
 
   const view = viewFor(status)
   const avatarPath = session.data?.avatarPath
   const localModel = models.data?.find((m) => m.local)
-  const modelLabel = models.data?.find((m) => params.model && m.providerId === params.model.providerId && m.modelId === params.model.modelId)?.label
+  const modelLabel = models.data?.find(
+    (m) => params.model && m.providerId === params.model.providerId && m.modelId === params.model.modelId,
+  )?.label
 
   switch (view) {
     case 'building':
-      return <BuildingView contactId={contactId} name={name} avatarPath={avatarPath} status={status as Extract<CloneStatus, { state: 'building' }>} onCancel={cancel} />
+      return (
+        <BuildingView
+          contactId={contactId}
+          name={name}
+          avatarPath={avatarPath}
+          status={status as Extract<CloneStatus, { state: 'building' }>}
+          onCancel={cancel}
+        />
+      )
     case 'ready':
       return (
         <ReadyView
@@ -115,7 +154,18 @@ export function CloneTab({ tab, update }: TabRendererProps) {
     default:
       return (
         <>
-          <IdleView contactId={contactId} name={name} avatarPath={avatarPath} messageCount={status.state === 'none' ? status.messageCount : lastMessageCount ?? session.data?.indexedCount} params={params} onParamsChange={setParams} onStart={() => void start()} starting={starting} />
+          <IdleView
+            contactId={contactId}
+            name={name}
+            avatarPath={avatarPath}
+            messageCount={
+              status.state === 'none' ? status.messageCount : (lastMessageCount ?? session.data?.indexedCount)
+            }
+            params={params}
+            onParamsChange={setParams}
+            onStart={() => void start()}
+            starting={starting}
+          />
           <CloneFailedDialog
             status={status.state === 'failed' ? status : undefined}
             open={status.state === 'failed' && !failedDismissed}
@@ -133,7 +183,7 @@ export function CloneTab({ tab, update }: TabRendererProps) {
             onWidenRange={() => {
               setParams({ ...params, range: 'all' })
               setFailedDismissed(true)
-              toast.info('训练范围已改为「全部」，确认后重新开始克隆')
+              toast.info(t('clone.toast.rangeWidened'))
             }}
           />
         </>

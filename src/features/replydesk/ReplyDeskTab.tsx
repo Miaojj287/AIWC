@@ -5,6 +5,7 @@
 import { AutoReplyControl } from '@/features/autoreply/AutoReplyControl'
 import { Inbox, OctagonAlert, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { useT } from '@/i18n'
 import { Button, EmptyState, ICON_STROKE, ScrollArea, toast } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
@@ -14,6 +15,7 @@ import { pendingCount, remainingMs } from './reducer'
 import { startReplyDesk, useReplyDeskStore } from './store'
 
 export function ReplyDeskTab(_props: TabRendererProps) {
+  const t = useT()
   const state = useReplyDeskStore((s) => s.state)
   const dispatch = useReplyDeskStore((s) => s.dispatch)
   const reload = useReplyDeskStore((s) => s.reload)
@@ -39,7 +41,7 @@ export function ReplyDeskTab(_props: TabRendererProps) {
       await invoke('autoreply:resume', undefined)
       dispatch({ type: 'resumed' })
     } catch (e) {
-      toast.error('恢复失败', { detail: e instanceof Error ? e.message : String(e) })
+      toast.error(t('replydesk.tab.resumeFailed'), { detail: e instanceof Error ? e.message : String(e) })
     } finally {
       setResuming(false)
     }
@@ -56,8 +58,10 @@ export function ReplyDeskTab(_props: TabRendererProps) {
           <Inbox size={18} strokeWidth={ICON_STROKE} aria-hidden />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-bubble font-medium leading-5 text-fg">回复台</span>
-          <span className="truncate text-caption text-fg-3">{pending > 0 ? `${pending} 条 AI 起草的回复等待你确认` : 'AI 起草的回复会在这里等待你确认后再发送'}</span>
+          <span className="text-bubble font-medium leading-5 text-fg">{t('replydesk.tab.title')}</span>
+          <span className="truncate text-caption text-fg-3">
+            {pending > 0 ? t('replydesk.tab.pendingSubtitle', { n: pending }) : t('replydesk.tab.idleSubtitle')}
+          </span>
         </div>
         <Button
           variant="ghost"
@@ -69,31 +73,64 @@ export function ReplyDeskTab(_props: TabRendererProps) {
             void reload().finally(() => setRefreshing(false))
           }}
         >
-          刷新
+          {t('common.refresh')}
         </Button>
       </header>
       {state.halted ? (
-        <div role="alert" className="flex shrink-0 items-center gap-2.5 border-b border-danger/30 bg-danger/10 px-5 py-2.5 text-caption text-danger">
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2.5 border-b border-danger/30 bg-danger/10 px-5 py-2.5 text-caption text-danger"
+        >
           <OctagonAlert size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate">自动发送已熔断：{state.halted}</span>
-          <Button variant="outline" size="sm" icon={Play} loading={resuming} onClick={() => void resume()} className="border-danger/40 text-danger hover:bg-danger/10">
-            恢复
+          <span className="min-w-0 flex-1 truncate" title={t('replydesk.tab.halted', { reason: state.halted })}>
+            {t('replydesk.tab.halted', { reason: state.halted })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={Play}
+            loading={resuming}
+            onClick={() => void resume()}
+            className="border-danger/40 text-danger hover:bg-danger/10"
+          >
+            {t('replydesk.tab.resume')}
           </Button>
         </div>
       ) : null}
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 px-5 py-4">
           <AutoReplyControl />
-          {Object.entries(state.generating ?? {}).map(([id, name]) => <div key={id} role="status" className="rounded-card border border-line-6 p-4 text-caption text-fg-2">正在为「{name}」生成候选回复…</div>)}
+          {Object.entries(state.generating ?? {}).map(([id, name]) => (
+            <div key={id} role="status" className="rounded-card border border-line-6 p-4 text-caption text-fg-2">
+              {t('replydesk.tab.generating', { name })}
+            </div>
+          ))}
           {!state.loaded ? (
-            <EmptyState variant="loading" title="读取待确认回复…" />
+            <EmptyState variant="loading" title={t('replydesk.tab.loading')} />
           ) : state.error && state.drafts.length === 0 ? (
-            <EmptyState variant="error" title="读取失败" description={state.error} action={{ label: '重试', onClick: () => void reload() }} />
+            <EmptyState
+              variant="error"
+              title={t('replydesk.tab.loadFailed')}
+              description={state.error}
+              action={{ label: t('common.retry'), onClick: () => void reload() }}
+            />
           ) : state.drafts.length === 0 && !Object.keys(state.generating ?? {}).length ? (
-            <EmptyState variant="empty" icon={Inbox} title="没有待确认的回复" description="Agent 起草的回复，以及暂缓或发送失败的自动回复，会出现在这里" />
+            <EmptyState
+              variant="empty"
+              icon={Inbox}
+              title={t('replydesk.tab.emptyTitle')}
+              description={t('replydesk.tab.emptyDescription')}
+            />
           ) : (
             state.drafts.map((d) => (
-              <DraftCard key={d.id} draft={d} primary={d.id === primaryDraftId} remainingMs={remainingMs(state, d, now)} countdownTotalMs={countdownMs} onDismiss={(id) => dispatch({ type: 'dismiss', draftId: id })} />
+              <DraftCard
+                key={d.id}
+                draft={d}
+                primary={d.id === primaryDraftId}
+                remainingMs={remainingMs(state, d, now)}
+                countdownTotalMs={countdownMs}
+                onDismiss={(id) => dispatch({ type: 'dismiss', draftId: id })}
+              />
             ))
           )}
         </div>

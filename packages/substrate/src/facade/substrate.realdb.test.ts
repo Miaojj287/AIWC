@@ -23,14 +23,33 @@ run('full substrate path (reader → mirror → facade → sync)', () => {
     console.log('SYNC:', JSON.stringify(sync.totals ?? {}), 'phase:', sync.phase)
     const sessions = await facade.listSessions({ limit: 5, kind: 'all' })
     console.log('FACADE sessions total:', sessions.total, 'returned:', sessions.items.length)
-    console.log(JSON.stringify(sessions.items.slice(0, 4).map(s => ({ kind: s.kind, title: s.title, preview: (s.lastPreview||'').slice(0,24), unread: s.unread })), null, 1))
-    const first = sessions.items.find(s => s.kind === 'dm') ?? sessions.items[0]
+    console.log(
+      JSON.stringify(
+        sessions.items.slice(0, 4).map((s) => ({
+          kind: s.kind,
+          title: s.title,
+          preview: (s.lastPreview || '').slice(0, 24),
+          unread: s.unread,
+        })),
+        null,
+        1,
+      ),
+    )
+    const first = sessions.items.find((s) => s.kind === 'dm') ?? sessions.items[0]
     if (first) {
       const msgs = await facade.listMessages({ sessionId: first.id, limit: 5 })
       console.log('FACADE messages for', first.title, '->', msgs.items.length)
       // FTS search over the mirror
-      const hits = await facade.search({ query: (msgs.items[0]?.text || '你好').slice(0, 2), limit: 3, mode: 'keyword' })
-      console.log('FACADE search hits:', hits.length, hits.slice(0,2).map(h => (h.snippet||'').slice(0,30)))
+      const hits = await facade.search({
+        query: (msgs.items[0]?.text || '你好').slice(0, 2),
+        limit: 3,
+        mode: 'keyword',
+      })
+      console.log(
+        'FACADE search hits:',
+        hits.length,
+        hits.slice(0, 2).map((h) => (h.snippet || '').slice(0, 30)),
+      )
     }
     await facade.close()
     expect(sessions.total).toBeGreaterThan(0)

@@ -1,6 +1,8 @@
 /**
  * ObjectList body for the AI 克隆 rail function (DESIGN-SPEC §4): dm contacts with clone status on the
  * second line; context menu differs per status. Figma 144:415 (left), board 153:415 ①.
+ * 开始 / 重试 only open the clone Tab, whose confirm page says where the data goes and picks range and
+ * model (CLAUDE.md §6); 取消克隆 asks the same question as the progress card.
  */
 import { Bot, Ellipsis, Eye, MessageSquare, Quote, RefreshCw, Reply, Trash, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -25,110 +27,160 @@ import {
   type MenuSpec,
 } from '@/kit'
 import { runCommand } from '@/app/commands'
+import { useT, type MessageKey } from '@/i18n'
 import { formatTime } from '@/platform/format'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
 import type { ObjectListProps } from '@/shell/objectListRegistry'
 import { servableAvatar } from '@/shell/objectList/sessionListModel'
 import { useShellStore } from '@/shell/shellStore'
-import { cloneStatusLine, filterContacts, readyCount, type CloneListEntry, type CloneSegment } from './cloneView'
+import {
+  cloneStatusLine,
+  filterContacts,
+  progressPercent,
+  readyCount,
+  type CloneListEntry,
+  type CloneSegment,
+} from './cloneView'
 import { deleteImpactText } from './profileModel'
+import { CancelCloneDialog } from './views/CloneDialogs'
 
-export const CLONE_SEGMENTS: ReadonlyArray<{ id: CloneSegment; label: string }> = [
-  { id: 'all', label: '全部' },
-  { id: 'ready', label: '已克隆' },
+export const CLONE_SEGMENTS: ReadonlyArray<{ id: CloneSegment; labelKey: MessageKey }> = [
+  { id: 'all', labelKey: 'common.all' },
+  { id: 'ready', labelKey: 'clone.list.segments.ready' },
 ]
 
 const TONE_CLASS = { ok: 'text-ok', accent: 'text-accent', danger: 'text-danger', neutral: 'text-fg-3' } as const
 const DOT_CLASS = { ok: 'bg-ok', accent: 'bg-accent', danger: 'bg-danger', neutral: 'bg-fg-3' } as const
 
 export function ContactList({ query, activeObjectId }: ObjectListProps) {
+  const t = useT()
   const segmentId = useShellStore((s) => s.listSegment)
   const setSegment = useShellStore((s) => s.setListSegment)
   const segment: CloneSegment = segmentId === 'ready' ? 'ready' : 'all'
   const list = useInvoke('clone:list', undefined, [])
   const [live, setLive] = useState<Record<string, CloneStatus>>({})
   const [deleteTarget, setDeleteTarget] = useState<CloneListEntry | null>(null)
+  /** The build the 取消克隆 dialog is about; `startedAt` keeps it from reopening for a later build. */
+  const [cancelTarget, setCancelTarget] = useState<{ entry: CloneListEntry; startedAt: number } | null>(null)
 
   useBridgeEvent('clone:status', (e) => setLive((m) => ({ ...m, [e.contactId]: e.status })))
   useEffect(() => setLive({}), [list.data])
 
-  const entries = useMemo<CloneListEntry[]>(() => {
-    const merged = (list.data ?? []).map((e) => ({ ...e, status: live[e.contactId] ?? e.status }))
-    return filterContacts(merged, query, segment).sort((a, b) => (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0))
-  }, [list.data, live, query, segment])
+  const merged = useMemo<CloneListEntry[]>(
+    () => (list.data ?? []).map((e) => ({ ...e, status: live[e.contactId] ?? e.status })),
+    [list.data, live],
+  )
+  const entries = useMemo<CloneListEntry[]>(
+    () => filterContacts(merged, query, segment).sort((a, b) => (b.lastContactAt ?? 0) - (a.lastContactAt ?? 0)),
+    [merged, query, segment],
+  )
   const total = list.data?.length ?? 0
-  const ready = readyCount((list.data ?? []).map((e) => ({ ...e, status: live[e.contactId] ?? e.status })))
-
+  const ready = readyCount(merged)
+  // The dialog follows the live status: it closes by itself once that build finishes or fails.
+  const cancelStatus = cancelTarget
+    ? merged.find((e) => e.contactId === cancelTarget.entry.contactId)?.status
+    : undefined
+  const cancelProgress =
+    cancelStatus?.state === 'building' && cancelStatus.progress.startedAt === cancelTarget?.startedAt
+      ? cancelStatus.progress
+      : undefined
 
   const open = (e: CloneListEntry) => runCommand('tab.openClone', { contactId: e.contactId, title: e.displayName })
-
-  const start = async (e: CloneListEntry) => {
-    try {
-      await invoke('clone:start', { contactId: e.contactId })
-      open(e)
-    } catch (err) {
-      toast.error('无法开始克隆', { detail: err instanceof Error ? err.message : String(err) })
-    }
-  }
 
   const cancel = async (e: CloneListEntry) => {
     try {
       await invoke('clone:cancel', { contactId: e.contactId })
-      toast.info(`已取消克隆「${e.displayName}」`)
+      toast.info(t('clone.toast.cancelled', { name: e.displayName }))
     } catch (err) {
-      toast.error('取消克隆失败', { detail: err instanceof Error ? err.message : String(err) })
+      toast.error(t('clone.toast.cancelCloneFailed'), { detail: err instanceof Error ? err.message : String(err) })
     }
   }
 
   const sync = async () => {
     try {
       const res = await invoke('substrate:sync', {})
-      if (res.phase === 'error' && res.error) toast.error('同步失败', { detail: res.error })
-      else toast.success('已开始同步微信数据')
+      if (res.phase === 'error' && res.error) toast.error(t('clone.list.syncFailed'), { detail: res.error })
+      else toast.success(t('clone.list.syncStarted'))
       list.reload()
     } catch (err) {
-      toast.error('同步失败', { detail: err instanceof Error ? err.message : String(err) })
+      toast.error(t('clone.list.syncFailed'), { detail: err instanceof Error ? err.message : String(err) })
     }
   }
 
   const remove = async (e: CloneListEntry) => {
     try {
       const res = await invoke('clone:delete', { contactId: e.contactId })
-      toast.success(`已删除「${e.displayName}」的分身`, { detail: res.affectedRules.length ? `${res.affectedRules.length} 条自动回复规则已改为默认助理` : undefined })
+      toast.success(t('clone.toast.deleted', { name: e.displayName }), {
+        detail: res.affectedRules.length ? t('clone.list.rulesReset', { n: res.affectedRules.length }) : undefined,
+      })
       list.reload()
     } catch (err) {
-      toast.error('删除失败', { detail: err instanceof Error ? err.message : String(err) })
+      toast.error(t('clone.toast.deleteFailed'), { detail: err instanceof Error ? err.message : String(err) })
     }
   }
 
   const menuFor = (e: CloneListEntry): MenuSpec => {
     const common: MenuSpec = [
-      { id: 'chat', label: '查看聊天记录', icon: MessageSquare, onSelect: () => runCommand('tab.openChat', { sessionId: e.contactId, title: e.displayName }) },
-      { id: 'quote', label: '引用到 Agent', icon: Quote, onSelect: () => runCommand('agent.quote', { kind: 'contact', id: e.contactId, label: e.displayName }) },
+      {
+        id: 'chat',
+        label: t('clone.list.menu.viewChat'),
+        icon: MessageSquare,
+        onSelect: () => runCommand('tab.openChat', { sessionId: e.contactId, title: e.displayName }),
+      },
+      {
+        id: 'quote',
+        label: t('clone.list.menu.quote'),
+        icon: Quote,
+        onSelect: () => runCommand('agent.quote', { kind: 'contact', id: e.contactId, label: e.displayName }),
+      },
     ]
     switch (e.status.state) {
       case 'ready':
         return [
-          { id: 'talk', label: '和分身聊聊', icon: Bot, onSelect: () => open(e) },
-          { id: 'profile', label: '查看人格画像', icon: Eye, onSelect: () => open(e) },
-          { id: 'autoreply', label: '用于自动回复…', icon: Reply, onSelect: () => runCommand('tab.openAutoReply', { sessionId: e.contactId, title: e.displayName }) },
+          { id: 'talk', label: t('clone.actions.talk'), icon: Bot, onSelect: () => open(e) },
+          { id: 'profile', label: t('clone.list.menu.viewProfile'), icon: Eye, onSelect: () => open(e) },
+          {
+            id: 'autoreply',
+            label: t('clone.list.menu.useForAutoReply'),
+            icon: Reply,
+            onSelect: () => runCommand('tab.openAutoReply', { sessionId: e.contactId, title: e.displayName }),
+          },
           { type: 'separator' },
           ...common,
           { type: 'separator' },
-          { id: 'reclone', label: '重新克隆', icon: RefreshCw, onSelect: () => open(e) },
-          { id: 'delete', label: '删除克隆', icon: Trash, danger: true, onSelect: () => setDeleteTarget(e) },
+          { id: 'reclone', label: t('clone.actions.reclone'), icon: RefreshCw, onSelect: () => open(e) },
+          {
+            id: 'delete',
+            label: t('clone.list.menu.delete'),
+            icon: Trash,
+            danger: true,
+            onSelect: () => setDeleteTarget(e),
+          },
         ]
-      case 'building':
+      case 'building': {
+        const { startedAt } = e.status.progress
         return [
-          { id: 'progress', label: '查看进度', icon: Eye, onSelect: () => open(e) },
+          { id: 'progress', label: t('clone.list.menu.viewProgress'), icon: Eye, onSelect: () => open(e) },
           { type: 'separator' },
           ...common,
           { type: 'separator' },
-          { id: 'cancel', label: '取消克隆', icon: X, danger: true, onSelect: () => void cancel(e) },
+          {
+            id: 'cancel',
+            label: t('clone.actions.cancel'),
+            icon: X,
+            danger: true,
+            onSelect: () => setCancelTarget({ entry: e, startedAt }),
+          },
         ]
+      }
       default:
         return [
-          { id: 'start', label: e.status.state === 'failed' ? '重试克隆' : '开始克隆', icon: Bot, onSelect: () => void start(e) },
+          {
+            id: 'start',
+            label: e.status.state === 'failed' ? t('clone.list.menu.retry') : t('clone.list.menu.start'),
+            icon: Bot,
+            onSelect: () => open(e),
+          },
           { type: 'separator' },
           ...common,
         ]
@@ -136,16 +188,28 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
   }
 
   if (list.loading && !list.data) return <SkeletonListRows rows={6} className="px-2.5 py-2" />
-  if (list.error) return <EmptyState compact variant="error" title="加载联系人失败" description={list.error.message} action={{ label: '重试', onClick: list.reload }} />
+  if (list.error)
+    return (
+      <EmptyState
+        compact
+        variant="error"
+        title={t('clone.list.loadFailed')}
+        description={list.error.message}
+        action={{ label: t('common.retry'), onClick: list.reload }}
+      />
+    )
   if (total === 0) {
     return (
       <EmptyState
         compact
         variant="empty"
-        title="还没有可克隆的联系人"
-        description="AI 克隆只支持单聊联系人。连接微信并完成一次同步后，联系人会出现在这里。"
-        action={{ label: '立即同步', onClick: () => void sync() }}
-        secondaryAction={{ label: '去连接微信', onClick: () => runCommand('tab.openSettings', { page: 'account' }) }}
+        title={t('clone.list.empty')}
+        description={t('clone.list.emptyHint')}
+        action={{ label: t('clone.list.syncNow'), onClick: () => void sync() }}
+        secondaryAction={{
+          label: t('clone.list.connectWechat'),
+          onClick: () => runCommand('tab.openSettings', { page: 'account' }),
+        }}
       />
     )
   }
@@ -154,18 +218,28 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
       <EmptyState
         compact
         variant="no-results"
-        title={query ? `没有匹配「${query}」的联系人` : '还没有已克隆的联系人'}
-        description={query ? '只显示单聊联系人，群聊不可克隆' : `共 ${total} 位联系人可以克隆，切到「全部」挑一位开始`}
-        action={segment !== 'all' ? { label: '查看全部联系人', onClick: () => setSegment(null) } : undefined}
-        secondaryAction={query ? { label: '清空搜索', onClick: () => useShellStore.getState().setListQuery('') } : undefined}
+        title={query ? t('clone.list.noMatch', { query }) : t('clone.list.noneCloned')}
+        description={query ? t('clone.list.dmOnly') : t('clone.list.pickFromAll')}
+        action={segment !== 'all' ? { label: t('clone.list.viewAll'), onClick: () => setSegment(null) } : undefined}
+        secondaryAction={
+          query
+            ? { label: t('clone.list.clearSearch'), onClick: () => useShellStore.getState().setListQuery('') }
+            : undefined
+        }
       />
     )
   }
 
   return (
-    <div role="list" aria-label="联系人" className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-1.5">
+    <div
+      role="list"
+      aria-label={t('clone.list.ariaLabel')}
+      className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-1.5"
+    >
       <div className="flex items-center px-2.5 pb-1 text-micro text-fg-3">
-        <span>{segment === 'ready' ? `已克隆 ${ready} 位` : `共 ${total} 位联系人 · 已克隆 ${ready} 位`}</span>
+        <span>
+          {segment === 'ready' ? t('clone.list.countReady', { n: ready }) : t('clone.list.countAll', { total, ready })}
+        </span>
       </div>
       {entries.map((e) => {
         const line = cloneStatusLine(e.status, e.messageCount)
@@ -178,9 +252,16 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
                 leading={<Avatar id={e.contactId} name={e.displayName} src={servableAvatar(e.avatarPath)} />}
                 title={e.displayName}
                 subtitle={
-                  <span className={cn('flex items-center gap-1.5 truncate', TONE_CLASS[line.tone])}>
-                    {e.status.state === 'ready' || e.status.state === 'building' ? <span aria-hidden className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_CLASS[line.tone])} /> : null}
-                    <span className="truncate">{line.text}</span>
+                  <span className={cn('flex min-w-0 items-center gap-1.5', TONE_CLASS[line.tone])}>
+                    {e.status.state === 'ready' || e.status.state === 'building' ? (
+                      <span
+                        aria-hidden
+                        className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_CLASS[line.tone])}
+                      />
+                    ) : null}
+                    <span className="truncate" title={line.text}>
+                      {line.text}
+                    </span>
                   </span>
                 }
                 meta={formatTime(e.lastContactAt)}
@@ -189,7 +270,7 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
                 hoverActions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <IconButton size="sm" icon={Ellipsis} label="更多操作" />
+                      <IconButton size="sm" icon={Ellipsis} label={t('clone.list.moreActions')} />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
                       <DropdownMenuItems items={spec} />
@@ -207,12 +288,22 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
       <DangerDialog
         open={deleteTarget !== null}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={`删除「${deleteTarget?.displayName ?? ''}」的分身？`}
+        title={t('clone.deleteDialog.title', { name: deleteTarget?.displayName ?? '' })}
         description={deleteImpactText()}
         onConfirm={async () => {
           const t = deleteTarget
           setDeleteTarget(null)
           if (t) await remove(t)
+        }}
+      />
+      <CancelCloneDialog
+        open={cancelProgress !== undefined}
+        onOpenChange={(o) => !o && setCancelTarget(null)}
+        percent={cancelProgress ? progressPercent(cancelProgress) : 0}
+        onConfirm={() => {
+          const target = cancelTarget
+          setCancelTarget(null)
+          if (target) void cancel(target.entry)
         }}
       />
     </div>

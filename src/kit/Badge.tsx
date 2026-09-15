@@ -9,7 +9,7 @@ import { ICON_STROKE, type IconComponent } from './icon'
  * Neutral has no colour of its own: it uses the grey overlay scale (line-8 ground + line-16 border).
  */
 export const badgeVariants = cva(
-  'inline-flex h-[18px] shrink-0 items-center gap-1 whitespace-nowrap rounded-chip border px-[7px] text-micro font-medium leading-none',
+  'inline-flex h-[18px] max-w-[160px] shrink-0 items-center gap-1 whitespace-nowrap rounded-chip border px-[7px] text-micro font-medium leading-none',
   {
     variants: {
       tone: {
@@ -44,12 +44,17 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement>, VariantProp
 
 export function Badge({ tone, icon: Icon, dot = false, className, children, ...rest }: BadgeProps) {
   if (dot) {
-    return <span className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_TONE[tone ?? 'neutral'], className)} {...rest} />
+    return (
+      <span
+        className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_TONE[tone ?? 'neutral'], className)}
+        {...rest}
+      />
+    )
   }
   return (
     <span className={cn(badgeVariants({ tone }), className)} {...rest}>
-      {Icon ? <Icon size={10} strokeWidth={ICON_STROKE} aria-hidden /> : null}
-      {children}
+      {Icon ? <Icon size={10} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" /> : null}
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   )
 }

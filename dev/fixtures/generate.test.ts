@@ -11,7 +11,9 @@ describe('demo dataset generator', () => {
     const again = generateDataset({ seed: DEFAULT_SEED, now: NOW })
     expect(again.account.wxid).toBe(fixture.account.wxid)
     expect(again.sessions.slice(0, 5).map((s) => s.id)).toEqual(fixture.sessions.slice(0, 5).map((s) => s.id))
-    expect(again.contacts.slice(0, 5).map((c) => c.username)).toEqual(fixture.contacts.slice(0, 5).map((c) => c.username))
+    expect(again.contacts.slice(0, 5).map((c) => c.username)).toEqual(
+      fixture.contacts.slice(0, 5).map((c) => c.username),
+    )
     expect(again.messages.slice(0, 5).map((m) => m.id)).toEqual(fixture.messages.slice(0, 5).map((m) => m.id))
     expect(JSON.stringify(again)).toBe(JSON.stringify(fixture))
   })
@@ -19,7 +21,9 @@ describe('demo dataset generator', () => {
   it('changes with the seed', () => {
     const other = generateDataset({ seed: DEFAULT_SEED + 1, now: NOW })
     expect(other.account.wxid).not.toBe(fixture.account.wxid)
-    expect(other.contacts.slice(0, 5).map((c) => c.username)).not.toEqual(fixture.contacts.slice(0, 5).map((c) => c.username))
+    expect(other.contacts.slice(0, 5).map((c) => c.username)).not.toEqual(
+      fixture.contacts.slice(0, 5).map((c) => c.username),
+    )
   })
 
   it('has the requested shape', () => {
@@ -48,7 +52,8 @@ describe('demo dataset generator', () => {
       }
     }
     expect(new Set(fixture.messages.map((m) => m.id)).size).toBe(fixture.messages.length)
-    for (const m of fixture.messages) expect(m.anchor).toEqual({ sessionId: m.sessionId, messageId: m.id, seq: m.seq, createdAt: m.createdAt })
+    for (const m of fixture.messages)
+      expect(m.anchor).toEqual({ sessionId: m.sessionId, messageId: m.id, seq: m.seq, createdAt: m.createdAt })
   })
 
   it('spans the last 90 days with a realistic kind mix', () => {
@@ -78,7 +83,12 @@ describe('demo dataset generator', () => {
     for (const c of fixture.contacts) expect(FORBIDDEN_NAMES.has(c.nickname)).toBe(false)
     const groupSenders = fixture.sessions
       .filter((s) => s.kind === 'group')
-      .map((s) => new Set(fixture.messages.filter((m) => m.sessionId === s.id && m.senderId !== 'system').map((m) => m.senderId)).size)
+      .map(
+        (s) =>
+          new Set(
+            fixture.messages.filter((m) => m.sessionId === s.id && m.senderId !== 'system').map((m) => m.senderId),
+          ).size,
+      )
     for (const n of groupSenders) expect(n).toBeGreaterThanOrEqual(3)
   })
 })

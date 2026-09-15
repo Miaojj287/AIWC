@@ -59,7 +59,12 @@ describe('secretStore', () => {
   it('returns null (not throw) when a ciphertext cannot be decrypted', () => {
     const file = join(dir, 'secrets.bin')
     createSecretStore({ file, safeStorage: fakeSafeStorage() }).set('k', 'v')
-    const broken: SafeStorageLike = { ...fakeSafeStorage(), decryptString: () => { throw new Error('keychain changed') } }
+    const broken: SafeStorageLike = {
+      ...fakeSafeStorage(),
+      decryptString: () => {
+        throw new Error('keychain changed')
+      },
+    }
     expect(createSecretStore({ file, safeStorage: broken }).reveal('k')).toBeNull()
   })
 

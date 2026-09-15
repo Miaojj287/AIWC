@@ -57,9 +57,14 @@ export function decryptFirstPageBody(page: Buffer, key: Buffer): Buffer | null {
 export function looksLikeSqliteHeaderBody(body: Buffer): boolean {
   if (body.length < 8) return false
   return (
-    body[0] === 0x10 && body[1] === 0x00 && // page size 4096
-    (body[2] === 1 || body[2] === 2) && (body[3] === 1 || body[3] === 2) && // write/read versions
-    body[4] === SQLCIPHER_RESERVED_SIZE && body[5] === 0x40 && body[6] === 0x20 && body[7] === 0x20
+    body[0] === 0x10 &&
+    body[1] === 0x00 && // page size 4096
+    (body[2] === 1 || body[2] === 2) &&
+    (body[3] === 1 || body[3] === 2) && // write/read versions
+    body[4] === SQLCIPHER_RESERVED_SIZE &&
+    body[5] === 0x40 &&
+    body[6] === 0x20 &&
+    body[7] === 0x20
   )
 }
 

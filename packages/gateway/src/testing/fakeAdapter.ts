@@ -2,7 +2,15 @@
  * In-memory PlatformAdapter for unit tests (no network / no UI). Exposed from the barrel so other
  * packages' tests and the web-only mock bridge can reuse it.
  */
-import type { AdapterState, ChannelKind, MessageEvent, PlatformAdapter, SendRequest, SendResult, SessionSource } from '@aiwc/protocol'
+import type {
+  AdapterState,
+  ChannelKind,
+  MessageEvent,
+  PlatformAdapter,
+  SendRequest,
+  SendResult,
+  SessionSource,
+} from '@aiwc/protocol'
 import { createEmitter } from '../core/emitter'
 import type { AdapterExtras } from '../core/gateway'
 
@@ -15,7 +23,10 @@ export interface FakeAdapter extends PlatformAdapter, AdapterExtras {
   emitQr(dataUrl: string): void
 }
 
-export function createFakeAdapter(channel: ChannelKind, opts: { mentionPatterns?: readonly string[]; supportsQr?: boolean } = {}): FakeAdapter {
+export function createFakeAdapter(
+  channel: ChannelKind,
+  opts: { mentionPatterns?: readonly string[]; supportsQr?: boolean } = {},
+): FakeAdapter {
   const messages = createEmitter<MessageEvent>()
   const states = createEmitter<{ state: AdapterState; detail?: string }>()
   const qr = createEmitter<string>()
@@ -55,7 +66,9 @@ export function createFakeAdapter(channel: ChannelKind, opts: { mentionPatterns?
   return adapter
 }
 
-export function fakeEvent(over: Partial<MessageEvent> & { source?: Partial<SessionSource> } = {}): MessageEvent {
+export function fakeEvent(
+  over: Partial<Omit<MessageEvent, 'source'>> & { source?: Partial<SessionSource> } = {},
+): MessageEvent {
   const source: SessionSource = {
     channel: 'wechat-ilink',
     peerId: 'u_alice',

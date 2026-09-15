@@ -37,7 +37,8 @@ export const iconButtonVariants = cva(
 const ICON_BY_SIZE = { default: 15, sm: 14, xs: 12 } as const
 
 export interface IconButtonProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label'>,
+  extends
+    Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label'>,
     VariantProps<typeof iconButtonVariants> {
   icon: IconComponent
   /** Accessible name — required, there is no visible text. */
@@ -50,7 +51,19 @@ export interface IconButtonProps
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { icon: Icon, label, active = false, loading = false, size, tone, iconSize, disabled, className, type = 'button', ...rest },
+  {
+    icon: Icon,
+    label,
+    active = false,
+    loading = false,
+    size,
+    tone,
+    iconSize,
+    disabled,
+    className,
+    type = 'button',
+    ...rest
+  },
   ref,
 ) {
   const resolvedIcon = iconSize ?? ICON_BY_SIZE[size ?? 'default']

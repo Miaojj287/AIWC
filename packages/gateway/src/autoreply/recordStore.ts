@@ -5,7 +5,16 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { DEFAULT_HISTORY_COUNT, MAX_HISTORY_COUNT, MIN_HISTORY_COUNT, type AutoReplyRecord, type AutoReplyRule, type DraftState, type ReplyDraft, type ReplyRecordStatus } from '@aiwc/protocol'
+import {
+  DEFAULT_HISTORY_COUNT,
+  MAX_HISTORY_COUNT,
+  MIN_HISTORY_COUNT,
+  type AutoReplyRecord,
+  type AutoReplyRule,
+  type DraftState,
+  type ReplyDraft,
+  type ReplyRecordStatus,
+} from '@aiwc/protocol'
 
 export interface RecordQuery {
   sessionId?: string
@@ -93,7 +102,12 @@ export function normaliseStoredRule(input: AutoReplyRule): AutoReplyRule {
     source: raw.source === 'fixed' ? 'fixed' : 'ai',
     fixedText: typeof raw.fixedText === 'string' && raw.fixedText.trim() ? raw.fixedText : undefined,
     prompt: typeof raw.prompt === 'string' && raw.prompt.trim() ? raw.prompt : undefined,
-    historyCount: Number.isFinite(n) ? Math.max(MIN_HISTORY_COUNT, Math.min(MAX_HISTORY_COUNT, n)) : DEFAULT_HISTORY_COUNT,
+    historyCount: Number.isFinite(n)
+      ? Math.max(MIN_HISTORY_COUNT, Math.min(MAX_HISTORY_COUNT, n))
+      : DEFAULT_HISTORY_COUNT,
+    // Rows written before sendMode existed were auto-sending; keep them that way rather than
+    // silently parking their replies behind a click nobody knows about.
+    sendMode: raw.sendMode === 'confirm' ? 'confirm' : 'auto',
     updatedAt: Number(raw.updatedAt) || 0,
     pausedReason: typeof raw.pausedReason === 'string' ? raw.pausedReason : undefined,
   }
@@ -115,17 +129,24 @@ export function createAutoReplyRecordStore(opts: { dbPath: string }): AutoReplyR
     ),
     deleteRule: db.prepare('DELETE FROM rules WHERE session_id = ?'),
     getRecord: db.prepare('SELECT json FROM records WHERE id = ?'),
-    insertRecord: db.prepare('INSERT INTO records (id, rule_id, session_id, at, status, json) VALUES (?, ?, ?, ?, ?, ?)'),
-    updateRecord: db.prepare('UPDATE records SET rule_id = ?, session_id = ?, at = ?, status = ?, json = ? WHERE id = ?'),
+    insertRecord: db.prepare(
+      'INSERT INTO records (id, rule_id, session_id, at, status, json) VALUES (?, ?, ?, ?, ?, ?)',
+    ),
+    updateRecord: db.prepare(
+      'UPDATE records SET rule_id = ?, session_id = ?, at = ?, status = ?, json = ? WHERE id = ?',
+    ),
     countToday: db.prepare("SELECT COUNT(*) AS n FROM records WHERE session_id = ? AND status = 'sent' AND at >= ?"),
     listDraftsAll: db.prepare('SELECT json FROM drafts ORDER BY created_at DESC'),
     getDraft: db.prepare('SELECT json FROM drafts WHERE id = ?'),
-    upsertDraft: db.prepare('INSERT INTO drafts (id, state, created_at, json) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, created_at = excluded.created_at, json = excluded.json'),
+    upsertDraft: db.prepare(
+      'INSERT INTO drafts (id, state, created_at, json) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, created_at = excluded.created_at, json = excluded.json',
+    ),
     deleteDraft: db.prepare('DELETE FROM drafts WHERE id = ?'),
   }
 
   const parseRows = <T>(rows: unknown[]): T[] => rows.map((r) => JSON.parse(String((r as { json: string }).json)) as T)
-  const parseOne = <T>(row: unknown): T | undefined => (row ? (JSON.parse(String((row as { json: string }).json)) as T) : undefined)
+  const parseOne = <T>(row: unknown): T | undefined =>
+    row ? (JSON.parse(String((row as { json: string }).json)) as T) : undefined
 
   const store: AutoReplyRecordStore = {
     listRules() {
@@ -173,7 +194,14 @@ export function createAutoReplyRecordStore(opts: { dbPath: string }): AutoReplyR
       return parseOne<AutoReplyRecord>(stmts.getRecord.get(id))
     },
     addRecord(record) {
-      stmts.insertRecord.run(record.id, record.ruleId, record.sessionId, record.at, record.status, JSON.stringify(record))
+      stmts.insertRecord.run(
+        record.id,
+        record.ruleId,
+        record.sessionId,
+        record.at,
+        record.status,
+        JSON.stringify(record),
+      )
     },
     updateRecord(id, patch) {
       const current = store.getRecord(id)

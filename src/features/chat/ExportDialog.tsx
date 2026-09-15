@@ -4,19 +4,53 @@
  */
 import { Download, Folder } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { FormDialog, FormDialogField, IconButton, Input, Radio, RadioGroup, Select, toast, type SelectOption } from '@/kit'
+import {
+  FormDialog,
+  FormDialogField,
+  IconButton,
+  Input,
+  Radio,
+  RadioGroup,
+  Select,
+  toast,
+  type SelectOption,
+} from '@/kit'
+import { useT, type MessageKey } from '@/i18n'
 import { invoke } from '@/platform/hooks'
 import { openLocalPath } from '@/platform/openExternal'
 import { formatNumber } from '@/platform/format'
-import { computeExportRange, defaultExportMode, isFiltered, rangeLabel, type ChatFilters, type ExportRangeMode } from './filters'
+import {
+  computeExportRange,
+  defaultExportMode,
+  isFiltered,
+  rangeLabel,
+  type ChatFilters,
+  type ExportRangeMode,
+} from './filters'
 
 export type ExportFormat = 'html' | 'markdown' | 'json' | 'excel'
 
-const FORMATS: ReadonlyArray<SelectOption<ExportFormat>> = [
-  { value: 'markdown', label: 'Markdown', description: '纯文本，适合再交给 Agent 或归档' },
-  { value: 'html', label: 'HTML 网页', description: '带样式与媒体的单文件网页' },
-  { value: 'json', label: 'JSON', description: '结构化数据，供程序处理' },
-  { value: 'excel', label: 'Excel 表格', description: '每条消息一行' },
+const FORMATS: ReadonlyArray<{ value: ExportFormat; label: MessageKey; description: MessageKey }> = [
+  {
+    value: 'markdown',
+    label: 'chat.exportDialog.formats.markdown.label',
+    description: 'chat.exportDialog.formats.markdown.description',
+  },
+  {
+    value: 'html',
+    label: 'chat.exportDialog.formats.html.label',
+    description: 'chat.exportDialog.formats.html.description',
+  },
+  {
+    value: 'json',
+    label: 'chat.exportDialog.formats.json.label',
+    description: 'chat.exportDialog.formats.json.description',
+  },
+  {
+    value: 'excel',
+    label: 'chat.exportDialog.formats.excel.label',
+    description: 'chat.exportDialog.formats.excel.description',
+  },
 ]
 
 export interface ExportDialogProps {
@@ -33,27 +67,54 @@ export interface ExportDialogProps {
   initialMode?: ExportRangeMode
 }
 
-export function ExportDialog({ open, onOpenChange, sessionId, sessionTitle, filters, selectedIds, filteredCount, totalCount, initialMode }: ExportDialogProps) {
+export function ExportDialog({
+  open,
+  onOpenChange,
+  sessionId,
+  sessionTitle,
+  filters,
+  selectedIds,
+  filteredCount,
+  totalCount,
+  initialMode,
+}: ExportDialogProps) {
+  const t = useT()
   const [format, setFormat] = useState<ExportFormat>('markdown')
   const [mode, setMode] = useState<ExportRangeMode>('all')
   const [outDir, setOutDir] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const filtered = isFiltered(filters)
+  const formatOptions = useMemo<ReadonlyArray<SelectOption<ExportFormat>>>(
+    () => FORMATS.map((f) => ({ value: f.value, label: t(f.label), description: t(f.description) })),
+    [t],
+  )
 
   useEffect(() => {
     if (open) setMode(initialMode ?? defaultExportMode(selectedIds.size, filters))
   }, [open, initialMode, selectedIds.size, filters])
 
   const options = useMemo(() => {
+    const count = (n: number) => t('chat.exportDialog.messageCount', { n, count: formatNumber(n) })
     const out: Array<{ value: ExportRangeMode; label: string; description?: string }> = []
-    if (filtered) out.push({ value: 'filtered', label: `当前筛选${filteredCount !== undefined ? ` · ${formatNumber(filteredCount)} 条` : ''}`, description: rangeLabel(filters.range) + (filters.senderIds.length ? ` · ${filters.senderIds.length} 位发送者` : '') })
-    if (selectedIds.size > 0) out.push({ value: 'selected', label: `已勾选 · ${formatNumber(selectedIds.size)} 条` })
-    out.push({ value: 'all', label: `全部${totalCount !== undefined ? ` · ${formatNumber(totalCount)} 条` : ''}` })
+    if (filtered)
+      out.push({
+        value: 'filtered',
+        label: `${t('chat.exportDialog.rangeFiltered')}${filteredCount !== undefined ? ` · ${count(filteredCount)}` : ''}`,
+        description:
+          rangeLabel(filters.range) +
+          (filters.senderIds.length ? ` · ${t('chat.exportDialog.senderCount', { n: filters.senderIds.length })}` : ''),
+      })
+    if (selectedIds.size > 0)
+      out.push({ value: 'selected', label: `${t('chat.exportDialog.rangeSelected')} · ${count(selectedIds.size)}` })
+    out.push({ value: 'all', label: `${t('common.all')}${totalCount !== undefined ? ` · ${count(totalCount)}` : ''}` })
     return out
-  }, [filtered, filteredCount, filters, selectedIds.size, totalCount])
+  }, [filtered, filteredCount, filters, selectedIds.size, totalCount, t])
 
   const pickDir = async () => {
-    const dir = await invoke('app:pickDirectory', { title: '选择导出目录', defaultPath: outDir || undefined })
+    const dir = await invoke('app:pickDirectory', {
+      title: t('chat.exportDialog.pickDirTitle'),
+      defaultPath: outDir || undefined,
+    })
     if (dir) setOutDir(dir)
   }
 
@@ -61,11 +122,24 @@ export function ExportDialog({ open, onOpenChange, sessionId, sessionTitle, filt
     setBusy(true)
     try {
       const range = computeExportRange(mode, filters, selectedIds)
-      const res = await invoke('substrate:export', { sessionId, format, from: range.from, to: range.to, messageIds: range.messageIds, outDir: outDir || undefined })
+      const res = await invoke('substrate:export', {
+        sessionId,
+        format,
+        from: range.from,
+        to: range.to,
+        messageIds: range.messageIds,
+        senderIds: range.senderIds,
+        outDir: outDir || undefined,
+      })
       onOpenChange(false)
-      toast.success(`已导出到 ${res.path}`, { action: { label: '打开', onClick: () => void openLocalPath(res.path, '导出文件') } })
+      toast.success(t('chat.exportDialog.done', { path: res.path }), {
+        action: {
+          label: t('common.open'),
+          onClick: () => void openLocalPath(res.path, t('chat.openTarget.exportFile')),
+        },
+      })
     } catch (e) {
-      toast.error(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+      toast.error(t('chat.exportDialog.failed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -76,31 +150,50 @@ export function ExportDialog({ open, onOpenChange, sessionId, sessionTitle, filt
       open={open}
       onOpenChange={onOpenChange}
       icon={Download}
-      title="导出聊天记录"
-      description={`${sessionTitle} · 图片与文件会一并复制到导出目录，全部在本机完成`}
-      submitLabel="导出"
+      title={t('chat.exportDialog.title')}
+      description={t('chat.exportDialog.description', { title: sessionTitle })}
+      submitLabel={t('chat.exportDialog.submit')}
       loading={busy}
       onSubmit={submit}
     >
-      <FormDialogField label="格式">
-        <Select<ExportFormat> options={FORMATS} value={format} onValueChange={setFormat} fullWidth size="lg" aria-label="导出格式" />
+      <FormDialogField label={t('chat.exportDialog.format')}>
+        <Select<ExportFormat>
+          options={formatOptions}
+          value={format}
+          onValueChange={setFormat}
+          fullWidth
+          size="lg"
+          aria-label={t('chat.exportDialog.formatLabel')}
+        />
       </FormDialogField>
-      <FormDialogField label="范围" alignTop>
-        <RadioGroup value={mode} onValueChange={(v) => setMode(v as ExportRangeMode)} aria-label="导出范围" className="pt-1.5">
+      <FormDialogField label={t('chat.exportDialog.range')} alignTop>
+        <RadioGroup
+          value={mode}
+          onValueChange={(v) => setMode(v as ExportRangeMode)}
+          aria-label={t('chat.exportDialog.rangeLabel')}
+          className="pt-1.5"
+        >
           {options.map((o) => (
             <Radio key={o.value} value={o.value} label={o.label} description={o.description} />
           ))}
         </RadioGroup>
       </FormDialogField>
-      <FormDialogField label="保存到">
+      <FormDialogField label={t('chat.exportDialog.saveTo')}>
         <Input
           mono
           readOnly
           value={outDir}
-          placeholder="默认：下载目录"
-          aria-label="导出目录"
+          placeholder={t('chat.exportDialog.defaultDir')}
+          aria-label={t('chat.exportDialog.dirLabel')}
           onClick={() => void pickDir()}
-          trailing={<IconButton size="xs" icon={Folder} label="选择目录" onClick={() => void pickDir()} />}
+          trailing={
+            <IconButton
+              size="xs"
+              icon={Folder}
+              label={t('chat.exportDialog.chooseDir')}
+              onClick={() => void pickDir()}
+            />
+          }
         />
       </FormDialogField>
     </FormDialog>

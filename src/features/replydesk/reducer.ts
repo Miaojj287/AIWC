@@ -3,6 +3,7 @@
  * countdowns for `auto` drafts and the halt latch of the UI-injection channel. Pure reducer.
  */
 import type { ReplyDraft } from '@aiwc/protocol'
+import type { MessageKey } from '@/i18n'
 
 export interface ReplyDeskState {
   generating?: Record<string, string>
@@ -92,4 +93,8 @@ export function remainingMs(state: ReplyDeskState, draft: ReplyDraft, now: numbe
   return undefined
 }
 
-export const MODE_LABEL: Record<ReplyDraft['mode'], string> = { suggest: '建议', confirm: '待确认', auto: '自动发送' }
+export const MODE_LABEL_KEY: Record<ReplyDraft['mode'], MessageKey> = {
+  suggest: 'replydesk.mode.suggest',
+  confirm: 'replydesk.mode.confirm',
+  auto: 'replydesk.mode.auto',
+}

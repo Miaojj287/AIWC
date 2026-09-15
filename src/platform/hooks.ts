@@ -30,7 +30,12 @@ export function invoke<K extends InvokeChannel>(channel: K, req: InvokeReq<K>): 
   return getBridge().then((b) => b.invoke(channel, req))
 }
 
-export function useInvoke<K extends InvokeChannel>(channel: K, req: InvokeReq<K>, deps: DependencyList = [], options: UseInvokeOptions = {}): UseInvokeResult<InvokeRes<K>> {
+export function useInvoke<K extends InvokeChannel>(
+  channel: K,
+  req: InvokeReq<K>,
+  deps: DependencyList = [],
+  options: UseInvokeOptions = {},
+): UseInvokeResult<InvokeRes<K>> {
   const enabled = options.enabled ?? true
   const [data, setData] = useState<InvokeRes<K> | undefined>(undefined)
   const [error, setError] = useState<Error | undefined>(undefined)
@@ -63,6 +68,8 @@ export function useInvoke<K extends InvokeChannel>(channel: K, req: InvokeReq<K>
     return () => {
       cancelled = true
     }
+    // `deps` is the caller's dependency list for `req` (read through reqRef), the same contract as useMemo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel, enabled, tick, ...deps])
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
@@ -76,10 +83,14 @@ export function useBridgeEvent<K extends EventChannel>(channel: K, handler: (pay
   useEffect(() => {
     let off: (() => void) | undefined
     let disposed = false
-    getBridge().then((b) => {
-      if (disposed) return
-      off = b.on(channel, (payload) => handlerRef.current(payload))
-    })
+    getBridge()
+      .then((b) => {
+        if (disposed) return
+        off = b.on(channel, (payload) => handlerRef.current(payload))
+      })
+      .catch(() => {
+        // No bridge means bootstrap already rendered its fatal error (main.tsx); there is nothing to subscribe to.
+      })
     return () => {
       disposed = true
       off?.()

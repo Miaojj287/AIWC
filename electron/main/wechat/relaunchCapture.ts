@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { scanMacDbKey, scanMacDbKeyFromDumps, findWeChatPidSync } from '@aiwc/substrate'
 import type { Logger } from '../log'
+import { t } from '../i18n'
 
 const execFileAsync = promisify(execFile)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -32,10 +33,10 @@ export function createRelaunchCapture(deps: RelaunchCaptureDeps): RelaunchCaptur
     const deadline = Date.now() + budget
 
     try {
-      deps.onStatus?.('正在关闭微信…')
+      deps.onStatus?.(t('main.keys.relaunch.closing'))
       await execFileAsync('/usr/bin/pkill', ['-x', 'WeChat']).catch(() => undefined)
       await sleep(2000)
-      deps.onStatus?.('正在重新启动微信…')
+      deps.onStatus?.(t('main.keys.relaunch.restarting'))
       await execFileAsync('/usr/bin/open', ['-a', 'WeChat']).catch(() => undefined)
 
       let pid = 0
@@ -52,7 +53,7 @@ export function createRelaunchCapture(deps: RelaunchCaptureDeps): RelaunchCaptur
         return undefined
       }
 
-      deps.onStatus?.('微信已重启，正在捕获启动阶段密钥（如停在登录页请扫码并进入任意聊天）…')
+      deps.onStatus?.(t('main.keys.relaunch.capturing'))
       while (Date.now() < deadline) {
         const remaining = Math.max(8_000, deadline - Date.now())
         const live = await scanMacDbKey(pid, sessionDb, deps.nativeDir, Math.min(20_000, remaining))

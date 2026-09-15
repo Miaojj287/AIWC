@@ -30,8 +30,6 @@ export interface RpcStatus {
   status: ServiceStatus
 }
 
-export type RpcMessage = RpcRequest | RpcResponse | RpcEvent | RpcStatus
-
 export const DEFAULT_TIMEOUT_MS = 60_000
 export const SYNC_TIMEOUT_MS = 10 * 60_000
 export const OPEN_TIMEOUT_MS = 5 * 60_000
@@ -91,7 +89,10 @@ export function isRpcStatus(v: unknown): v is RpcStatus {
 
 /** Local-index operations exposed by the facade beyond SubstrateService (backing substrate:setSessionFlags / removeIndex / rebuildIndex). */
 export interface SubstrateExtras {
-  setSessionFlags(sessionId: string, flags: { pinned?: boolean; muted?: boolean; hidden?: boolean; read?: boolean }): Promise<void>
+  setSessionFlags(
+    sessionId: string,
+    flags: { pinned?: boolean; muted?: boolean; hidden?: boolean; read?: boolean },
+  ): Promise<void>
   removeIndex(sessionId: string): Promise<void>
   rebuildIndex(sessionId: string): Promise<void>
 }
@@ -119,12 +120,17 @@ export interface PortLike {
 
 /** Unwrap MessageEvent-shaped envelopes ({ data }) into the payload. */
 export function unwrapPortMessage(ev: unknown): unknown {
-  if (isObject(ev) && 'data' in ev && !('method' in ev) && !('ok' in ev) && !('event' in ev) && !('status' in ev)) return ev.data
+  if (isObject(ev) && 'data' in ev && !('method' in ev) && !('ok' in ev) && !('event' in ev) && !('status' in ev))
+    return ev.data
   return ev
 }
 
 /** Normalise any PortLike into post/onMessage. */
-export function attachPort(port: PortLike): { post(msg: unknown): void; onMessage(cb: (msg: unknown) => void): () => void; close(): void } {
+export function attachPort(port: PortLike): {
+  post(msg: unknown): void
+  onMessage(cb: (msg: unknown) => void): () => void
+  close(): void
+} {
   return {
     post: (msg) => port.postMessage(msg),
     onMessage: (cb) => {

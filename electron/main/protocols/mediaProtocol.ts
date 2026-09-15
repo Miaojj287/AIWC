@@ -21,7 +21,8 @@ export function registerMediaScheme(): void {
   ])
 }
 
-const deny = (status: number, text: string) => new Response(text, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+const deny = (status: number, text: string) =>
+  new Response(text, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } })
 
 export function registerMediaProtocol(deps: { allowList: AllowList; logger: Logger }): void {
   const log = deps.logger.child('media')

@@ -3,13 +3,8 @@
  * group member lists (chatroom_member ⋈ name2id) and best-effort group nicknames.
  */
 import type { WxContact } from '@aiwc/protocol'
-import {
-  CONTACT_FLAG,
-  classifyContactKind,
-  isGroupUsername,
-  pickAvatarUrl,
-  pickDisplayName,
-} from './accountUtils'
+import { isGroupUsername } from '../normalize/kinds'
+import { CONTACT_FLAG, classifyContactKind, pickAvatarUrl, pickDisplayName } from './accountUtils'
 import { coerceRowNumber, decodeBlob, extractXmlValue, type Row } from './rowDecoders'
 import { quoteIdent, type WcdbQuery } from './query'
 
@@ -24,7 +19,17 @@ export interface ContactRecord {
   kind: WxContact['kind'] | null
 }
 
-const CONTACT_COLUMNS = ['username', 'remark', 'nick_name', 'alias', 'flag', 'local_type', 'type', 'big_head_url', 'small_head_url']
+const CONTACT_COLUMNS = [
+  'username',
+  'remark',
+  'nick_name',
+  'alias',
+  'flag',
+  'local_type',
+  'type',
+  'big_head_url',
+  'small_head_url',
+]
 const PAGE = 2000
 
 function toRecord(row: Row): ContactRecord | null {
@@ -109,12 +114,20 @@ export class ContactDirectory {
   /** Load only the contacts needed by a visible session page. */
   preload(usernames: readonly string[]): void {
     if (this.fullyLoaded || !this.contactDbPath || !this.q.tableExists(this.contactDbPath, 'contact')) return
-    const missing = [...new Set(usernames.filter((username) => username && !this.records.has(username) && !this.missingRecords.has(username)))]
+    const missing = [
+      ...new Set(
+        usernames.filter((username) => username && !this.records.has(username) && !this.missingRecords.has(username)),
+      ),
+    ]
     const cols = this.columns().map(quoteIdent).join(', ')
     for (let i = 0; i < missing.length; i += 400) {
       const batch = missing.slice(i, i + 400)
       const placeholders = batch.map(() => '?').join(', ')
-      const rows = this.q.all(this.contactDbPath, `SELECT ${cols} FROM contact WHERE username IN (${placeholders})`, batch)
+      const rows = this.q.all(
+        this.contactDbPath,
+        `SELECT ${cols} FROM contact WHERE username IN (${placeholders})`,
+        batch,
+      )
       const found = new Set<string>()
       for (const row of rows) {
         const record = toRecord(row)
@@ -138,15 +151,24 @@ export class ContactDirectory {
     let avatar: string | undefined
     if (this.headImageDbPath) {
       try {
-        const row = this.q.get(this.headImageDbPath, 'SELECT image_buffer FROM head_image WHERE username = ? LIMIT 1', [username])
+        const row = this.q.get(this.headImageDbPath, 'SELECT image_buffer FROM head_image WHERE username = ? LIMIT 1', [
+          username,
+        ])
         const bytes = decodeBlob(row?.['image_buffer'])
         if (bytes?.length) {
-          const mime = bytes.subarray(0, 3).toString() === 'GIF' ? 'image/gif'
-            : bytes[0] === 0x89 ? 'image/png'
-            : bytes.subarray(8, 12).toString() === 'WEBP' ? 'image/webp' : 'image/jpeg'
+          const mime =
+            bytes.subarray(0, 3).toString() === 'GIF'
+              ? 'image/gif'
+              : bytes[0] === 0x89
+                ? 'image/png'
+                : bytes.subarray(8, 12).toString() === 'WEBP'
+                  ? 'image/webp'
+                  : 'image/jpeg'
           avatar = `data:${mime};base64,${bytes.toString('base64')}`
         }
-      } catch { /* Optional local avatar database may be unavailable. */ }
+      } catch {
+        /* Optional local avatar database may be unavailable. */
+      }
     }
     this.localAvatars.set(username, avatar)
     return avatar
@@ -163,7 +185,10 @@ export class ContactDirectory {
   }
 
   /** Full contact export with cooperative yields so session/message IPC remains responsive. */
-  async contactsAsync(lastContactAt: ReadonlyMap<string, number>, yieldEvery: () => Promise<void>): Promise<WxContact[]> {
+  async contactsAsync(
+    lastContactAt: ReadonlyMap<string, number>,
+    yieldEvery: () => Promise<void>,
+  ): Promise<WxContact[]> {
     if (!this.fullyLoaded && this.contactDbPath && this.q.tableExists(this.contactDbPath, 'contact')) {
       const cols = this.columns().map(quoteIdent).join(', ')
       let lastRowId = 0
@@ -307,7 +332,11 @@ export class ContactDirectory {
           const cols = this.q.columns(this.contactDbPath, table)
           const keyCol = cols.find((c) => /^(username|chatroom_name|room_name)$/i.test(c))
           if (!keyCol) continue
-          const rows = this.q.all(this.contactDbPath, `SELECT * FROM ${quoteIdent(table)} WHERE ${quoteIdent(keyCol)} = ? LIMIT 1`, [groupId])
+          const rows = this.q.all(
+            this.contactDbPath,
+            `SELECT * FROM ${quoteIdent(table)} WHERE ${quoteIdent(keyCol)} = ? LIMIT 1`,
+            [groupId],
+          )
           for (const row of rows) {
             for (const value of Object.values(row)) {
               const text = typeof value === 'string' ? value : decodeBlob(value)?.toString('utf8')

@@ -6,7 +6,13 @@
  * After init the transferred port carries the substrate JSON-RPC (see packages/substrate/src/host).
  */
 import type { MessagePortMain } from 'electron'
-import { createMirror, createSubstrateFacade, createWcdbSourceReader, serveSubstrate, type SourceReader } from '@aiwc/substrate'
+import {
+  createMirror,
+  createSubstrateFacade,
+  createWcdbSourceReader,
+  serveSubstrate,
+  type SourceReader,
+} from '@aiwc/substrate'
 
 export interface SubstrateHostInit {
   type: 'init'
@@ -19,7 +25,10 @@ export interface SubstrateHostInit {
   cacheDir: string
 }
 
-export type SubstrateHostMessage = { type: 'ready' } | { type: 'fatal'; message: string } | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+export type SubstrateHostMessage =
+  | { type: 'ready' }
+  | { type: 'fatal'; message: string }
+  | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
 
 const parentPort = process.parentPort
 
@@ -41,12 +50,17 @@ process.on('uncaughtException', fatal)
 process.on('unhandledRejection', fatal)
 
 function isInit(v: unknown): v is SubstrateHostInit {
-  return typeof v === 'object' && v !== null && (v as { type?: unknown }).type === 'init' && typeof (v as { mirrorDbPath?: unknown }).mirrorDbPath === 'string'
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v as { type?: unknown }).type === 'init' &&
+    typeof (v as { mirrorDbPath?: unknown }).mirrorDbPath === 'string'
+  )
 }
 
 function buildSource(init: SubstrateHostInit): SourceReader {
-  if (init.mode !== 'wcdb') throw new Error('仅支持读取真实微信数据库')
-  if (!init.nativeDir) throw new Error('wcdb 模式缺少 nativeDir')
+  if (init.mode !== 'wcdb') throw new Error('substrate host only supports the wcdb (real WeChat database) mode')
+  if (!init.nativeDir) throw new Error('wcdb mode requires nativeDir')
   return createWcdbSourceReader({ nativeDir: init.nativeDir })
 }
 
@@ -57,7 +71,7 @@ parentPort.on('message', (event) => {
   if (!isInit(init) || started) return
   started = true
   const port: MessagePortMain | undefined = event.ports[0]
-  if (!port) fatal(new Error('init 消息未附带 MessagePort'))
+  if (!port) fatal(new Error('init message did not carry a MessagePort'))
   try {
     const source = buildSource(init)
     const mirror = createMirror({ dbPath: init.mirrorDbPath })

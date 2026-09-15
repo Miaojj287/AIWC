@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { newThreadId, type ApprovalId, type Event, type EventChannel, type EventMap, type ThreadId } from '@aiwc/protocol'
+import {
+  newThreadId,
+  type ApprovalId,
+  type Event,
+  type EventChannel,
+  type EventMap,
+  type ThreadId,
+} from '@aiwc/protocol'
 import { createMockBridge, demoFixture, type MockBridge } from './mockBridge'
 
 const NOW = Date.UTC(2026, 8, 6, 4, 0, 0)
 
-function waitFor<K extends EventChannel>(bridge: MockBridge, channel: K, predicate: (p: EventMap[K]) => boolean, timeoutMs = 4000): Promise<EventMap[K]> {
+function waitFor<K extends EventChannel>(
+  bridge: MockBridge,
+  channel: K,
+  predicate: (p: EventMap[K]) => boolean,
+  timeoutMs = 4000,
+): Promise<EventMap[K]> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       off()
@@ -33,8 +45,16 @@ async function runTurn(bridge: MockBridge, threadId: ThreadId, text: string): Pr
   const off = bridge.on('agent:event', (e) => {
     if (e.threadId === threadId) events.push(e)
   })
-  const done = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && (e.type === 'turn.completed' || e.type === 'turn.aborted'))
-  await bridge.invoke('agent:submit', { type: 'turn.start', threadId, input: { content: [{ type: 'text', text }], mentions: [] } })
+  const done = waitFor(
+    bridge,
+    'agent:event',
+    (e) => e.threadId === threadId && (e.type === 'turn.completed' || e.type === 'turn.aborted'),
+  )
+  await bridge.invoke('agent:submit', {
+    type: 'turn.start',
+    threadId,
+    input: { content: [{ type: 'text', text }], mentions: [] },
+  })
   await done
   off()
   return events
@@ -87,7 +107,11 @@ describe('mock bridge', () => {
     const newest = latest.items.at(-1)!
     expect(newest.createdAt).toBeLessThan(NOW)
     expect(newest.createdAt).toBeGreaterThan(NOW - 24 * 3_600_000)
-    const older = await bridge.invoke('substrate:listMessages', { sessionId, limit: 20, beforeSeq: latest.items[0]!.seq })
+    const older = await bridge.invoke('substrate:listMessages', {
+      sessionId,
+      limit: 20,
+      beforeSeq: latest.items[0]!.seq,
+    })
     expect(older.items.every((m) => m.seq < latest.items[0]!.seq)).toBe(true)
     const ctx = await bridge.invoke('substrate:getContext', { anchor: newest.anchor, radius: 3 })
     expect(ctx.some((m) => m.id === newest.id)).toBe(true)
@@ -112,7 +136,9 @@ describe('mock bridge', () => {
     const voice = demoFixture.messages.find((m) => m.kind === 'voice' && m.media?.transcript)!
     const media = await bridge.invoke('substrate:resolveMedia', { sessionId: voice.sessionId, messageId: voice.id })
     expect(media?.path?.startsWith('data:audio/wav;base64,')).toBe(true)
-    expect(await bridge.invoke('substrate:transcribeVoice', { sessionId: voice.sessionId, messageId: voice.id })).toBe(voice.media!.transcript)
+    expect(await bridge.invoke('substrate:transcribeVoice', { sessionId: voice.sessionId, messageId: voice.id })).toBe(
+      voice.media!.transcript,
+    )
     const silent = demoFixture.messages.find((m) => m.kind === 'voice' && !m.media?.transcript)!
     const text = await bridge.invoke('substrate:transcribeVoice', { sessionId: silent.sessionId, messageId: silent.id })
     expect(text.length).toBeGreaterThan(0)
@@ -149,7 +175,13 @@ describe('mock bridge', () => {
     const completed = events.find((e) => e.type === 'turn.completed')!
     expect(completed.finalText).toContain('评审')
     const { items, summary } = await bridge.invoke('agent:getThread', { threadId })
-    expect(items.map((i) => i.type)).toEqual(['user_message', 'assistant_message', 'tool_call', 'tool_result', 'assistant_message'])
+    expect(items.map((i) => i.type)).toEqual([
+      'user_message',
+      'assistant_message',
+      'tool_call',
+      'tool_result',
+      'assistant_message',
+    ])
     expect(summary.title).toBe('帮我找一下关于评审的消息')
     expect(await bridge.invoke('agent:listThreads', {})).toHaveLength(1)
   })
@@ -160,12 +192,25 @@ describe('mock bridge', () => {
     await runTurn(bridge, threadId, '第二轮')
     const approval = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'approval.requested')
     const completed = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'turn.completed')
-    const sendDone = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'tool.call' && e.toolName === 'send_message' && e.status === 'done')
-    await bridge.invoke('agent:submit', { type: 'turn.start', threadId, input: { content: [{ type: 'text', text: '第三轮' }], mentions: [] } })
+    const sendDone = waitFor(
+      bridge,
+      'agent:event',
+      (e) => e.threadId === threadId && e.type === 'tool.call' && e.toolName === 'send_message' && e.status === 'done',
+    )
+    await bridge.invoke('agent:submit', {
+      type: 'turn.start',
+      threadId,
+      input: { content: [{ type: 'text', text: '第三轮' }], mentions: [] },
+    })
     const req = (await approval) as Extract<Event, { type: 'approval.requested' }>
     expect(req.toolName).toBe('send_message')
     expect(req.risk).toBe('send')
-    await bridge.invoke('agent:submit', { type: 'approval.resolve', threadId, approvalId: req.approvalId as ApprovalId, decision: 'allow_once' })
+    await bridge.invoke('agent:submit', {
+      type: 'approval.resolve',
+      threadId,
+      approvalId: req.approvalId as ApprovalId,
+      decision: 'allow_once',
+    })
     await sendDone
     await completed
   })
@@ -179,11 +224,24 @@ describe('mock bridge', () => {
       expect(events.some((e) => e.type === 'approval.requested')).toBe(false)
     }
     const approval = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'approval.requested')
-    const denied = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'tool.call' && e.status === 'denied')
+    const denied = waitFor(
+      bridge,
+      'agent:event',
+      (e) => e.threadId === threadId && e.type === 'tool.call' && e.status === 'denied',
+    )
     const completed = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'turn.completed')
-    await bridge.invoke('agent:submit', { type: 'turn.start', threadId, input: { content: [{ type: 'text', text: '六' }], mentions: [] } })
+    await bridge.invoke('agent:submit', {
+      type: 'turn.start',
+      threadId,
+      input: { content: [{ type: 'text', text: '六' }], mentions: [] },
+    })
     const req = (await approval) as Extract<Event, { type: 'approval.requested' }>
-    await bridge.invoke('agent:submit', { type: 'approval.resolve', threadId, approvalId: req.approvalId as ApprovalId, decision: 'deny' })
+    await bridge.invoke('agent:submit', {
+      type: 'approval.resolve',
+      threadId,
+      approvalId: req.approvalId as ApprovalId,
+      decision: 'deny',
+    })
     await denied
     await completed
   })
@@ -191,7 +249,11 @@ describe('mock bridge', () => {
   it('turn.interrupt aborts and thread.compact folds history', async () => {
     const threadId = await createThread(bridge)
     const aborted = waitFor(bridge, 'agent:event', (e) => e.threadId === threadId && e.type === 'turn.aborted')
-    await bridge.invoke('agent:submit', { type: 'turn.start', threadId, input: { content: [{ type: 'text', text: '很长的任务' }], mentions: [] } })
+    await bridge.invoke('agent:submit', {
+      type: 'turn.start',
+      threadId,
+      input: { content: [{ type: 'text', text: '很长的任务' }], mentions: [] },
+    })
     await bridge.invoke('agent:submit', { type: 'turn.interrupt', threadId })
     expect(((await aborted) as Extract<Event, { type: 'turn.aborted' }>).reason).toBe('interrupted')
     await runTurn(bridge, threadId, '再来一轮')
@@ -234,6 +296,7 @@ describe('mock bridge', () => {
       source: 'fixed',
       fixedText: '{昵称}你好，现在是 {时间}，稍后回复',
       historyCount: 30,
+      sendMode: 'auto',
       updatedAt: 0,
     })
     expect(rule.id).toBeTruthy()
@@ -255,12 +318,14 @@ describe('mock bridge', () => {
     const changed = waitFor(bridge, 'memory:changed', (e) => e.file === 'MEMORY')
     await bridge.invoke('memory:write', { file: 'MEMORY', markdown: '# MEMORY\n\n- 新条目' })
     await changed
-    expect(await bridge.invoke('memory:entries', { file: 'MEMORY' })).toEqual([{ index: 0, text: '新条目', source: 'user' }])
+    expect(await bridge.invoke('memory:entries', { file: 'MEMORY' })).toEqual([
+      { index: 0, text: '新条目', source: 'user' },
+    ])
     const budget = await bridge.invoke('memory:budget', { file: 'MEMORY' })
     expect(budget.limitChars).toBeGreaterThan(budget.usedChars)
   })
 
-  it('generates a diary from the day\'s messages and tests models', async () => {
+  it("generates a diary from the day's messages and tests models", async () => {
     const day = new Date(NOW - 2 * 86_400_000)
     const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
     const progress: number[] = []
@@ -274,6 +339,13 @@ describe('mock bridge', () => {
     expect(await bridge.invoke('diary:list', undefined)).toHaveLength(1)
     const provider = { id: 'p', kind: 'openai' as const, label: 'x', models: [] }
     expect((await bridge.invoke('ai:testModel', { provider, modelId: 'm' })).ok).toBe(true)
-    expect((await bridge.invoke('ai:testModel', { provider: { ...provider, baseUrl: 'https://fail.example' }, modelId: 'm' })).ok).toBe(false)
+    expect(
+      (
+        await bridge.invoke('ai:testModel', {
+          provider: { ...provider, baseUrl: 'https://fail.example' },
+          modelId: 'm',
+        })
+      ).ok,
+    ).toBe(false)
   })
 })

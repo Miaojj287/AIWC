@@ -32,7 +32,16 @@ import { Item, Row, Section } from '../gallery'
 const MENU: MenuSpec = [
   { type: 'label', id: 'g', label: '分组标题' },
   { id: 'edit', label: '常规操作', icon: Pencil, shortcut: '⌘E' },
-  { type: 'sub', id: 'sub', label: '带子菜单', icon: Copy, items: [{ id: 's1', label: '子项 A' }, { id: 's2', label: '子项 B' }] },
+  {
+    type: 'sub',
+    id: 'sub',
+    label: '带子菜单',
+    icon: Copy,
+    items: [
+      { id: 's1', label: '子项 A' },
+      { id: 's2', label: '子项 B' },
+    ],
+  },
   { id: 'pin', label: '禁用项', icon: Pin, disabled: true },
   { type: 'separator' },
   { id: 'badge', label: '带徽标', icon: Sparkles, badge: <Badge tone="accent">新</Badge> },
@@ -58,7 +67,11 @@ export function OverlaysSection() {
   const [formType, setFormType] = useState('ai')
 
   return (
-    <Section id="overlays" title="⑤ 浮层模板" description="右键菜单（分组 / 快捷键 / 子菜单 / 禁用 / 危险）；带描述的下拉；对话框四种；右侧抽屉；遮罩">
+    <Section
+      id="overlays"
+      title="⑤ 浮层模板"
+      description="右键菜单（分组 / 快捷键 / 子菜单 / 禁用 / 危险）；带描述的下拉；对话框四种；右侧抽屉；遮罩"
+    >
       <Item label="右键菜单 · 模板（右键区域 / 点击 ···，同一份 MenuSpec）">
         <Row align="start">
           <ContextMenu>
@@ -138,7 +151,13 @@ export function OverlaysSection() {
             右侧抽屉
           </Button>
         </Row>
-        <ConfirmDialog open={confirmOpen} onOpenChange={setConfirmOpen} title="确认操作？" description="一句话说明后果，让用户知道点确定会发生什么。" onConfirm={() => setConfirmOpen(false)} />
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="确认操作？"
+          description="一句话说明后果，让用户知道点确定会发生什么。"
+          onConfirm={() => setConfirmOpen(false)}
+        />
         <DangerDialog
           open={dangerOpen}
           onOpenChange={setDangerOpen}
@@ -147,19 +166,60 @@ export function OverlaysSection() {
           confirmWord="删除"
           onConfirm={() => setDangerOpen(false)}
         />
-        <FormDialog open={formOpen} onOpenChange={setFormOpen} title="表单标题" description="带字段的对话框，字段左标签固定 64px" onSubmit={() => setFormOpen(false)} submitDisabled={!formName.trim()} submitDisabledReason="名称不能为空">
+        <FormDialog
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          title="表单标题"
+          description="带字段的对话框，字段左标签固定 64px"
+          onSubmit={() => setFormOpen(false)}
+          submitDisabled={!formName.trim()}
+          submitDisabledReason="名称不能为空"
+        >
           <FormDialogField label="名称" htmlFor="kit-form-name">
-            <Input id="kit-form-name" value={formName} onChange={(e) => setFormName(e.target.value)} error={!formName.trim() && '名称不能为空'} />
+            <Input
+              id="kit-form-name"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              error={!formName.trim() && '名称不能为空'}
+            />
           </FormDialogField>
           <FormDialogField label="类型" htmlFor="kit-form-type">
-            <Select id="kit-form-type" fullWidth value={formType} onValueChange={setFormType} options={[{ value: 'fixed', label: '固定文案' }, { value: 'ai', label: 'AI 生成' }, { value: 'human', label: '转人工' }]} />
+            <Select
+              id="kit-form-type"
+              fullWidth
+              value={formType}
+              onValueChange={setFormType}
+              options={[
+                { value: 'fixed', label: '固定文案' },
+                { value: 'ai', label: 'AI 生成' },
+                { value: 'human', label: '转人工' },
+              ]}
+            />
           </FormDialogField>
           <FormDialogField label="备注" htmlFor="kit-form-note">
             <Input id="kit-form-note" placeholder="可选" />
           </FormDialogField>
         </FormDialog>
-        <ProgressDialog open={progressOpen} title="正在处理" description="步骤列表 + 进度条，只保留「取消」" value={45} status="第 3 / 5 步 · 预计还需 20 秒" steps={STEPS} note="请勿关闭微信" onCancel={() => setProgressOpen(false)} />
-        <Drawer open={drawerOpen} onOpenChange={setDrawerOpen} title="抽屉标题" footer={<Button variant="ghost" size="sm" onClick={() => setDrawerOpen(false)}>关闭</Button>}>
+        <ProgressDialog
+          open={progressOpen}
+          title="正在处理"
+          description="步骤列表 + 进度条，只保留「取消」"
+          value={45}
+          status="第 3 / 5 步 · 预计还需 20 秒"
+          steps={STEPS}
+          note="请勿关闭微信"
+          onCancel={() => setProgressOpen(false)}
+        />
+        <Drawer
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          title="抽屉标题"
+          footer={
+            <Button variant="ghost" size="sm" onClick={() => setDrawerOpen(false)}>
+              关闭
+            </Button>
+          }
+        >
           <SkeletonListRows rows={6} />
         </Drawer>
       </Item>

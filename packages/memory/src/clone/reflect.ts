@@ -35,8 +35,13 @@ export function reflectSystem(displayName: string): string {
 }
 
 /** Render a persona transcript for reflection, oldest first, bounded to the most recent portion. */
-export function renderTranscript(messages: readonly { role: 'user' | 'assistant'; text: string }[], displayName: string): string {
-  const lines = messages.filter((m) => m.text.trim()).map((m) => `${m.role === 'user' ? '我' : `${displayName}的分身`}: ${m.text.replace(/\n+/g, ' ').trim()}`)
+export function renderTranscript(
+  messages: readonly { role: 'user' | 'assistant'; text: string }[],
+  displayName: string,
+): string {
+  const lines = messages
+    .filter((m) => m.text.trim())
+    .map((m) => `${m.role === 'user' ? '我' : `${displayName}的分身`}: ${m.text.replace(/\n+/g, ' ').trim()}`)
   let out = ''
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i] as string
@@ -47,11 +52,22 @@ export function renderTranscript(messages: readonly { role: 'user' | 'assistant'
 }
 
 /** Returns the notes to append; empty when the model found nothing worth keeping. */
-export async function reflectConversation(model: ModelClient, input: ReflectInput, signal?: AbortSignal): Promise<Array<Omit<PersonaNote, 'at'>>> {
+export async function reflectConversation(
+  model: ModelClient,
+  input: ReflectInput,
+  signal?: AbortSignal,
+): Promise<Array<Omit<PersonaNote, 'at'>>> {
   if (!input.transcript.trim()) return []
   const result = await generateValidated(
     model,
-    { system: reflectSystem(input.displayName), user: input.transcript, label: '对话反思', temperature: 0.2, maxOutputTokens: 700, ...(signal ? { signal } : {}) },
+    {
+      system: reflectSystem(input.displayName),
+      user: input.transcript,
+      label: '对话反思',
+      temperature: 0.2,
+      maxOutputTokens: 700,
+      ...(signal ? { signal } : {}),
+    },
     reflectSchema,
   )
   const notes: Array<Omit<PersonaNote, 'at'>> = []

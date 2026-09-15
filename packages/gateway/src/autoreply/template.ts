@@ -16,9 +16,14 @@ export function formatClock(at: number): string {
   return `${hh}:${mm}`
 }
 
-export function templateVars(event: MessageEvent, names: { nickname?: string; groupName?: string } = {}, now = Date.now()): TemplateVars {
+export function templateVars(
+  event: MessageEvent,
+  names: { nickname?: string; groupName?: string } = {},
+  now = Date.now(),
+): TemplateVars {
   const nickname = names.nickname ?? event.source.displayName ?? event.source.peerId
-  const groupName = names.groupName ?? (event.source.chatType === 'group' ? event.source.displayName ?? event.source.chatId : '')
+  const groupName =
+    names.groupName ?? (event.source.chatType === 'group' ? (event.source.displayName ?? event.source.chatId) : '')
   return { nickname, time: formatClock(now), groupName }
 }
 

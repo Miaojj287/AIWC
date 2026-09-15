@@ -104,7 +104,12 @@ function decorate(rng: Rng, draft: DraftMessage, prev: DraftMessage | undefined)
     case 'image':
       return { ...draft, kind, text: '', media: { kind: 'image', sizeBytes: rng.int(80_000, 4_200_000) } }
     case 'video':
-      return { ...draft, kind, text: '', media: { kind: 'video', durationMs: rng.int(4, 58) * 1000, sizeBytes: rng.int(1_500_000, 38_000_000) } }
+      return {
+        ...draft,
+        kind,
+        text: '',
+        media: { kind: 'video', durationMs: rng.int(4, 58) * 1000, sizeBytes: rng.int(1_500_000, 38_000_000) },
+      }
     case 'voice': {
       const durationMs = rng.int(10, 450) * 100
       const media: WxMedia = { kind: 'voice', durationMs }
@@ -124,7 +129,7 @@ function decorate(rng: Rng, draft: DraftMessage, prev: DraftMessage | undefined)
       return { ...draft, kind, quote: { senderName: prev.sender.name, text: prev.text } }
     }
     case 'revoke': {
-      const who = draft.sender?.isSelf ? '你' : draft.sender?.name ?? '对方'
+      const who = draft.sender?.isSelf ? '你' : (draft.sender?.name ?? '对方')
       return { ...draft, kind, text: `${who}撤回了一条消息` }
     }
     default:
@@ -143,7 +148,13 @@ function fillerLines(rng: Rng): string[] {
 }
 
 /** A 1:1 burst between `me` and `peer`. */
-export function buildDmBurst(rng: Rng, me: Participant, peer: Participant, startAt: number, now: number): DraftMessage[] {
+export function buildDmBurst(
+  rng: Rng,
+  me: Participant,
+  peer: Participant,
+  startAt: number,
+  now: number,
+): DraftMessage[] {
   const script = rng.chance(0.62) ? rng.pick(DM_SCRIPTS) : fillerLines(rng)
   const openerIsMe = rng.chance(0.5)
   const out: DraftMessage[] = []

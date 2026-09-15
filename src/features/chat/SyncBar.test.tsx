@@ -20,7 +20,9 @@ const SYNCED: SyncView = { phase: 'synced', text: '已同步 · 刚刚', detail:
 
 describe('<SyncBar>', () => {
   it('sits on the panel surface token, not an ad-hoc fg tint', () => {
-    const { container } = render(<SyncBar view={SYNCED} filters={DEFAULT_FILTERS} onFiltersChange={vi.fn()} senders={[]} onSync={vi.fn()} />)
+    const { container } = render(
+      <SyncBar view={SYNCED} filters={DEFAULT_FILTERS} onFiltersChange={vi.fn()} senders={[]} onSync={vi.fn()} />,
+    )
     const root = container.firstElementChild as HTMLElement
     expect(root.className).toContain('bg-panel')
     expect(root.className).toContain('h-[34px]')

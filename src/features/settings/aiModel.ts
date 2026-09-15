@@ -3,7 +3,15 @@
  * and the flattened model list used by 默认模型 / thread model pickers. Pure — tested in aiModel.test.ts.
  */
 import { validModelSettings } from '@aiwc/protocol'
-import type { ModelEntry, ModelSelection, ModelTestResult, ProviderConfig, ProviderKind, ReasoningEffort } from '@aiwc/protocol'
+import type {
+  ModelEntry,
+  ModelSelection,
+  ModelTestResult,
+  ProviderConfig,
+  ProviderKind,
+  ReasoningEffort,
+} from '@aiwc/protocol'
+import { t, type MessageKey } from '@/i18n'
 import { type VendorPreset } from './vendors'
 
 export interface ProviderKindMeta {
@@ -15,15 +23,57 @@ export interface ProviderKindMeta {
   local: boolean
 }
 
+/** Display copy is a getter over the settings.ai.kinds catalog, so every read uses the current language. */
 export const PROVIDER_KINDS: readonly ProviderKindMeta[] = [
-  { value: 'openai', label: 'OpenAI', description: 'Responses / Chat Completions · Bearer', defaultBaseUrl: 'https://api.openai.com/v1', local: false },
-  { value: 'anthropic', label: 'Anthropic', description: '/v1/messages · x-api-key', defaultBaseUrl: 'https://api.anthropic.com', local: false },
-  { value: 'google', label: 'Google Gemini', description: 'generateContent · key 参数', defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta', local: false },
-  { value: 'openai-compatible', label: '自定义 · OpenAI 格式', description: '第三方 / 自建服务，手动指定请求格式', defaultBaseUrl: '', local: false },
-  { value: 'ollama', label: 'Ollama · 本地', description: 'http://localhost:11434 · 数据不出本机', defaultBaseUrl: 'http://localhost:11434', local: true },
+  {
+    value: 'openai',
+    label: 'OpenAI',
+    description: 'Responses / Chat Completions · Bearer',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    local: false,
+  },
+  {
+    value: 'anthropic',
+    label: 'Anthropic',
+    description: '/v1/messages · x-api-key',
+    defaultBaseUrl: 'https://api.anthropic.com',
+    local: false,
+  },
+  {
+    value: 'google',
+    label: 'Google Gemini',
+    get description() {
+      return t('settings.ai.kinds.googleDescription')
+    },
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    local: false,
+  },
+  {
+    value: 'openai-compatible',
+    get label() {
+      return t('settings.ai.kinds.custom')
+    },
+    get description() {
+      return t('settings.ai.kinds.customDescription')
+    },
+    defaultBaseUrl: '',
+    local: false,
+  },
+  {
+    value: 'ollama',
+    get label() {
+      return t('settings.ai.kinds.ollama')
+    },
+    get description() {
+      return t('settings.ai.kinds.ollamaDescription')
+    },
+    defaultBaseUrl: 'http://localhost:11434',
+    local: true,
+  },
 ]
 
-export const kindMeta = (kind: ProviderKind): ProviderKindMeta => PROVIDER_KINDS.find((k) => k.value === kind) ?? (PROVIDER_KINDS[3] as ProviderKindMeta)
+export const kindMeta = (kind: ProviderKind): ProviderKindMeta =>
+  PROVIDER_KINDS.find((k) => k.value === kind) ?? (PROVIDER_KINDS[3] as ProviderKindMeta)
 
 export const isLocalKind = (kind: ProviderKind): boolean => kindMeta(kind).local
 
@@ -63,10 +113,10 @@ export function validateModelDraft(d: ModelDraft, hasStoredKey: boolean): ModelD
   const errors: ModelDraftErrors = {}
   const url = d.baseUrl.trim()
   if (!url) {
-    if (d.kind === 'openai-compatible' || d.kind === 'ollama') errors.baseUrl = '请填写接口 URL'
-  } else if (!URL_RE.test(url)) errors.baseUrl = 'URL 需以 http:// 或 https:// 开头'
-  if (!d.modelId.trim()) errors.modelId = '请填写模型 ID'
-  if (!isLocalKind(d.kind) && !d.apiKey.trim() && !hasStoredKey) errors.apiKey = '请填写 API Key'
+    if (d.kind === 'openai-compatible' || d.kind === 'ollama') errors.baseUrl = t('settings.ai.draft.urlRequired')
+  } else if (!URL_RE.test(url)) errors.baseUrl = t('settings.ai.shared.urlScheme')
+  if (!d.modelId.trim()) errors.modelId = t('settings.ai.shared.modelIdRequired')
+  if (!isLocalKind(d.kind) && !d.apiKey.trim() && !hasStoredKey) errors.apiKey = t('settings.ai.shared.apiKeyRequired')
   return errors
 }
 
@@ -74,16 +124,32 @@ export const isDraftValid = (e: ModelDraftErrors): boolean => Object.keys(e).len
 
 export function draftDirty(p: ProviderConfig, d: ModelDraft): boolean {
   const base = draftFromProvider(p)
-  return base.kind !== d.kind || base.baseUrl !== d.baseUrl.trim() || base.modelId !== d.modelId.trim() || d.apiKey.trim().length > 0
+  return (
+    base.kind !== d.kind ||
+    base.baseUrl !== d.baseUrl.trim() ||
+    base.modelId !== d.modelId.trim() ||
+    d.apiKey.trim().length > 0
+  )
 }
 
 /** Apply the form draft: kind / baseUrl and the primary model (kept first; other models preserved). */
-export function applyDraft(p: ProviderConfig, d: ModelDraft, opts: { supportsTools?: boolean; apiKeyRef?: string } = {}): ProviderConfig {
+export function applyDraft(
+  p: ProviderConfig,
+  d: ModelDraft,
+  opts: { supportsTools?: boolean; apiKeyRef?: string } = {},
+): ProviderConfig {
   const modelId = d.modelId.trim()
   const existing = p.models.find((m) => m.modelId === modelId)
   const primary = existing
     ? { ...existing, supportsTools: opts.supportsTools ?? existing.supportsTools }
-    : { modelId, label: modelId, contextWindow: 128_000, supportsTools: opts.supportsTools ?? true, supportsVision: false, enabled: true }
+    : {
+        modelId,
+        label: modelId,
+        contextWindow: 128_000,
+        supportsTools: opts.supportsTools ?? true,
+        supportsVision: false,
+        enabled: true,
+      }
   const rest = p.models.filter((m) => m.modelId !== modelId)
   const url = d.baseUrl.trim() || kindMeta(d.kind).defaultBaseUrl
   return {
@@ -102,21 +168,25 @@ export type TestState =
   | { status: 'ok'; latencyMs?: number; supportsTools: boolean }
   | { status: 'error'; message: string }
 
-const ERROR_CODE_LABEL: Record<NonNullable<ModelTestResult['error']>['code'], string> = {
-  auth: '鉴权失败',
-  rate_limit: '触发限流',
-  context_overflow: '上下文超限',
-  network: '网络错误',
-  invalid_request: '请求无效',
-  unsupported_tools: '不支持工具调用',
-  unknown: '连接失败',
+const ERROR_CODE_LABEL: Record<NonNullable<ModelTestResult['error']>['code'], MessageKey> = {
+  auth: 'settings.ai.test.errors.auth',
+  rate_limit: 'settings.ai.test.errors.rateLimit',
+  context_overflow: 'settings.ai.test.errors.contextOverflow',
+  network: 'settings.ai.test.errors.network',
+  invalid_request: 'settings.ai.test.errors.invalidRequest',
+  unsupported_tools: 'settings.ai.test.errors.unsupportedTools',
+  unknown: 'settings.ai.shared.connectFailed',
 }
 
 export function testStateFromResult(r: ModelTestResult): TestState {
   if (r.ok) return { status: 'ok', latencyMs: r.latencyMs, supportsTools: r.supportsTools ?? true }
   const code = r.error?.code ?? 'unknown'
   const status = r.error?.status ? ` ${r.error.status}` : ''
-  return { status: 'error', message: `${ERROR_CODE_LABEL[code]}${status}${r.error?.message ? `：${r.error.message}` : ''}` }
+  const label = `${t(ERROR_CODE_LABEL[code])}${status}`
+  return {
+    status: 'error',
+    message: r.error?.message ? t('settings.ai.test.errorDetail', { error: label, detail: r.error.message }) : label,
+  }
 }
 
 export interface StatusLine {
@@ -128,13 +198,24 @@ export interface StatusLine {
 export function testStatusLine(s: TestState, purpose: 'agent' | 'stt' = 'agent'): StatusLine {
   switch (s.status) {
     case 'idle':
-      return { kind: 'info', text: '尚未测试' }
+      return { kind: 'info', text: t('settings.ai.test.idle') }
     case 'testing':
-      return { kind: 'info', text: '测试中…' }
+      return { kind: 'info', text: t('settings.ai.test.testing') }
     case 'ok': {
-      const latency = s.latencyMs !== undefined ? ` · 延迟 ${Math.round(s.latencyMs)} ms` : ''
-      if (purpose === 'agent' && !s.supportsTools) return { kind: 'warning', text: `已连接${latency} · 不支持工具调用，Agent 功能将受限` }
-      return { kind: 'success', text: `已连接${latency}${purpose === 'agent' ? ' · 支持工具调用' : ''}` }
+      // Tool support is the expected case, so only its absence is worth a word (and a warning tone).
+      const ms = s.latencyMs !== undefined ? Math.round(s.latencyMs) : undefined
+      if (purpose === 'agent' && !s.supportsTools)
+        return {
+          kind: 'warning',
+          text:
+            ms !== undefined
+              ? t('settings.ai.test.connectedLatencyNoTools', { ms })
+              : t('settings.ai.test.connectedNoTools'),
+        }
+      return {
+        kind: 'success',
+        text: ms !== undefined ? t('settings.ai.test.connectedLatency', { ms }) : t('settings.ai.test.connected'),
+      }
     }
     case 'error':
       return { kind: 'error', text: s.message }
@@ -165,7 +246,13 @@ export function modelOptions(providers: readonly ProviderConfig[]): ModelOption[
     for (const m of p.models) {
       if (m.enabled === false || m.available === false) continue
       const selection = { providerId: p.id, modelId: m.modelId }
-      out.push({ value: modelValue(selection), label: m.label || m.modelId, description: `${p.label}${m.supportsTools ? '' : ' · 不支持工具调用'}`, local: isLocalKind(p.kind), selection })
+      out.push({
+        value: modelValue(selection),
+        label: m.label || m.modelId,
+        description: m.supportsTools ? p.label : t('settings.ai.options.noTools', { provider: p.label }),
+        local: isLocalKind(p.kind),
+        selection,
+      })
     }
   }
   return out
@@ -183,22 +270,25 @@ export function filterSuggestions(all: readonly string[], query: string, limit =
 
 export interface ReasoningEffortMeta {
   value: ReasoningEffort
-  label: string
-  description: string
+  label: MessageKey
+  description: MessageKey
 }
 
-/** 推理强度 options (Figma 164:3532): 关闭 / 低 / 中 / 高 / 极高. */
+/** 推理强度 options (Figma 164:3532): 关闭 / 低 / 中 / 高 / 极高. Catalog keys — resolve with t() at render. */
 export const REASONING_EFFORTS: readonly ReasoningEffortMeta[] = [
-  { value: 'off', label: '关闭', description: '不思考，直接作答' },
-  { value: 'minimal', label: '最低', description: '最少量推理' },
-  { value: 'low', label: '低', description: '快速作答，少量推理' },
-  { value: 'medium', label: '中', description: '常规任务的均衡选择' },
-  { value: 'high', label: '高', description: '复杂任务，更多推理' },
-  { value: 'xhigh', label: '极高', description: '投入更多推理' },
-  { value: 'max', label: '最高', description: '最大推理投入' },
+  { value: 'off', label: 'settings.ai.effort.off', description: 'settings.ai.effort.offDescription' },
+  { value: 'minimal', label: 'settings.ai.effort.minimal', description: 'settings.ai.effort.minimalDescription' },
+  { value: 'low', label: 'settings.ai.effort.low', description: 'settings.ai.effort.lowDescription' },
+  { value: 'medium', label: 'settings.ai.effort.medium', description: 'settings.ai.effort.mediumDescription' },
+  { value: 'high', label: 'settings.ai.effort.high', description: 'settings.ai.effort.highDescription' },
+  { value: 'xhigh', label: 'settings.ai.effort.xhigh', description: 'settings.ai.effort.xhighDescription' },
+  { value: 'max', label: 'settings.ai.effort.max', description: 'settings.ai.effort.maxDescription' },
 ]
 
-export const effortLabel = (e: ReasoningEffort | undefined): string | undefined => REASONING_EFFORTS.find((x) => x.value === e)?.label
+export const effortLabel = (e: ReasoningEffort | undefined): string | undefined => {
+  const key = REASONING_EFFORTS.find((x) => x.value === e)?.label
+  return key ? t(key) : undefined
+}
 
 /** 上下文用量 choices (tokens). */
 export const CONTEXT_WINDOWS: readonly number[] = [32_000, 64_000, 128_000, 200_000, 256_000, 400_000, 1_000_000]
@@ -223,13 +313,13 @@ export function providerStatus(p: ProviderConfig | undefined): ProviderStatus {
   return 'unconfigured'
 }
 
-export const isProviderConnected = (p: ProviderConfig | undefined): boolean => providerStatus(p) !== 'unconfigured'
-
 /** Configured provider for a vendor preset (one per vendor, id = vendor id). */
-export const providerForVendor = (providers: readonly ProviderConfig[], vendorId: string): ProviderConfig | undefined => providers.find((p) => p.vendor === vendorId)
+export const providerForVendor = (providers: readonly ProviderConfig[], vendorId: string): ProviderConfig | undefined =>
+  providers.find((p) => p.vendor === vendorId)
 
 /** Providers without a vendor preset (hand-configured endpoints), in config order. */
-export const customProviders = (providers: readonly ProviderConfig[]): ProviderConfig[] => providers.filter((p) => !p.vendor)
+export const customProviders = (providers: readonly ProviderConfig[]): ProviderConfig[] =>
+  providers.filter((p) => !p.vendor)
 
 /** New provider for a vendor preset with an empty model list; `id` = vendor id so the secret ref is stable. */
 export function providerFromVendor(v: VendorPreset): ProviderConfig {
@@ -253,20 +343,32 @@ export function patchModel(p: ProviderConfig, modelId: string, patch: Partial<Mo
 }
 
 export function removeModel(p: ProviderConfig, modelId: string): ProviderConfig {
-  return { ...p, ignoredModelIds: [...(p.ignoredModelIds ?? []), modelId], models: p.models.filter((m) => m.modelId !== modelId) }
+  return {
+    ...p,
+    ignoredModelIds: [...(p.ignoredModelIds ?? []), modelId],
+    models: p.models.filter((m) => m.modelId !== modelId),
+  }
 }
 
 /** A model entry typed by hand or picked from the remote list (no preset note). */
 export function modelEntryFromId(modelId: string, contextWindow = 128_000): ModelEntry {
   const id = modelId.trim()
-  return { modelId: id, label: id, source: 'manual', contextWindow, supportsTools: true, supportsVision: false, enabled: true }
+  return {
+    modelId: id,
+    label: id,
+    source: 'manual',
+    contextWindow,
+    supportsTools: true,
+    supportsVision: false,
+    enabled: true,
+  }
 }
 
-/** First enabled model of the provider, for 测试连接 and the default-model fallback. */
-export const primaryModelId = (p: Pick<ProviderConfig, 'models'>): string | undefined => (p.models.find((m) => m.enabled !== false && m.available !== false) ?? p.models[0])?.modelId
-
 /** Pick the default model after a config change: keep it while it still exists and is enabled, else the first enabled one. */
-export function resolveDefaultModel(providers: readonly ProviderConfig[], current: ModelSelection | undefined): ModelSelection | undefined {
+export function resolveDefaultModel(
+  providers: readonly ProviderConfig[],
+  current: ModelSelection | undefined,
+): ModelSelection | undefined {
   if (current) {
     const p = providers.find((x) => x.id === current.providerId)
     const m = p?.models.find((x) => x.modelId === current.modelId)
@@ -281,15 +383,29 @@ export function resolveDefaultModel(providers: readonly ProviderConfig[], curren
 
 /** Refresh metadata without resetting user choices; missing remote models remain visible but unavailable. */
 export function syncProviderModels(provider: ProviderConfig, remote: readonly ModelEntry[]): ProviderConfig {
-  const ids = new Set(remote.map(m => m.modelId))
-  const models = remote.filter(m => !provider.ignoredModelIds?.includes(m.modelId)).map(m => {
-    const prev = provider.models.find(p => p.modelId === m.modelId)
-    return validModelSettings(provider, prev ? { ...prev, ...m, enabled: prev.enabled,
-      contextWindow: prev.contextWindow, maxOutputTokens: prev.maxOutputTokens,
-      reasoningEffort: prev.reasoningEffort, thinkingBudget: prev.thinkingBudget,
-      temperature: prev.temperature, fast: prev.fast,
-    } : { ...m, enabled: provider.models.length ? false : true })
-  })
-  for (const m of provider.models) if (!ids.has(m.modelId)) models.push({ ...m, available: m.source === 'manual' ? undefined : false })
+  const ids = new Set(remote.map((m) => m.modelId))
+  const models = remote
+    .filter((m) => !provider.ignoredModelIds?.includes(m.modelId))
+    .map((m) => {
+      const prev = provider.models.find((p) => p.modelId === m.modelId)
+      return validModelSettings(
+        provider,
+        prev
+          ? {
+              ...prev,
+              ...m,
+              enabled: prev.enabled,
+              contextWindow: prev.contextWindow,
+              maxOutputTokens: prev.maxOutputTokens,
+              reasoningEffort: prev.reasoningEffort,
+              thinkingBudget: prev.thinkingBudget,
+              temperature: prev.temperature,
+              fast: prev.fast,
+            }
+          : { ...m, enabled: false },
+      )
+    })
+  for (const m of provider.models)
+    if (!ids.has(m.modelId)) models.push({ ...m, available: m.source === 'manual' ? undefined : false })
   return { ...provider, models, modelsSyncedAt: Date.now() }
 }

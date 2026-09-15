@@ -28,7 +28,20 @@ describe('parseInline', () => {
 
 describe('parseMarkdown', () => {
   it('parses headings, paragraphs, hr, quotes and fenced code', () => {
-    const src = ['# 标题', '', '第一段', '继续', '', '---', '> 引用', '> 第二行', '', '```ts', 'const a = 1', '```'].join('\n')
+    const src = [
+      '# 标题',
+      '',
+      '第一段',
+      '继续',
+      '',
+      '---',
+      '> 引用',
+      '> 第二行',
+      '',
+      '```ts',
+      'const a = 1',
+      '```',
+    ].join('\n')
     const blocks = parseMarkdown(src)
     expect(blocks[0]).toEqual({ t: 'heading', level: 1, c: [{ t: 'text', v: '标题' }] })
     expect(blocks[1]).toEqual({ t: 'paragraph', c: [{ t: 'text', v: '第一段 继续' }] })
@@ -43,7 +56,10 @@ describe('parseMarkdown', () => {
     if (ul?.t !== 'list') throw new Error('expected list')
     expect(ul.items).toHaveLength(2)
     expect(ul.items[0]?.[0]).toEqual({ t: 'paragraph', c: [{ t: 'text', v: 'a' }] })
-    expect(ul.items[0]?.[1]).toMatchObject({ t: 'list', items: [[{ t: 'paragraph', c: [{ t: 'text', v: 'a1' }] }], [{ t: 'paragraph', c: [{ t: 'text', v: 'a2' }] }]] })
+    expect(ul.items[0]?.[1]).toMatchObject({
+      t: 'list',
+      items: [[{ t: 'paragraph', c: [{ t: 'text', v: 'a1' }] }], [{ t: 'paragraph', c: [{ t: 'text', v: 'a2' }] }]],
+    })
     expect(ol).toMatchObject({ t: 'list', ordered: true, start: 3 })
   })
   it('parses pipe tables with alignment', () => {
@@ -52,7 +68,10 @@ describe('parseMarkdown', () => {
     expect(table).toMatchObject({ t: 'table', align: ['left', 'right'] })
     if (table?.t !== 'table') throw new Error('expected table')
     expect(table.header.map(inlineText)).toEqual(['名称', '数量'])
-    expect(table.rows.map((r) => r.map(inlineText))).toEqual([['苹果', '3'], ['梨', '12']])
+    expect(table.rows.map((r) => r.map(inlineText))).toEqual([
+      ['苹果', '3'],
+      ['梨', '12'],
+    ])
   })
   it('hard line breaks with two trailing spaces', () => {
     const [p] = parseMarkdown('一行  \n二行')

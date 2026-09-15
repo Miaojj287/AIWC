@@ -5,6 +5,7 @@ import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import { fileURLToPath, URL } from 'node:url'
 import { builtinModules } from 'node:module'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
@@ -17,13 +18,17 @@ const aliases = {
   '@aiwc/substrate': here('./packages/substrate/src/index.ts'),
   '@aiwc/gateway': here('./packages/gateway/src/index.ts'),
   '@aiwc/memory': here('./packages/memory/src/index.ts'),
+  '@aiwc/i18n': here('./packages/i18n/src/index.ts'),
+  '@aiwc/office': here('./packages/office/src/index.ts'),
+  '@aiwc/shell': here('./packages/shell/src/index.ts'),
   '@': here('./src'),
 }
 
 // Main-process bundles: keep native / heavy deps external, bundle the AI SDK so that a
 // single ESM graph is produced (mirrors the proven AIWC_ORG setup).
 const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)])
-const bundleInMain = (id: string) => id === 'ai' || id.startsWith('ai/') || id.startsWith('@ai-sdk/') || id === 'zod' || id.startsWith('zod/')
+const bundleInMain = (id: string) =>
+  id === 'ai' || id.startsWith('ai/') || id.startsWith('@ai-sdk/') || id === 'zod' || id.startsWith('zod/')
 const externalDeps = Object.keys(pkg.dependencies ?? {}).filter((n) => !bundleInMain(n))
 const external = (id: string) => {
   if (nodeBuiltins.has(id)) return true
@@ -51,7 +56,11 @@ export default defineConfig({
           electron([
             ...mainEntries.map(({ entry, out }) => ({
               entry,
-              onstart({ startup }: { startup: (argv?: string[], options?: import('node:child_process').SpawnOptions, customElectronPkg?: string) => Promise<boolean> }) {
+              onstart({
+                startup,
+              }: {
+                startup: (argv?: string[], options?: SpawnOptions, customElectronPkg?: string) => Promise<boolean>
+              }) {
                 return startup(undefined, undefined, devElectronPackage).then(() => undefined)
               },
               vite: {
@@ -67,8 +76,11 @@ export default defineConfig({
               entry: 'electron/preload/index.ts',
               onstart(options) {
                 // reload() falls back to the stock Electron bundle when nothing is running yet.
-                if ((process as NodeJS.Process & { electronApp?: import('node:child_process').ChildProcess }).electronApp) options.reload()
-                else return options.startup(undefined, undefined, devElectronPackage).then(() => undefined)
+                if ((process as NodeJS.Process & { electronApp?: ChildProcess }).electronApp) {
+                  options.reload()
+                  return
+                }
+                return options.startup(undefined, undefined, devElectronPackage).then(() => undefined)
               },
               vite: {
                 resolve: { alias: aliases },

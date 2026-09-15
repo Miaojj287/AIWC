@@ -6,13 +6,42 @@
 import { Link, ListFilter, Save } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ProviderConfig } from '@aiwc/protocol'
-import { Badge, Button, EmptyState, IconButton, InlineHint, Input, Popover, PopoverAnchor, PopoverContent, Select, cn, toast, type SelectOption } from '@/kit'
-// TODO(kit): the barrel does not export the menu item primitives yet; deep-import so the suggestion list
-// reuses the ONE kit menu item (geometry, hover, label layout) instead of re-implementing it (CLAUDE.md §3).
-import { MenuItemContent } from '@/kit/menu/MenuItemBody'
-import { menuItemClass, menuLabelClass } from '@/kit/menu/menuStyles'
+import { useT, type Translator } from '@/i18n'
+import {
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  InlineHint,
+  Input,
+  MenuItemContent,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  Select,
+  cn,
+  menuItemClass,
+  menuLabelClass,
+  toast,
+  type SelectOption,
+} from '@/kit'
 import { invoke } from '@/platform/hooks'
-import { PROVIDER_KINDS, apiKeyRefFor, applyDraft, draftDirty, draftFromProvider, filterSuggestions, isDraftValid, isLocalKind, kindMeta, testStateFromResult, testStatusLine, validateModelDraft, type ModelDraft, type TestState } from '../aiModel'
+import {
+  PROVIDER_KINDS,
+  apiKeyRefFor,
+  applyDraft,
+  draftDirty,
+  draftFromProvider,
+  filterSuggestions,
+  isDraftValid,
+  isLocalKind,
+  kindMeta,
+  testStateFromResult,
+  testStatusLine,
+  validateModelDraft,
+  type ModelDraft,
+  type TestState,
+} from '../aiModel'
 import { errorMessage, useSecretPresence } from '../hooks'
 import { SRow } from '../pageKit'
 
@@ -30,14 +59,17 @@ export interface ModelFormProps {
   primaryTone?: 'primary' | 'outline'
 }
 
-const KIND_OPTIONS: SelectOption<ProviderConfig['kind']>[] = PROVIDER_KINDS.map((k) => ({
-  value: k.value,
-  label: k.label,
-  description: k.description,
-  badge: k.local ? <Badge tone="ok">本地</Badge> : undefined,
-}))
+/** Built per render: kind labels are catalog getters, so the options follow the current language. */
+const kindOptions = (t: Translator): SelectOption<ProviderConfig['kind']>[] =>
+  PROVIDER_KINDS.map((k) => ({
+    value: k.value,
+    label: k.label,
+    description: k.description,
+    badge: k.local ? <Badge tone="ok">{t('settings.ai.shared.local')}</Badge> : undefined,
+  }))
 
 export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'primary' }: ModelFormProps) {
+  const t = useT()
   const [draft, setDraft] = useState<ModelDraft>(() => draftFromProvider(provider))
   const [test, setTest] = useState<TestState>({ status: 'idle' })
   const [saving, setSaving] = useState(false)
@@ -47,11 +79,13 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
   const keyRef = provider.apiKeyRef ?? apiKeyRefFor(provider.id)
   const secret = useSecretPresence(keyRef)
 
-  // Reset when another provider is selected.
+  // Reset when another provider is selected — keyed on the id on purpose: a config refresh of the same
+  // provider must not wipe the user's unsaved draft. (Cleaner: the parent passes key={provider.id}.)
   useEffect(() => {
     setDraft(draftFromProvider(provider))
     setTest({ status: 'idle' })
     setSuggestions(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider.id])
 
   const hasKey = Boolean(secret.has)
@@ -78,7 +112,11 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
   const runTest = async () => {
     setTest({ status: 'testing' })
     try {
-      const res = await invoke('ai:testModel', { provider: candidate(), modelId: draft.modelId.trim(), apiKey: draft.apiKey.trim() || undefined })
+      const res = await invoke('ai:testModel', {
+        provider: candidate(),
+        modelId: draft.modelId.trim(),
+        apiKey: draft.apiKey.trim() || undefined,
+      })
       setTest(testStateFromResult(res))
     } catch (e) {
       setTest({ status: 'error', message: errorMessage(e) })
@@ -89,11 +127,14 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
     setFetching(true)
     setSuggestOpen(true)
     try {
-      const list = await invoke('ai:listRemoteModels', { provider: candidate(), apiKey: draft.apiKey.trim() || undefined })
+      const list = await invoke('ai:listRemoteModels', {
+        provider: candidate(),
+        apiKey: draft.apiKey.trim() || undefined,
+      })
       setSuggestions(list)
     } catch (e) {
       setSuggestions([])
-      toast.error('拉取模型列表失败', { detail: errorMessage(e) })
+      toast.error(t('settings.ai.shared.fetchModelsFailed'), { detail: errorMessage(e) })
     } finally {
       setFetching(false)
     }
@@ -106,32 +147,93 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
       const typedKey = draft.apiKey.trim()
       if (typedKey) await invoke('secret:set', { ref: keyRef, value: typedKey })
       const supportsTools = test.status === 'ok' ? test.supportsTools : undefined
-      await onSave(applyDraft(provider, draft, { apiKeyRef: typedKey || provider.apiKeyRef ? keyRef : undefined, supportsTools }))
+      await onSave(
+        applyDraft(provider, draft, { apiKeyRef: typedKey || provider.apiKeyRef ? keyRef : undefined, supportsTools }),
+      )
       setDraft((d) => ({ ...d, apiKey: '' }))
       if (typedKey) secret.reload()
-      toast.success(purpose === 'agent' ? '模型配置已保存' : '转写接口已保存')
+      toast.success(purpose === 'agent' ? t('settings.ai.modelForm.savedAgent') : t('settings.ai.modelForm.savedStt'))
     } catch (e) {
-      toast.error('保存失败', { detail: errorMessage(e) })
+      toast.error(t('common.saveFailed'), { detail: errorMessage(e) })
     } finally {
       setSaving(false)
     }
   }
 
-  const visibleSuggestions = useMemo(() => (suggestions ? filterSuggestions(suggestions, draft.modelId) : []), [suggestions, draft.modelId])
-  const saveReason = !valid ? Object.values(errors)[0] : !dirty ? '没有需要保存的修改' : undefined
+  const visibleSuggestions = useMemo(
+    () => (suggestions ? filterSuggestions(suggestions, draft.modelId) : []),
+    [suggestions, draft.modelId],
+  )
+  const saveReason = !valid ? Object.values(errors)[0] : !dirty ? t('settings.ai.modelForm.noChanges') : undefined
 
   return (
     <>
-      <SRow id={rowIds.kind} title="提供商兼容方式" description="决定请求格式与鉴权头" htmlFor={`${provider.id}-kind`}>
-        <Select id={`${provider.id}-kind`} aria-label="提供商兼容方式" options={KIND_OPTIONS} value={draft.kind} onValueChange={setKind} align="end" className="min-w-[160px]" />
+      <SRow
+        id={rowIds.kind}
+        title={t('settings.ai.modelForm.kind')}
+        description={t('settings.ai.shared.kindHint')}
+        htmlFor={`${provider.id}-kind`}
+      >
+        <Select
+          id={`${provider.id}-kind`}
+          aria-label={t('settings.ai.modelForm.kind')}
+          options={kindOptions(t)}
+          value={draft.kind}
+          onValueChange={setKind}
+          align="end"
+          className="min-w-[160px]"
+        />
       </SRow>
-      <SRow id={rowIds.baseUrl} title="接口 URL" description="Base URL，不含路径后缀" htmlFor={`${provider.id}-url`}>
-        <Input id={`${provider.id}-url`} mono size="sm" value={draft.baseUrl} placeholder={kindMeta(draft.kind).defaultBaseUrl || 'https://…'} onChange={(e) => patch({ baseUrl: e.target.value })} error={draft.baseUrl && errors.baseUrl ? errors.baseUrl : undefined} wrapperClassName="w-[260px]" />
+      <SRow
+        id={rowIds.baseUrl}
+        title={t('settings.ai.modelForm.baseUrl')}
+        description={t('settings.ai.shared.baseUrlHint')}
+        htmlFor={`${provider.id}-url`}
+      >
+        <Input
+          id={`${provider.id}-url`}
+          mono
+          size="sm"
+          value={draft.baseUrl}
+          placeholder={kindMeta(draft.kind).defaultBaseUrl || 'https://…'}
+          onChange={(e) => patch({ baseUrl: e.target.value })}
+          error={draft.baseUrl && errors.baseUrl ? errors.baseUrl : undefined}
+          wrapperClassName="w-[260px]"
+        />
       </SRow>
-      <SRow id={rowIds.apiKey} title="API Key" description={local ? '本地模型无需 Key，数据不出本机' : hasKey ? '已保存在本机钥匙串，输入新值即可替换' : '仅保存在本机钥匙串，不会上传'} htmlFor={`${provider.id}-key`} disabled={local}>
-        <Input id={`${provider.id}-key`} type="password" mono size="sm" value={draft.apiKey} placeholder={hasKey ? '•••••••• 已保存' : 'sk-…'} onChange={(e) => patch({ apiKey: e.target.value })} autoComplete="off" wrapperClassName="w-[260px]" />
+      <SRow
+        id={rowIds.apiKey}
+        title="API Key"
+        description={
+          local
+            ? t('settings.ai.shared.localNoKey')
+            : hasKey
+              ? t('settings.ai.modelForm.keyStored')
+              : t('settings.ai.shared.keyLocalOnly')
+        }
+        htmlFor={`${provider.id}-key`}
+        disabled={local}
+      >
+        <Input
+          id={`${provider.id}-key`}
+          type="password"
+          mono
+          size="sm"
+          value={draft.apiKey}
+          placeholder={hasKey ? t('settings.ai.shared.keySaved') : 'sk-…'}
+          onChange={(e) => patch({ apiKey: e.target.value })}
+          autoComplete="off"
+          wrapperClassName="w-[260px]"
+        />
       </SRow>
-      <SRow id={rowIds.modelId} title="模型 ID" description={purpose === 'agent' ? '默认模型，可在对话框底部临时切换' : '用于 audio/transcriptions 的转写模型'} htmlFor={`${provider.id}-model`}>
+      <SRow
+        id={rowIds.modelId}
+        title={t('settings.ai.shared.modelId')}
+        description={
+          purpose === 'agent' ? t('settings.ai.modelForm.modelIdAgent') : t('settings.ai.modelForm.modelIdStt')
+        }
+        htmlFor={`${provider.id}-model`}
+      >
         <Popover open={suggestOpen} onOpenChange={setSuggestOpen}>
           <PopoverAnchor asChild>
             <div className="w-[260px]">
@@ -140,30 +242,60 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
                 mono
                 size="sm"
                 value={draft.modelId}
-                placeholder={purpose === 'agent' ? '例如 gpt-4.1 / qwen3:8b' : '例如 whisper-1'}
+                placeholder={
+                  purpose === 'agent'
+                    ? t('settings.ai.shared.modelIdPlaceholder')
+                    : t('settings.ai.modelForm.sttModelPlaceholder')
+                }
                 onChange={(e) => {
                   patch({ modelId: e.target.value })
                   if (suggestions) setSuggestOpen(true)
                 }}
                 onKeyDown={(e) => e.key === 'Escape' && setSuggestOpen(false)}
                 error={errors.modelId && draft.modelId === '' && dirty ? errors.modelId : undefined}
-                trailing={<IconButton size="xs" icon={ListFilter} label="从接口拉取模型列表" loading={fetching} onClick={() => void fetchModels()} className="text-fg-3" />}
+                trailing={
+                  <IconButton
+                    size="xs"
+                    icon={ListFilter}
+                    label={t('settings.ai.shared.fetchModels')}
+                    loading={fetching}
+                    onClick={() => void fetchModels()}
+                    className="text-fg-3"
+                  />
+                }
               />
             </div>
           </PopoverAnchor>
           <PopoverContent align="start" onOpenAutoFocus={(e) => e.preventDefault()} className="w-[260px] p-1.5">
             {fetching ? (
-              <EmptyState variant="loading" compact title="读取模型列表" />
+              <EmptyState variant="loading" compact title={t('settings.ai.shared.loadingModels')} />
             ) : !suggestions || suggestions.length === 0 ? (
-              <EmptyState variant="empty" compact title="接口未返回模型" description="检查接口 URL 与 Key 后重试，或直接手动填写模型 ID" />
+              <EmptyState
+                variant="empty"
+                compact
+                title={t('settings.ai.shared.noModelsReturned')}
+                description={t('settings.ai.modelForm.noModelsHint')}
+              />
             ) : visibleSuggestions.length === 0 ? (
-              <EmptyState variant="no-results" compact title={`没有匹配「${draft.modelId}」的模型`} description={`接口共返回 ${suggestions.length} 个模型`} />
+              <EmptyState
+                variant="no-results"
+                compact
+                title={t('settings.ai.shared.noMatchingModel', { query: draft.modelId })}
+                description={t('settings.ai.shared.modelsReturnedTotal', { n: suggestions.length })}
+              />
             ) : (
               <>
                 <div className={menuLabelClass}>
-                  接口返回 {suggestions.length} 个模型 · 匹配 {visibleSuggestions.length} 个
+                  {t('settings.ai.modelForm.suggestionsSummary', {
+                    total: suggestions.length,
+                    matched: visibleSuggestions.length,
+                  })}
                 </div>
-                <div role="listbox" aria-label="模型列表" className="flex max-h-[220px] flex-col gap-px overflow-y-auto">
+                <div
+                  role="listbox"
+                  aria-label={t('settings.ai.shared.modelList')}
+                  className="flex max-h-[220px] flex-col gap-px overflow-y-auto"
+                >
                   {visibleSuggestions.map((m) => (
                     <button
                       key={m}
@@ -185,12 +317,29 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
           </PopoverContent>
         </Popover>
       </SRow>
-      <SRow id={rowIds.status} title="连接状态" description={<InlineHint kind={status.kind}>{status.text}</InlineHint>}>
-        <Button variant="ghost" icon={Link} onClick={() => void runTest()} loading={test.status === 'testing'} disabled={!draft.modelId.trim()}>
-          测试连接
+      <SRow
+        id={rowIds.status}
+        title={t('settings.ai.modelForm.status')}
+        description={<InlineHint kind={status.kind}>{status.text}</InlineHint>}
+      >
+        <Button
+          variant="ghost"
+          icon={Link}
+          onClick={() => void runTest()}
+          loading={test.status === 'testing'}
+          disabled={!draft.modelId.trim()}
+        >
+          {t('settings.ai.shared.testConnection')}
         </Button>
-        <Button variant={primaryTone} icon={Save} onClick={() => void save()} loading={saving} disabled={!valid || !dirty} title={saveReason}>
-          保存
+        <Button
+          variant={primaryTone}
+          icon={Save}
+          onClick={() => void save()}
+          loading={saving}
+          disabled={!valid || !dirty}
+          title={saveReason}
+        >
+          {t('common.save')}
         </Button>
       </SRow>
     </>

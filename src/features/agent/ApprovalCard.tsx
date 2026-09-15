@@ -9,14 +9,16 @@
 import { AlertTriangle, Check, CheckCheck, Send, ShieldAlert, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { ApprovalDecision, ToolRisk } from '@aiwc/protocol'
+import { useT, type MessageKey } from '@/i18n'
 import { Button, cn, ICON_STROKE, Kbd } from '@/kit'
 import type { ApprovalRequest } from './model'
+import { approvalBodyFor, approvalNoteFor } from './toolCards'
 
-const RISK_COPY: Record<ToolRisk, string> = {
-  read: '将读取本机的微信数据，不会上传。',
-  write: '将写入本机数据（文件 / 记忆 / 配置）。',
-  send: '将以你的微信身份发送消息。发送后无法撤回，请确认内容。',
-  destructive: '此操作不可恢复，请确认。',
+const RISK_COPY: Record<ToolRisk, MessageKey> = {
+  read: 'agent.approval.risk.read',
+  write: 'agent.approval.risk.write',
+  send: 'agent.approval.risk.send',
+  destructive: 'agent.approval.risk.destructive',
 }
 
 const RISK_ICON: Record<ToolRisk, typeof Send> = {
@@ -38,9 +40,12 @@ export interface ApprovalCardProps {
 }
 
 export function ApprovalCard({ request, onResolve, primary = true, className }: ApprovalCardProps) {
+  const t = useT()
   const danger = request.risk === 'destructive'
   const { canAllowAlways } = request
   const RiskIcon = RISK_ICON[request.risk]
+  // A feature may show its input in a reviewable form (a table preview) instead of raw JSON.
+  const Body = approvalBodyFor(request.toolName)
   const allowRef = useRef<HTMLButtonElement>(null)
   const resolve = (decision: ApprovalDecision): void => onResolve(request.approvalId, decision)
   // The listener is registered once per request; it reads the latest resolve through this ref.
@@ -73,7 +78,7 @@ export function ApprovalCard({ request, onResolve, primary = true, className }: 
   return (
     <div
       role="alertdialog"
-      aria-label={`Agent 请求：${request.summary}`}
+      aria-label={t('agent.approval.request', { summary: request.summary })}
       data-testid="approval-card"
       data-risk={request.risk}
       className={cn(
@@ -83,14 +88,25 @@ export function ApprovalCard({ request, onResolve, primary = true, className }: 
       )}
     >
       <div className="flex items-start gap-2">
-        <RiskIcon size={14} strokeWidth={ICON_STROKE} aria-hidden className={cn('mt-px shrink-0', danger ? 'text-danger' : 'text-accent')} />
+        <RiskIcon
+          size={14}
+          strokeWidth={ICON_STROKE}
+          aria-hidden
+          className={cn('mt-px shrink-0', danger ? 'text-danger' : 'text-accent')}
+        />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-body font-medium leading-[18px] text-fg">Agent 请求：{request.summary}</span>
-          <span className="text-note leading-4 text-fg-3">{RISK_COPY[request.risk]}</span>
+          <span className="text-body font-medium leading-[18px] text-fg">
+            {t('agent.approval.request', { summary: request.summary })}
+          </span>
+          <span className="text-note leading-4 text-fg-3">
+            {approvalNoteFor(request, t) ?? t(RISK_COPY[request.risk])}
+          </span>
         </div>
       </div>
 
-      {request.detail ? (
+      {Body ? (
+        <Body request={request} />
+      ) : request.detail ? (
         <div className="max-h-[132px] overflow-y-auto rounded-control border border-line-6 bg-content px-2.5 py-2 text-caption leading-[18px] text-fg-2 whitespace-pre-wrap break-words select-text">
           {request.detail}
         </div>
@@ -100,19 +116,39 @@ export function ApprovalCard({ request, onResolve, primary = true, className }: 
         </pre>
       )}
 
-      <div className="flex items-center justify-end gap-1.5">
-        <Button size="sm" variant="ghost" icon={X} aria-label="拒绝" onClick={() => resolve('deny')}>
-          拒绝
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={X}
+          aria-label={t('agent.approval.deny')}
+          onClick={() => resolve('deny')}
+        >
+          {t('agent.approval.deny')}
           {primary ? <Kbd keys="Esc" className="ml-0.5 bg-transparent px-0 text-current opacity-60" /> : null}
         </Button>
         {canAllowAlways ? (
-          <Button size="sm" variant="ghost" icon={CheckCheck} aria-label="总是允许" onClick={() => resolve('allow_always')} title="以后此工具不再询问（设置 › AI 接入 › 权限规则可撤销）">
-            总是允许
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={CheckCheck}
+            aria-label={t('agent.approval.allowAlways')}
+            onClick={() => resolve('allow_always')}
+            title={t('agent.approval.allowAlwaysHint')}
+          >
+            {t('agent.approval.allowAlways')}
             {primary ? <Kbd keys="⇧⏎" className="ml-0.5 bg-transparent px-0 text-current opacity-60" /> : null}
           </Button>
         ) : null}
-        <Button ref={allowRef} size="sm" variant={danger ? 'danger' : 'primary'} icon={Check} aria-label="允许一次" onClick={() => resolve('allow_once')}>
-          允许一次
+        <Button
+          ref={allowRef}
+          size="sm"
+          variant={danger ? 'danger' : 'primary'}
+          icon={Check}
+          aria-label={t('agent.approval.allowOnce')}
+          onClick={() => resolve('allow_once')}
+        >
+          {t('agent.approval.allowOnce')}
           {primary ? <Kbd keys="⏎" className="ml-0.5 bg-transparent px-0 text-current opacity-70" /> : null}
         </Button>
       </div>
@@ -122,7 +158,7 @@ export function ApprovalCard({ request, onResolve, primary = true, className }: 
 
 export function safeJson(value: unknown): string {
   try {
-    return typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? ''
+    return typeof value === 'string' ? value : (JSON.stringify(value, null, 2) ?? '')
   } catch {
     return String(value)
   }

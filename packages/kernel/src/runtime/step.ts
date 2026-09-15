@@ -93,7 +93,14 @@ export interface StepOutcome {
 }
 
 function loopGuardOutcome(call: ToolCallRequest): ToolDispatchOutcome {
-  return { callId: call.callId, toolName: call.toolName, result: { content: LOOP_GUARD_MESSAGE, isError: true }, isError: true, status: 'error', durationMs: 0 }
+  return {
+    callId: call.callId,
+    toolName: call.toolName,
+    result: { content: LOOP_GUARD_MESSAGE, isError: true },
+    isError: true,
+    status: 'error',
+    durationMs: 0,
+  }
 }
 
 export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOutcome> {
@@ -108,7 +115,9 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
     maxOutputTokens: ctx.model.ref.maxOutputTokens,
     signal: deps.signal,
     cacheKey: ctx.cacheKey,
-    ...(PROFILE_TEMPERATURE[ctx.settings.profile] !== undefined ? { temperature: PROFILE_TEMPERATURE[ctx.settings.profile] } : {}),
+    ...(PROFILE_TEMPERATURE[ctx.settings.profile] !== undefined
+      ? { temperature: PROFILE_TEMPERATURE[ctx.settings.profile] }
+      : {}),
   }
 
   const itemId = newItemId()

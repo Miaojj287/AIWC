@@ -4,9 +4,10 @@
  * and merges per-tab state (settings page, focused message…). Installed once by the Workspace.
  */
 import { onCommand, runCommand, type CommandMap } from '@/app/commands'
+import { t } from '@/i18n'
 import { toast } from '@/kit'
 import { useShellStore } from '@/shell/shellStore'
-import type { TabDescriptor, TabKind } from '@/workspace/tabRegistry'
+import type { TabDescriptor } from '@/workspace/tabRegistry'
 import { TAB_FUNCTION, useTabsStore } from '@/workspace/tabsStore'
 
 export interface TabCommandDeps {
@@ -14,16 +15,7 @@ export interface TabCommandDeps {
   requestClose(id: string): void
 }
 
-export const SETTINGS_TAB_ID = 'settings:settings'
-
 type OpenRequest = Omit<TabDescriptor, 'id' | 'state'> & { state?: Record<string, unknown> }
-
-/** Prefix a tab title once (「自动回复 · 产品市场群」), never twice. */
-export function prefixedTitle(prefix: string, title: string): string {
-  const t = title.trim()
-  const p = `${prefix} · `
-  return t.startsWith(p) ? t : `${p}${t}`
-}
 
 export function fileName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean)
@@ -31,22 +23,40 @@ export function fileName(path: string): string {
 }
 
 /** Build the descriptor for a tab.open* command (pure — used by tests and the installer). */
-export function descriptorFor<K extends keyof TabCommandPayloads>(command: K, payload: TabCommandPayloads[K] | undefined): OpenRequest | undefined {
+export function descriptorFor<K extends keyof TabCommandPayloads>(
+  command: K,
+  payload: TabCommandPayloads[K] | undefined,
+): OpenRequest | undefined {
   switch (command) {
     case 'tab.openChat': {
       const p = payload as CommandMap['tab.openChat'] | undefined
       if (!p?.sessionId) return undefined
-      return { kind: 'chat', objectId: p.sessionId, title: p.title || p.sessionId, state: p.focusMessageId ? { focusMessageId: p.focusMessageId } : undefined }
+      return {
+        kind: 'chat',
+        objectId: p.sessionId,
+        title: p.title || p.sessionId,
+        state: p.focusMessageId ? { focusMessageId: p.focusMessageId } : undefined,
+      }
     }
     case 'tab.openAutoReply': {
       const p = payload as CommandMap['tab.openAutoReply'] | undefined
       if (!p?.sessionId) return undefined
-      return { kind: 'autoreply', objectId: p.sessionId, title: prefixedTitle('自动回复', p.title || p.sessionId) }
+      return { kind: 'autoreply', objectId: p.sessionId, title: p.title || p.sessionId }
     }
     case 'tab.openClone': {
       const p = payload as CommandMap['tab.openClone'] | undefined
       if (!p?.contactId) return undefined
-      return { kind: 'clone', objectId: p.contactId, title: prefixedTitle('克隆', p.title || p.contactId) }
+      return { kind: 'clone', objectId: p.contactId, title: p.title || p.contactId }
+    }
+    case 'tab.openTask': {
+      const p = payload as CommandMap['tab.openTask'] | undefined
+      if (!p?.id) return undefined
+      return {
+        kind: 'task',
+        objectId: p.id,
+        title: p.title ?? '',
+        state: p.templateId ? { templateId: p.templateId } : undefined,
+      }
     }
     case 'tab.openFile': {
       const p = payload as CommandMap['tab.openFile'] | undefined
@@ -55,26 +65,57 @@ export function descriptorFor<K extends keyof TabCommandPayloads>(command: K, pa
     }
     case 'tab.openDiary': {
       const p = payload as CommandMap['tab.openDiary'] | undefined
-      return { kind: 'diary', objectId: 'diary', title: '日记', state: p?.date ? { date: p.date } : undefined }
+      return {
+        kind: 'diary',
+        objectId: 'diary',
+        title: t('app.tabs.diary'),
+        state: p?.date ? { date: p.date } : undefined,
+      }
     }
     case 'tab.openReplyDesk':
-      return { kind: 'replydesk', objectId: 'replydesk', title: '回复台' }
+      return { kind: 'replydesk', objectId: 'replydesk', title: t('app.tabs.replyDesk') }
     case 'tab.openSettings': {
       const p = payload as CommandMap['tab.openSettings'] | undefined
       const state: Record<string, unknown> = {}
       if (p?.page) state.page = p.page
       if (p?.highlight) state.highlight = p.highlight
-      return { kind: 'settings', objectId: 'settings', title: '设置', state: Object.keys(state).length ? state : undefined }
+      return {
+        kind: 'settings',
+        objectId: 'settings',
+        title: t('app.tabs.settings'),
+        state: Object.keys(state).length ? state : undefined,
+      }
     }
     case 'tab.openKit':
-      return { kind: 'kit', objectId: 'gallery', title: '组件库' }
+      return { kind: 'kit', objectId: 'gallery', title: t('app.tabs.kit') }
     default:
       return undefined
   }
 }
 
-type TabCommandPayloads = Pick<CommandMap, 'tab.openChat' | 'tab.openAutoReply' | 'tab.openClone' | 'tab.openFile' | 'tab.openDiary' | 'tab.openReplyDesk' | 'tab.openSettings' | 'tab.openKit'>
-const OPEN_COMMANDS = ['tab.openChat', 'tab.openAutoReply', 'tab.openClone', 'tab.openFile', 'tab.openDiary', 'tab.openReplyDesk', 'tab.openSettings', 'tab.openKit'] as const
+type TabCommandPayloads = Pick<
+  CommandMap,
+  | 'tab.openChat'
+  | 'tab.openAutoReply'
+  | 'tab.openClone'
+  | 'tab.openTask'
+  | 'tab.openFile'
+  | 'tab.openDiary'
+  | 'tab.openReplyDesk'
+  | 'tab.openSettings'
+  | 'tab.openKit'
+>
+const OPEN_COMMANDS = [
+  'tab.openChat',
+  'tab.openAutoReply',
+  'tab.openClone',
+  'tab.openTask',
+  'tab.openFile',
+  'tab.openDiary',
+  'tab.openReplyDesk',
+  'tab.openSettings',
+  'tab.openKit',
+] as const
 
 /** Open or re-activate; switch the rail to the tab's function; merge defined state keys. */
 export function openTab(req: OpenRequest): string {
@@ -96,9 +137,9 @@ export function quoteRefFor(tab: TabDescriptor): CommandMap['agent.quote'] | und
   switch (tab.kind) {
     case 'chat':
     case 'autoreply':
-      return { kind: 'session', id: tab.objectId, label: tab.title.replace(/^自动回复 · /, '') }
+      return { kind: 'session', id: tab.objectId, label: tab.title }
     case 'clone':
-      return { kind: 'contact', id: tab.objectId, label: tab.title.replace(/^克隆 · /, '') }
+      return { kind: 'contact', id: tab.objectId, label: tab.title }
     case 'file':
       return { kind: 'file', id: tab.objectId, label: tab.title }
     default:
@@ -130,7 +171,7 @@ export function installTabCommands(deps: TabCommandDeps): () => void {
       const tab = tabs.find((t) => t.id === activeId)
       const ref = tab ? quoteRefFor(tab) : undefined
       if (!ref) {
-        toast.info('当前标签没有可引用到 Agent 的对象', { detail: '打开一个会话、联系人或文件后再试' })
+        toast.info(t('app.quote.noTarget'), { detail: t('app.quote.noTargetHint') })
         return
       }
       runCommand('agent.quote', ref)
@@ -138,5 +179,3 @@ export function installTabCommands(deps: TabCommandDeps): () => void {
   )
   return () => offs.forEach((off) => off())
 }
-
-export const isTabKind = (v: unknown): v is TabKind => typeof v === 'string' && v in TAB_FUNCTION

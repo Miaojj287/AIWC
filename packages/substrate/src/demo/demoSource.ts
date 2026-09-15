@@ -10,7 +10,6 @@ import { FixtureSchema, type Fixture, type NormalisedFixture } from './fixtureSc
 import { contactKindFromUsername, sessionKindFromUsername } from '../normalize/kinds'
 import { previewOf } from '../normalize/preview'
 import { SubstrateError, errorMessage } from '../shared/errors'
-import { guardSelectSql } from '../shared/sqlGuard'
 import { Db } from '../mirror/db'
 
 export interface DemoSourceOptions {
@@ -23,13 +22,19 @@ export function normaliseFixture(raw: unknown, baseDir: string): NormalisedFixtu
   const parsed = FixtureSchema.safeParse(raw)
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
-    throw new SubstrateError('fixture_invalid', `演示数据格式错误：${issue ? `${issue.path.join('.')} ${issue.message}` : parsed.error.message}`)
+    throw new SubstrateError(
+      'fixture_invalid',
+      `演示数据格式错误：${issue ? `${issue.path.join('.')} ${issue.message}` : parsed.error.message}`,
+    )
   }
   const f: Fixture = parsed.data
-  const resolvePath = (p: string | undefined): string | undefined => (p ? (isAbsolute(p) ? p : resolve(baseDir, p)) : undefined)
+  const resolvePath = (p: string | undefined): string | undefined =>
+    p ? (isAbsolute(p) ? p : resolve(baseDir, p)) : undefined
 
   const messages: WxMessage[] = f.messages.map((m) => {
-    const media: WxMedia | undefined = m.media ? { ...m.media, path: resolvePath(m.media.path), thumbPath: resolvePath(m.media.thumbPath) } : undefined
+    const media: WxMedia | undefined = m.media
+      ? { ...m.media, path: resolvePath(m.media.path), thumbPath: resolvePath(m.media.thumbPath) }
+      : undefined
     const out: WxMessage = {
       id: m.id,
       sessionId: m.sessionId,
@@ -79,7 +84,11 @@ export function normaliseFixture(raw: unknown, baseDir: string): NormalisedFixtu
   })
 
   const contacts: WxContact[] = f.contacts.map((c) => {
-    const out: WxContact = { username: c.username, nickname: c.nickname || c.username, kind: c.kind ?? contactKindFromUsername(c.username) }
+    const out: WxContact = {
+      username: c.username,
+      nickname: c.nickname || c.username,
+      kind: c.kind ?? contactKindFromUsername(c.username),
+    }
     if (c.remark) out.remark = c.remark
     if (c.alias) out.alias = c.alias
     const avatar = resolvePath(c.avatarPath)
@@ -107,16 +116,46 @@ function buildSqlCopy(fx: NormalisedFixture): Db {
   `)
   db.tx(() => {
     for (const s of fx.sessions) {
-      db.run('INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', s.id, s.kind, s.title, s.lastMessageAt ?? null, s.lastPreview ?? null, s.unread, s.pinned ? 1 : 0, s.muted ? 1 : 0, s.memberCount ?? null)
+      db.run(
+        'INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        s.id,
+        s.kind,
+        s.title,
+        s.lastMessageAt ?? null,
+        s.lastPreview ?? null,
+        s.unread,
+        s.pinned ? 1 : 0,
+        s.muted ? 1 : 0,
+        s.memberCount ?? null,
+      )
     }
     for (const c of fx.contacts) {
-      db.run('INSERT OR REPLACE INTO contacts VALUES (?, ?, ?, ?, ?, ?)', c.username, c.nickname, c.remark ?? null, c.alias ?? null, c.kind, c.lastContactAt ?? null)
+      db.run(
+        'INSERT OR REPLACE INTO contacts VALUES (?, ?, ?, ?, ?, ?)',
+        c.username,
+        c.nickname,
+        c.remark ?? null,
+        c.alias ?? null,
+        c.kind,
+        c.lastContactAt ?? null,
+      )
     }
     for (const [groupId, members] of Object.entries(fx.groupMembers)) {
       for (const u of members) db.run('INSERT OR IGNORE INTO group_members VALUES (?, ?)', groupId, u)
     }
     for (const m of fx.messages) {
-      db.run('INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', m.id, m.sessionId, m.seq, m.createdAt, m.senderId, m.senderName ?? null, m.isSelf ? 1 : 0, m.kind, m.text)
+      db.run(
+        'INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        m.id,
+        m.sessionId,
+        m.seq,
+        m.createdAt,
+        m.senderId,
+        m.senderName ?? null,
+        m.isSelf ? 1 : 0,
+        m.kind,
+        m.text,
+      )
     }
   })
   return db
@@ -240,18 +279,16 @@ export function createDemoSourceReader(opts: DemoSourceOptions): SourceReader {
       return () => {}
     },
 
-    async querySql(_db, sql, limit) {
+    async querySql(_db, statement) {
       const fx = requireOpen()
-      const guarded = guardSelectSql(sql, limit)
       sqlDb ??= buildSqlCopy(fx)
       try {
-        const stmt = sqlDb.raw.prepare(guarded.sql)
+        const stmt = sqlDb.raw.prepare(statement.sql)
         const columns = stmt.columns().map((c) => c.name)
         stmt.setReturnArrays(true)
         const rows = stmt.all() as unknown as unknown[][]
         return { columns, rows }
       } catch (err) {
-        if (err instanceof SubstrateError) throw err
         throw new SubstrateError('sql_rejected', `SQL 执行失败：${errorMessage(err)}`, { cause: err })
       }
     },

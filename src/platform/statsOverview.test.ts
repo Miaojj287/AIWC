@@ -38,7 +38,10 @@ describe('readStatsOverview', () => {
   })
 
   it('reads the canonical single-row shape too', () => {
-    const res: StatsResult = { metric: 'overview', rows: [{ total: 12, imageCount: 3, fileCount: 1, voiceCount: 2, videoCount: 0, firstAt: 5, lastAt: 9 }] }
+    const res: StatsResult = {
+      metric: 'overview',
+      rows: [{ total: 12, imageCount: 3, fileCount: 1, voiceCount: 2, videoCount: 0, firstAt: 5, lastAt: 9 }],
+    }
     expect(readStatsOverview(res)).toMatchObject({ total: 12, imageCount: 3, voiceCount: 2, firstAt: 5 })
   })
 
@@ -50,7 +53,13 @@ describe('readStatsOverview', () => {
   })
 
   it('tolerates string numbers and unknown keys', () => {
-    const res: StatsResult = { metric: 'overview', rows: [{ key: 'total', value: '42' }, { key: 'weird', value: 'x' }] }
+    const res: StatsResult = {
+      metric: 'overview',
+      rows: [
+        { key: 'total', value: '42' },
+        { key: 'weird', value: 'x' },
+      ],
+    }
     expect(readStatsOverview(res)).toMatchObject({ total: 42, voiceCount: 0, firstAt: 0 })
   })
 })

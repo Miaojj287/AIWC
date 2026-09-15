@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "author": "AIWC",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -19,9 +19,14 @@
     "build:win": "npm run build && electron-builder --win",
     "build:dir": "npm run build && electron-builder --dir",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",
+    "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "knip": "knip",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "npm run format:check && npm run typecheck && npm run lint && npm run knip && npm test",
     "smoke": "npm run build && electron . --smoke"
   },
   "dependencies": {
@@ -53,8 +58,11 @@
     "eslint": "^9.39.0",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-boundaries": "^5.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^26.1.0",
+    "knip": "^6.35.1",
     "lucide-react": "^1.41.0",
+    "prettier": "3.9.6",
     "radix-ui": "^1.4.3",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
@@ -144,7 +152,8 @@
       "shortcutName": "AIWC",
       "unicode": true,
       "installerLanguages": [
-        "zh_CN"
+        "zh_CN",
+        "en_US"
       ],
       "language": "2052"
     },

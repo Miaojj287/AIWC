@@ -63,12 +63,38 @@ export interface ToolResult {
   meta?: Record<string, JsonValue>
 }
 
+/**
+ * A tool of any input and services type, for heterogeneous collections (registry, router, tool lists).
+ * `any` is deliberate and confined here: `ToolDefinition<I, S>` is contravariant in both parameters, so no
+ * concrete instantiation can hold every tool.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyToolDefinition = ToolDefinition<any, any>
+
+/**
+ * Per-call approval policy for tools whose danger depends on the input (a shell command, a CLI call).
+ * `risk` replaces the definition's static risk for this call; `allowKey` is what "总是允许" persists
+ * instead of the tool name, so the allow-list can be as narrow as a command prefix
+ * (`shell:git commit`) rather than "any command".
+ */
+export interface ToolCallPolicy {
+  risk: ToolRisk
+  allowKey?: string
+  /** False forces a fresh confirmation every time even when the risk would allow "总是允许". */
+  canAllowAlways?: boolean
+  /** One sentence shown with the approval, e.g. why a command was classified as destructive. */
+  note?: string
+}
+
 export interface ToolDefinition<I = unknown, S extends ToolServices = ToolServices> {
   name: string
   description: string
   inputSchema: z.ZodType<I>
   profiles: readonly ToolProfile[]
+  /** Static risk; `classify` may raise or lower it per call. */
   risk: ToolRisk
+  /** Called after validation, before approval; the returned risk / allow-list key govern this call. */
+  classify?: (input: I) => ToolCallPolicy
   /** Safe to run concurrently with other parallel-safe tools (read-only, no shared mutable state). */
   parallelSafe: boolean
   exposure?: ToolExposure

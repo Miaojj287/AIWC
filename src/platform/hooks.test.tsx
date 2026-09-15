@@ -55,7 +55,10 @@ describe('useInvoke', () => {
   })
 
   it('re-runs when deps change and surfaces errors', async () => {
-    const { result, rerender } = renderHook(({ file }: { file: 'MEMORY' | 'SOUL' }) => useInvoke('memory:read', { file }, [file]), { initialProps: { file: 'MEMORY' as 'MEMORY' | 'SOUL' } })
+    const { result, rerender } = renderHook(
+      ({ file }: { file: 'MEMORY' | 'SOUL' }) => useInvoke('memory:read', { file }, [file]),
+      { initialProps: { file: 'MEMORY' as 'MEMORY' | 'SOUL' } },
+    )
     await waitFor(() => expect(result.current.data).toBe('content of MEMORY #1'))
     rerender({ file: 'SOUL' })
     await waitFor(() => expect(result.current.error?.message).toBe('boom'))
@@ -75,7 +78,10 @@ describe('useBridgeEvent', () => {
     const bridge = fakeBridge()
     __setBridgeForTests(bridge)
     const seen: string[] = []
-    const { rerender, unmount } = renderHook(({ tag }: { tag: string }) => useBridgeEvent('app:toast', (t) => seen.push(`${tag}:${t.text}`)), { initialProps: { tag: 'a' } })
+    const { rerender, unmount } = renderHook(
+      ({ tag }: { tag: string }) => useBridgeEvent('app:toast', (t) => seen.push(`${tag}:${t.text}`)),
+      { initialProps: { tag: 'a' } },
+    )
     await waitFor(() => {
       bridge.emit('app:toast', { kind: 'info', text: 'one' } satisfies EventMap['app:toast'])
       expect(seen).toContain('a:one')

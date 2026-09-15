@@ -13,7 +13,7 @@ const LABEL: Record<PlaceholderKind, string> = { image: '图片', sticker: '表�
 export function placeholderSvg(kind: PlaceholderKind, seed: string, width = 640, height = 480): string {
   const h = hashString(`${kind}:${seed}`)
   const hue = h % 360
-  const hue2 = (hue + 40 + (h >> 8) % 60) % 360
+  const hue2 = (hue + 40 + ((h >> 8) % 60)) % 360
   const bg = `hsl(${hue} 28% 22%)`
   const fg = `hsl(${hue2} 45% 55%)`
   const cx = 20 + ((h >> 4) % 60)

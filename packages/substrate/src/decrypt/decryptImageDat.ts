@@ -5,7 +5,13 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, extname } from 'node:path'
-import { decryptDatBuffer, getDatVersion, normalizeAesKey, normalizeXorKey, stripTrailingNulBytes } from './datDecryptCore'
+import {
+  decryptDatBuffer,
+  getDatVersion,
+  normalizeAesKey,
+  normalizeXorKey,
+  stripTrailingNulBytes,
+} from './datDecryptCore'
 import { decryptDatViaNative } from './nativeImageDecrypt'
 
 export interface DecryptImageDatOptions {
@@ -63,7 +69,7 @@ export async function decryptImageDat(opts: DecryptImageDatOptions): Promise<Dec
 
   const output = decryptDatBuffer(bytes, { xorKey: xorKey ?? null, aesKey: aesKey ?? null })
   const data = output.version === 0 ? stripTrailingNulBytes(output.data) : output.data
-  const ext = output.wxgf && !output.ext ? '.wxgf' : output.ext ?? '.jpg'
+  const ext = output.wxgf && !output.ext ? '.wxgf' : (output.ext ?? '.jpg')
   const path = finalPath(opts.dst, ext)
   await writeAtomic(path, data)
   return { path, ext, bytes: data.length, source: 'ts', wxgf: ext === '.wxgf' }

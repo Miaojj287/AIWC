@@ -5,8 +5,9 @@
 import { Layers } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { ContextUsage } from '@aiwc/protocol'
-import { Button, cn, Popover, PopoverContent, PopoverTrigger, ProgressBar } from '@/kit'
-import { formatTokens, usageRatio, USAGE_WARN_RATIO } from '../model'
+import { useT } from '@/i18n'
+import { Button, cn, formatTokens, Popover, PopoverContent, PopoverTrigger, ProgressBar } from '@/kit'
+import { usageRatio, USAGE_WARN_RATIO } from '../model'
 
 export interface ContextRingProps {
   usage?: ContextUsage
@@ -19,6 +20,7 @@ const R = 7
 const CIRC = 2 * Math.PI * R
 
 export function ContextRing({ usage, onCompact, disabled = false, size = 18 }: ContextRingProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const ratio = usageRatio(usage)
@@ -39,47 +41,74 @@ export function ContextRing({ usage, onCompact, disabled = false, size = 18 }: C
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={usage ? `上下文占用 ${pct}%` : '上下文占用'}
+          aria-label={usage ? t('agent.context.usagePercent', { percent: pct }) : t('agent.context.usage')}
           disabled={disabled}
           onMouseEnter={show}
           onMouseLeave={hide}
           onFocus={show}
           onBlur={hide}
-          className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-control outline-none transition-colors hover:bg-line-8 focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-40', tone)}
+          className={cn(
+            'inline-flex size-6 shrink-0 items-center justify-center rounded-control outline-none transition-colors hover:bg-line-8 focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-40',
+            tone,
+          )}
         >
           <svg width={size} height={size} viewBox="0 0 18 18" aria-hidden className="-rotate-90">
             <circle cx="9" cy="9" r={R} fill="none" stroke="currentColor" strokeOpacity={0.18} strokeWidth={2} />
-            <circle cx="9" cy="9" r={R} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - ratio)} className="transition-[stroke-dashoffset] duration-(--dur-base)" />
+            <circle
+              cx="9"
+              cy="9"
+              r={R}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeDasharray={CIRC}
+              strokeDashoffset={CIRC * (1 - ratio)}
+              className="transition-[stroke-dashoffset] duration-(--dur-base)"
+            />
           </svg>
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-[240px]" onMouseEnter={show} onMouseLeave={hide} onOpenAutoFocus={(e) => e.preventDefault()}>
+      <PopoverContent
+        side="top"
+        align="end"
+        className="w-[240px]"
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         {usage ? (
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-body font-medium text-fg">上下文占用</span>
+              <span className="text-body font-medium text-fg">{t('agent.context.usage')}</span>
               <span className={cn('font-latin text-body font-medium', tone)}>{pct}%</span>
             </div>
-            <ProgressBar value={pct} label="上下文占用" className={cn(ratio >= USAGE_WARN_RATIO && '[&>div]:bg-warn', ratio >= 0.95 && '[&>div]:bg-danger')} />
+            <ProgressBar
+              value={pct}
+              label={t('agent.context.usage')}
+              className={cn(ratio >= USAGE_WARN_RATIO && '[&>div]:bg-warn', ratio >= 0.95 && '[&>div]:bg-danger')}
+            />
             <div className="font-latin text-caption text-fg-3">
               {formatTokens(usage.usedTokens)} / {formatTokens(usage.maxTokens)} tokens
             </div>
             <dl className="m-0 flex flex-col gap-1 text-caption">
-              <Row label="系统提示 + 记忆" value={usage.breakdown.system + usage.breakdown.memory} />
-              <Row label="引用的会话消息" value={usage.breakdown.references} />
-              <Row label="对话历史" value={usage.breakdown.history} />
-              {usage.breakdown.tools > 0 ? <Row label="工具定义" value={usage.breakdown.tools} /> : null}
+              <Row label={t('agent.context.systemAndMemory')} value={usage.breakdown.system + usage.breakdown.memory} />
+              <Row label={t('agent.context.references')} value={usage.breakdown.references} />
+              <Row label={t('agent.context.history')} value={usage.breakdown.history} />
+              {usage.breakdown.tools > 0 ? (
+                <Row label={t('agent.context.tools')} value={usage.breakdown.tools} />
+              ) : null}
             </dl>
             {onCompact ? (
               <Button variant="ghost" icon={Layers} onClick={onCompact} className="w-full">
-                压缩上下文
+                {t('agent.context.compact')}
               </Button>
             ) : null}
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <span className="text-body font-medium text-fg">上下文占用</span>
-            <span className="text-caption text-fg-3">发送第一条消息后开始统计。</span>
+            <span className="text-body font-medium text-fg">{t('agent.context.usage')}</span>
+            <span className="text-caption text-fg-3">{t('agent.context.notStarted')}</span>
           </div>
         )}
       </PopoverContent>

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { classifyWeChatWindows, type WindowInfo } from './macNative'
 
 const window = (ownerPid: number, ownerName: string, title = '', width = 1000): WindowInfo => ({
-  ownerPid, ownerName, title, bounds: { x: 0, y: 0, width, height: 700 }, area: width * 700,
+  ownerPid,
+  ownerName,
+  title,
+  bounds: { x: 0, y: 0, width, height: 700 },
+  area: width * 700,
 })
 const main = window(22, 'WeChat', '微信')
 

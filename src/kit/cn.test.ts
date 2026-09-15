@@ -21,7 +21,9 @@ describe('cn', () => {
 
   it('keeps different variants of the same group side by side', () => {
     expect(cn('border-line-8 hover:border-(--line-16)')).toBe('border-line-8 hover:border-(--line-16)')
-    expect(cn('bg-line-8 hover:bg-(--fill-13) active:bg-(--line-16)')).toBe('bg-line-8 hover:bg-(--fill-13) active:bg-(--line-16)')
+    expect(cn('bg-line-8 hover:bg-(--fill-13) active:bg-(--line-16)')).toBe(
+      'bg-line-8 hover:bg-(--fill-13) active:bg-(--line-16)',
+    )
   })
 
   it('merges the registered token scales as their own groups (font size vs colour, radius)', () => {

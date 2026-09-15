@@ -4,14 +4,8 @@
  * (the same row can exist in two shards after WeChat re-shards).
  */
 import type { WxMessage } from '@aiwc/protocol'
-import { isGroupUsername } from './accountUtils'
-import {
-  deriveSeq,
-  messageIdentityKey,
-  readRawInfo,
-  rowToWxMessage,
-  type MessageRawInfo,
-} from './messageMapper'
+import { isGroupUsername } from '../normalize/kinds'
+import { deriveSeq, messageIdentityKey, readRawInfo, rowToWxMessage, type MessageRawInfo } from './messageMapper'
 import { quoteIdent, yieldToLoop, type WcdbQuery } from './query'
 import type { Row } from './rowDecoders'
 import type { MessageTableColumns, MessageTableIndex, MessageTableRef } from './tableResolver'
@@ -34,7 +28,8 @@ const MAX_ROWS_PER_CALL = 2000
 export function seqExpression(alias: string, cols: MessageTableColumns): string {
   const a = alias ? `${alias}.` : ''
   if (cols.hasSortSeq && cols.sortSeqAllPositive) return `${a}sort_seq`
-  if (cols.hasSortSeq) return `CASE WHEN ${a}sort_seq > 0 THEN ${a}sort_seq ELSE ${a}create_time * 1000 + ${a}local_id END`
+  if (cols.hasSortSeq)
+    return `CASE WHEN ${a}sort_seq > 0 THEN ${a}sort_seq ELSE ${a}create_time * 1000 + ${a}local_id END`
   return `${a}create_time * 1000 + ${a}local_id`
 }
 
@@ -44,7 +39,14 @@ interface SelectPlan {
   myRowId: number | null
 }
 
-function buildSelect(ctx: MessageQueryContext, ref: MessageTableRef, where: string, orderDir: 'ASC' | 'DESC', limit: number, whereParams: number[]): SelectPlan {
+function buildSelect(
+  ctx: MessageQueryContext,
+  ref: MessageTableRef,
+  where: string,
+  orderDir: 'ASC' | 'DESC',
+  limit: number,
+  whereParams: number[],
+): SelectPlan {
   const cols = ctx.index.columns(ref)
   const hasName2Id = ctx.index.hasName2Id(ref.dbPath) && cols.hasRealSenderId
   const myRowId = hasName2Id ? ctx.index.myRowId(ref.dbPath, ctx.selfKeys) : null
@@ -71,7 +73,13 @@ interface Collected {
   raw: MessageRawInfo
 }
 
-function collect(ctx: MessageQueryContext, sessionId: string, ref: MessageTableRef, plan: SelectPlan, out: Map<string, Collected>): void {
+function collect(
+  ctx: MessageQueryContext,
+  sessionId: string,
+  ref: MessageTableRef,
+  plan: SelectPlan,
+  out: Map<string, Collected>,
+): void {
   let rows: Row[]
   try {
     rows = ctx.q.all(ref.dbPath, plan.sql, plan.params)
@@ -95,7 +103,13 @@ function collect(ctx: MessageQueryContext, sessionId: string, ref: MessageTableR
   }
 }
 
-async function queryDirection(ctx: MessageQueryContext, sessionId: string, cursorSeq: number, limit: number, direction: 'after' | 'before'): Promise<WxMessage[]> {
+async function queryDirection(
+  ctx: MessageQueryContext,
+  sessionId: string,
+  cursorSeq: number,
+  limit: number,
+  direction: 'after' | 'before',
+): Promise<WxMessage[]> {
   const refs = ctx.index.tablesFor(sessionId)
   if (refs.length === 0) return []
   const safeLimit = Math.max(1, Math.floor(limit))
@@ -108,17 +122,32 @@ async function queryDirection(ctx: MessageQueryContext, sessionId: string, curso
     if (refs.length > 1) await yieldToLoop()
   }
   const list = Array.from(out.values()).map((c) => c.message)
-  list.sort((a, b) => (direction === 'after' ? a.seq - b.seq : b.seq - a.seq) || a.createdAt - b.createdAt || Number(a.id) - Number(b.id))
+  list.sort(
+    (a, b) =>
+      (direction === 'after' ? a.seq - b.seq : b.seq - a.seq) ||
+      a.createdAt - b.createdAt ||
+      Number(a.id) - Number(b.id),
+  )
   return list.slice(0, safeLimit)
 }
 
 /** Messages with seq > afterSeq, ascending. */
-export function queryMessagesAfter(ctx: MessageQueryContext, sessionId: string, afterSeq: number, limit: number): Promise<WxMessage[]> {
+export function queryMessagesAfter(
+  ctx: MessageQueryContext,
+  sessionId: string,
+  afterSeq: number,
+  limit: number,
+): Promise<WxMessage[]> {
   return queryDirection(ctx, sessionId, Math.max(0, afterSeq), limit, 'after')
 }
 
 /** Messages with seq < beforeSeq, descending. */
-export function queryMessagesBefore(ctx: MessageQueryContext, sessionId: string, beforeSeq: number, limit: number): Promise<WxMessage[]> {
+export function queryMessagesBefore(
+  ctx: MessageQueryContext,
+  sessionId: string,
+  beforeSeq: number,
+  limit: number,
+): Promise<WxMessage[]> {
   return queryDirection(ctx, sessionId, beforeSeq, limit, 'before')
 }
 
@@ -130,7 +159,12 @@ export interface LocatedRow {
 }
 
 /** Find one message row by local id (falls back to server id / seq) across shards. */
-export function findMessageRow(ctx: MessageQueryContext, sessionId: string, messageId: string, seq?: number): LocatedRow | undefined {
+export function findMessageRow(
+  ctx: MessageQueryContext,
+  sessionId: string,
+  messageId: string,
+  seq?: number,
+): LocatedRow | undefined {
   const qualified = /^wx:(\d+):(\d+)$/.exec(messageId)
   if (qualified && seq === undefined) seq = Number(qualified[2])
   const numeric = qualified ? Number(qualified[1]) : /^\d+$/.test(messageId) ? Number(messageId) : Number.NaN

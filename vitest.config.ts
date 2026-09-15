@@ -9,6 +9,9 @@ const alias = {
   '@aiwc/substrate': here('./packages/substrate/src/index.ts'),
   '@aiwc/gateway': here('./packages/gateway/src/index.ts'),
   '@aiwc/memory': here('./packages/memory/src/index.ts'),
+  '@aiwc/i18n': here('./packages/i18n/src/index.ts'),
+  '@aiwc/office': here('./packages/office/src/index.ts'),
+  '@aiwc/shell': here('./packages/shell/src/index.ts'),
   '@': here('./src'),
 }
 

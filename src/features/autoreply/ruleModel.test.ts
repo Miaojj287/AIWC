@@ -16,9 +16,15 @@ import {
 const rule = (over: Partial<AutoReplyRule> = {}): AutoReplyRule => ({ ...newRule('s1'), id: 'r1', ...over })
 
 describe('newRule', () => {
-  it('starts enabled, on AI, with the default history depth', () => {
+  it('starts enabled, on AI, with the default history depth, parked behind 确认发送', () => {
     const r = newRule('s1')
-    expect(r).toMatchObject({ sessionId: 's1', enabled: true, source: 'ai', historyCount: DEFAULT_HISTORY_COUNT })
+    expect(r).toMatchObject({
+      sessionId: 's1',
+      enabled: true,
+      source: 'ai',
+      historyCount: DEFAULT_HISTORY_COUNT,
+      sendMode: 'confirm',
+    })
     expect(r.id).toBe('')
   })
 })
@@ -46,6 +52,7 @@ describe('rulesEqual', () => {
     expect(rulesEqual(base, { ...base, prompt: '换个说法' })).toBe(false)
     expect(rulesEqual(base, { ...base, historyCount: 100 })).toBe(false)
     expect(rulesEqual(base, { ...base, enabled: false })).toBe(false)
+    expect(rulesEqual(base, { ...base, sendMode: 'auto' })).toBe(false)
   })
 })
 
@@ -56,8 +63,12 @@ describe('ruleStatusLine / segments', () => {
     expect(ruleStatusLine(rule({ enabled: false, pausedReason: '账户已切换' })).text).toBe('已暂停 · 账户已切换')
     // an enabled rule that the backend paused still reads as paused, with the reason
     expect(ruleStatusLine(rule({ pausedReason: '发送已熔断' })).text).toBe('已暂停 · 发送已熔断')
-    expect(ruleStatusLine(rule({ historyCount: 50, todayCount: 3 })).text).toBe('已开启 · AI 生成 · 参考 50 条 · 今日 3 次')
-    expect(ruleStatusLine(rule({ source: 'fixed', fixedText: 'hi' })).text).toBe('已开启 · 固定文案')
+    expect(ruleStatusLine(rule({ historyCount: 50, todayCount: 3 })).text).toBe(
+      '确认后发送 · AI 生成 · 参考 50 条 · 今日 3 次',
+    )
+    expect(ruleStatusLine(rule({ source: 'fixed', fixedText: 'hi', sendMode: 'auto' })).text).toBe(
+      '自动发送 · 固定文案',
+    )
   })
 
   it('filters by segment', () => {

@@ -16,7 +16,13 @@ function setup(frontmost: string[] = ['WeChat']) {
     if (script.includes('frontmost is true')) return frontmost[Math.min(front++, frontmost.length - 1)] ?? ''
     return ''
   })
-  const injector = createDarwinInjector({ run, setClipboard: async (t) => void clipboard.push(t), sleep: async () => {}, launch: async () => {}, native: false })
+  const injector = createDarwinInjector({
+    run,
+    setClipboard: async (t) => void clipboard.push(t),
+    sleep: async () => {},
+    launch: async () => {},
+    native: false,
+  })
   return { injector, scripts, clipboard, run }
 }
 
@@ -39,7 +45,11 @@ describe('darwin injector', () => {
   it('waits for delayed activation without launching again', async () => {
     const launch = vi.fn(async () => {})
     let probes = 0
-    await activateWeChatWindow({ native: true, trusted: () => true, launch, sleep: async () => {},
+    await activateWeChatWindow({
+      native: true,
+      trusted: () => true,
+      launch,
+      sleep: async () => {},
       probeWindow: () => ({ found: probes >= 3, frontmost: ++probes >= 4 }),
     })
     expect(launch).toHaveBeenCalledTimes(1)
@@ -91,7 +101,13 @@ describe('darwin injector', () => {
     const run = vi.fn(async () => {
       throw new InjectorError('no-permission', 'osascript is not allowed assistive access')
     })
-    const injector = createDarwinInjector({ run, setClipboard: async () => {}, sleep: async () => {}, launch: async () => {}, native: false })
+    const injector = createDarwinInjector({
+      run,
+      setClipboard: async () => {},
+      sleep: async () => {},
+      launch: async () => {},
+      native: false,
+    })
     await expect(injector.commit()).rejects.toMatchObject({ reason: 'no-permission' })
   })
 })

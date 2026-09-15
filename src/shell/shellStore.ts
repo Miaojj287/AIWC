@@ -76,10 +76,19 @@ export const useShellStore = create<ShellState>((set, get) => ({
 }))
 
 /** True when any header filter deviates from the default (segment or extra filters). */
-export const hasActiveListFilters = (s: Pick<ShellState, 'listSegment' | 'listFilters'>, firstSegmentId?: string): boolean =>
-  Object.keys(s.listFilters).length > 0 || (s.listSegment !== null && s.listSegment !== firstSegmentId)
+export const hasActiveListFilters = (
+  s: Pick<ShellState, 'listSegment' | 'listFilters'>,
+  firstSegmentId?: string,
+): boolean => Object.keys(s.listFilters).length > 0 || (s.listSegment !== null && s.listSegment !== firstSegmentId)
 
 /** Reset for tests. */
 export function __resetShellStoreForTests(): void {
-  useShellStore.setState({ railFunction: 'chat', listQuery: '', listSegment: null, listFilters: {}, agentUnread: false, searchFocusRequest: 0 })
+  useShellStore.setState({
+    railFunction: 'chat',
+    listQuery: '',
+    listSegment: null,
+    listFilters: {},
+    agentUnread: false,
+    searchFocusRequest: 0,
+  })
 }

@@ -7,13 +7,14 @@ import { create } from 'zustand'
 import type { TabDescriptor, TabKind } from './tabRegistry'
 import { tabId } from './tabRegistry'
 
-export type RailFunction = 'chat' | 'autoreply' | 'clone'
+export type RailFunction = 'chat' | 'autoreply' | 'clone' | 'tasks'
 
 /** Which rail function a tab kind belongs to (for §0.2 "activate that function's last tab"). */
 export const TAB_FUNCTION: Record<TabKind, RailFunction | null> = {
   chat: 'chat',
   autoreply: 'autoreply',
   clone: 'clone',
+  task: 'tasks',
   settings: null,
   file: null,
   diary: null,
@@ -26,6 +27,8 @@ interface TabsState {
   activeId: string | null
   recentlyClosed: TabDescriptor[]
   lastActiveByFunction: Partial<Record<RailFunction, string>>
+  /** Bumped on every `open()` (new or re-activated): the Agent window reveals its workspace pane on it. */
+  openSeq: number
 
   /** Open (or activate if exists) and return the tab id. */
   open(desc: Omit<TabDescriptor, 'id'> & { id?: string }): string
@@ -48,9 +51,11 @@ export const useTabsStore = create<TabsState>((set, get) => ({
   activeId: null,
   recentlyClosed: [],
   lastActiveByFunction: {},
+  openSeq: 0,
 
   open(desc) {
     const id = desc.id ?? tabId(desc.kind, desc.objectId)
+    set((s) => ({ openSeq: s.openSeq + 1 }))
     const existing = get().tabs.find((t) => t.id === id)
     if (existing) {
       get().activate(id)
@@ -87,9 +92,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
       tabs: next,
       activeId: nextActive,
       recentlyClosed: [closed, ...s.recentlyClosed].slice(0, 20),
-      lastActiveByFunction: Object.fromEntries(
-        Object.entries(s.lastActiveByFunction).filter(([, v]) => v !== id),
-      ) as Partial<Record<RailFunction, string>>,
+      lastActiveByFunction: Object.fromEntries(Object.entries(s.lastActiveByFunction).filter(([, v]) => v !== id)),
     }))
     if (nextActive) get().activate(nextActive)
   },

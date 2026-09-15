@@ -1,4 +1,5 @@
 import type { HTMLAttributes } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 
 export type SkeletonProps = HTMLAttributes<HTMLDivElement>
@@ -16,8 +17,9 @@ export interface SkeletonListRowsProps extends HTMLAttributes<HTMLDivElement> {
 
 /** Skeleton rows shaped like ListItem: avatar 36 r8 + 10px title line + 8px subtitle line. Figma 154:980. */
 export function SkeletonListRows({ rows = 3, avatar = true, className, ...rest }: SkeletonListRowsProps) {
+  const t = useT()
   return (
-    <div role="status" aria-label="加载中" className={cn('flex flex-col gap-2.5', className)} {...rest}>
+    <div role="status" aria-label={t('kit.loading')} className={cn('flex flex-col gap-2.5', className)} {...rest}>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center gap-2.5">
           {avatar ? <Skeleton className="size-9 shrink-0 rounded-item" /> : null}

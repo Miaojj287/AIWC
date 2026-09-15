@@ -11,7 +11,10 @@ const FALLBACK_SCHEMA: Record<string, unknown> = { type: 'object', properties: {
 /** JSON Schema (input side) for a tool's zod schema. Never throws: unrepresentable → `{}`. */
 export function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
   try {
-    const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any', target: 'draft-2020-12' }) as Record<string, unknown>
+    const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any', target: 'draft-2020-12' }) as Record<
+      string,
+      unknown
+    >
     delete json.$schema
     if (json.type === undefined && json.properties !== undefined) json.type = 'object'
     return json
@@ -24,7 +27,7 @@ export function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 export function compactInput(input: unknown, max = 120): string {
   let text: string
   try {
-    text = input === undefined ? '' : JSON.stringify(input) ?? String(input)
+    text = input === undefined ? '' : (JSON.stringify(input) ?? String(input))
   } catch {
     text = String(input)
   }

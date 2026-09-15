@@ -1,11 +1,13 @@
 /**
  * OnboardingWizard — the only screen without the four columns (CLAUDE.md §1). Full-window frame with
- * the exit ×, the page (欢迎 / 连接与解锁) and the steps bar 欢迎 → 连接微信 → 解锁数据 → 完成.
+ * the language switch and exit ×, the page (欢迎 / 连接与解锁) and the steps bar 欢迎 → 连接微信 → 解锁数据 → 完成.
+ * The language switch lives here too: settings are out of reach until setup finishes (CLAUDE.md §11).
  * `onDone` fires after a successful connection test; `onExit` (optional) after the exit confirmation.
  */
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { IconButton, Tooltip, cn, toast } from '@/kit'
+import { LANGUAGES, LANGUAGE_NAMES, useLanguage, useT } from '@/i18n'
+import { IconButton, SegmentedControl, Tooltip, cn, toast } from '@/kit'
 import { useConfigStore } from '@/platform/configStore'
 import { ConnectStep } from './ConnectStep'
 import { WelcomeStep } from './WelcomeStep'
@@ -21,8 +23,9 @@ export interface OnboardingWizardProps {
 }
 
 export function StepsBar({ active }: { active: number }) {
+  const t = useT()
   return (
-    <ol className="flex items-center gap-2" aria-label="设置步骤">
+    <ol className="flex items-center gap-2" aria-label={t('onboarding.wizard.stepsLabel')}>
       {STEP_LABELS.map((label, i) => {
         const state = i < active ? 'done' : i === active ? 'current' : 'todo'
         return (
@@ -31,12 +34,18 @@ export function StepsBar({ active }: { active: number }) {
               aria-current={state === 'current' ? 'step' : undefined}
               className={cn(
                 'flex size-5 items-center justify-center rounded-chip font-latin text-micro font-medium',
-                state === 'current' ? 'bg-accent text-(--fg-on-accent)' : state === 'done' ? 'bg-accent-15 text-accent' : 'bg-line-8 text-fg-3',
+                state === 'current'
+                  ? 'bg-accent text-(--fg-on-accent)'
+                  : state === 'done'
+                    ? 'bg-accent-15 text-accent'
+                    : 'bg-line-8 text-fg-3',
               )}
             >
               {i + 1}
             </span>
-            <span className={cn('text-caption', state === 'current' ? 'font-medium text-fg' : 'text-fg-3')}>{label}</span>
+            <span className={cn('text-caption', state === 'current' ? 'font-medium text-fg' : 'text-fg-3')}>
+              {t(label)}
+            </span>
             {i < STEP_LABELS.length - 1 ? <span aria-hidden className="mx-1 h-px w-8 bg-line-8" /> : null}
           </li>
         )
@@ -46,6 +55,8 @@ export function StepsBar({ active }: { active: number }) {
 }
 
 export function OnboardingWizard({ onDone, onExit }: OnboardingWizardProps) {
+  const t = useT()
+  const language = useLanguage()
   const config = useConfigStore((s) => s.config)
   const hydrated = useWizardStore((s) => s.hydrated)
   const hydrate = useWizardStore((s) => s.hydrate)
@@ -67,7 +78,7 @@ export function OnboardingWizard({ onDone, onExit }: OnboardingWizardProps) {
   const finish = async () => {
     const ok = await testAndFinish()
     if (!ok) return
-    toast.success('已连接，正在进入主界面')
+    toast.success(t('onboarding.wizard.connected'))
     onDone()
   }
 
@@ -81,9 +92,24 @@ export function OnboardingWizard({ onDone, onExit }: OnboardingWizardProps) {
 
   return (
     <div className="flex h-full w-full flex-col bg-shell text-fg">
-      <div className="flex h-12 shrink-0 items-center justify-end px-3">
-        <Tooltip content="退出设置向导" side="bottom">
-          <IconButton icon={X} label="退出设置向导" onClick={() => setExitOpen(true)} />
+      <div className="flex h-12 shrink-0 items-center justify-between px-3">
+        {/* Native language names, so the right one is recognisable whatever the current language. */}
+        <SegmentedControl
+          size="sm"
+          aria-label={t('onboarding.wizard.language')}
+          options={LANGUAGES.map((value) => ({ value, label: LANGUAGE_NAMES[value] }))}
+          value={language}
+          onValueChange={(next) =>
+            void useConfigStore
+              .getState()
+              .set({ general: { language: next } })
+              .catch((e: unknown) =>
+                toast.error(t('common.saveFailed'), { detail: e instanceof Error ? e.message : String(e) }),
+              )
+          }
+        />
+        <Tooltip content={t('onboarding.wizard.exit')} side="bottom">
+          <IconButton icon={X} label={t('onboarding.wizard.exit')} onClick={() => setExitOpen(true)} />
         </Tooltip>
       </div>
       <div className="min-h-0 flex-1">
@@ -95,12 +121,20 @@ export function OnboardingWizard({ onDone, onExit }: OnboardingWizardProps) {
             </div>
           </div>
         ) : (
-          <ConnectStep onBack={() => setPage('welcome')} onNext={() => void finish()} stepsBar={<StepsBar active={active} />} />
+          <ConnectStep
+            onBack={() => setPage('welcome')}
+            onNext={() => void finish()}
+            stepsBar={<StepsBar active={active} />}
+          />
         )}
       </div>
 
       <ExitDialog open={exitOpen} onOpenChange={setExitOpen} onExit={() => void exit()} />
-      <ConnectFailDialog error={testError} onOpenChange={(o) => !o && clearTestError()} onReacquire={() => void acquire('auto')} />
+      <ConnectFailDialog
+        error={testError}
+        onOpenChange={(o) => !o && clearTestError()}
+        onReacquire={() => void acquire('auto')}
+      />
     </div>
   )
 }

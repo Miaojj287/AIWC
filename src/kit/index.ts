@@ -17,6 +17,11 @@ export { Checkbox, type CheckboxProps, type CheckedState } from './Checkbox'
 export { Radio, RadioGroup, type RadioProps, type RadioGroupProps } from './Radio'
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from './SegmentedControl'
 export { Select, type SelectProps, type SelectOption, type SelectFooterAction } from './Select'
+export { ColorField } from './ColorField'
+export { PermissionSelect, permissionModeName, type PermissionSelectProps } from './PermissionSelect'
+export { ModelSelect, modelLabelFor, type ModelOption, type ModelSelectProps } from './ModelSelect'
+export { vendorIconFor } from './vendorIcons'
+export { formatTokens } from './format'
 
 // text input
 export { Input, type InputProps } from './Input'
@@ -32,6 +37,7 @@ export { Spinner, type SpinnerProps, type SpinnerSize } from './Spinner'
 export { ProgressBar, type ProgressBarProps } from './ProgressBar'
 export { Skeleton, SkeletonListRows, type SkeletonProps, type SkeletonListRowsProps } from './Skeleton'
 export { EmptyState, type EmptyStateProps, type EmptyStateVariant, type EmptyStateAction } from './EmptyState'
+export { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary'
 export { Toaster, type ToasterProps } from './toast/Toaster'
 export { ToastView, type ToastViewProps } from './toast/ToastView'
 export {
@@ -54,7 +60,15 @@ export {
 
 // floating layers
 export { Tooltip, TooltipProvider, type TooltipProps, type TooltipProviderProps } from './Tooltip'
-export { Popover, PopoverTrigger, PopoverAnchor, PopoverClose, PopoverContent, type PopoverContentProps } from './Popover'
+export { HelpTip, type HelpTipProps } from './HelpTip'
+export {
+  Popover,
+  PopoverTrigger,
+  PopoverAnchor,
+  PopoverClose,
+  PopoverContent,
+  type PopoverContentProps,
+} from './Popover'
 export {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -94,6 +108,9 @@ export {
   type ContextMenuSubTriggerProps,
 } from './menu/ContextMenu'
 export type { MenuSpec, MenuSpecItem } from './menu/menuSpec'
+// Item primitives for listboxes that are not Radix menus but must look like one (combobox suggestions, tab lists).
+export { MenuItemContent, type MenuItemContentProps } from './menu/MenuItemBody'
+export { menuItemClass, menuLabelClass } from './menu/menuStyles'
 export {
   Dialog,
   DialogTrigger,

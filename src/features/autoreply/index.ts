@@ -3,29 +3,45 @@
  * (kind 'autoreply', objectId = sessionId) and the `tab.openAutoReply` command.
  */
 import { onCommand } from '@/app/commands'
+import { t } from '@/i18n'
 import { registerObjectList } from '@/shell/objectListRegistry'
 import { registerTab } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { RULE_SEGMENTS, RuleList } from './RuleList'
-import { AUTOREPLY_TAB_PREFIX, RuleEditorTab } from './RuleEditorTab'
+import { RuleEditorTab } from './RuleEditorTab'
 
 let registered = false
 
 export function register(): void {
   if (registered) return
   registered = true
-  registerTab({ kind: 'autoreply', icon: 'reply', component: RuleEditorTab })
-  registerObjectList({ fn: 'autoreply', title: '自动回复', component: RuleList, segments: RULE_SEGMENTS.map((s) => ({ id: s.id, label: s.label })) })
+  // tab.title stores the chat's own name; the localized 自动回复 · prefix is added at render.
+  registerTab({
+    kind: 'autoreply',
+    icon: 'reply',
+    component: RuleEditorTab,
+    title: (tab) => t('autoreply.tab.title', { name: tab.title }),
+  })
+  registerObjectList({
+    fn: 'autoreply',
+    get title() {
+      return t('autoreply.list.title')
+    },
+    component: RuleList,
+    segments: RULE_SEGMENTS.map((s) => ({
+      id: s.id,
+      get label() {
+        return t(s.labelKey)
+      },
+    })),
+  })
   onCommand('tab.openAutoReply', ({ sessionId, title }) => openAutoReply(sessionId, title))
 }
 
 /** Open (or focus) the rule editor for a session. */
 export function openAutoReply(sessionId: string, title: string): string {
-  return useTabsStore.getState().open({ kind: 'autoreply', objectId: sessionId, title: `${AUTOREPLY_TAB_PREFIX}${title}` })
+  return useTabsStore.getState().open({ kind: 'autoreply', objectId: sessionId, title })
 }
 
-export { RuleList, RULE_SEGMENTS } from './RuleList'
-export { RuleEditorTab } from './RuleEditorTab'
-export { useRuleEditor, type RuleEditor } from './useRuleEditor'
 export * from './ruleModel'
 export * from './recordModel'

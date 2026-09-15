@@ -23,6 +23,8 @@ export interface MacScanResult {
 interface HelperPayload {
   success?: boolean
   key?: string
+  /** `--image` mode: the 16-byte image AES key, hex encoded. */
+  aesKeyHex?: string
   attached?: boolean
   attachCode?: number
 }
@@ -47,11 +49,16 @@ function parseHelperPayload(stdout: string): HelperPayload | null {
 
 async function runHelper(helper: string, args: string[], timeoutMs: number): Promise<HelperPayload | null> {
   try {
-    const { stdout } = await execFileAsync(helper, args, { timeout: Math.max(10_000, timeoutMs), maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' })
+    const { stdout } = await execFileAsync(helper, args, {
+      timeout: Math.max(10_000, timeoutMs),
+      maxBuffer: 4 * 1024 * 1024,
+      encoding: 'utf8',
+    })
     return parseHelperPayload(stdout)
   } catch (error) {
     // A completed scan with no match exits non-zero but still prints its JSON payload.
-    const stdout = typeof (error as { stdout?: string })?.stdout === 'string' ? (error as { stdout: string }).stdout : ''
+    const stdout =
+      typeof (error as { stdout?: string })?.stdout === 'string' ? (error as { stdout: string }).stdout : ''
     return parseHelperPayload(stdout)
   }
 }
@@ -62,7 +69,17 @@ function toKey(payload: HelperPayload | null): string | undefined {
 }
 
 function crashDumpDir(): string {
-  return join(homedir(), 'Library', 'Containers', 'com.tencent.xinWeChat', 'Data', 'Documents', 'app_data', 'crashinfo', 'completed')
+  return join(
+    homedir(),
+    'Library',
+    'Containers',
+    'com.tencent.xinWeChat',
+    'Data',
+    'Documents',
+    'app_data',
+    'crashinfo',
+    'completed',
+  )
 }
 
 /**
@@ -72,7 +89,12 @@ function crashDumpDir(): string {
  * scan needs task_for_pid, which the packaged app gets from the `com.apple.security.cs.debugger`
  * entitlement + the user's "Developer Tools" grant; unsigned dev runs fall back to the crash dump.
  */
-export async function scanMacDbKey(pid: number, sessionDbPath: string, nativeDir: string, timeoutMs = 25_000): Promise<MacScanResult> {
+export async function scanMacDbKey(
+  pid: number,
+  sessionDbPath: string,
+  nativeDir: string,
+  timeoutMs = 25_000,
+): Promise<MacScanResult> {
   const helper = helperPath(nativeDir)
   if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
   if (!Number.isInteger(pid) || pid <= 0) return { error: '未找到微信进程' }
@@ -91,7 +113,11 @@ export async function scanMacDbKey(pid: number, sessionDbPath: string, nativeDir
  * FILES only (no task_for_pid), so it works in an unsigned dev build and is the reliable fallback
  * when the live scan is denied. `sessionDbPath` is the concrete session.db used to validate matches.
  */
-export async function scanMacDbKeyFromDumps(sessionDbPath: string, nativeDir: string, timeoutMs = 30_000): Promise<MacScanResult> {
+export async function scanMacDbKeyFromDumps(
+  sessionDbPath: string,
+  nativeDir: string,
+  timeoutMs = 30_000,
+): Promise<MacScanResult> {
   const helper = helperPath(nativeDir)
   if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
   const dumpPath = crashDumpDir()
@@ -102,16 +128,25 @@ export async function scanMacDbKeyFromDumps(sessionDbPath: string, nativeDir: st
 }
 
 /** Read-only image AES scan (`--image <pid> <ciphertext-hex>`); returns the 16-char ASCII key. */
-export async function scanMacImageAesKey(pid: number, ciphertext: Buffer, nativeDir: string, timeoutMs = 30_000): Promise<string | null> {
+export async function scanMacImageAesKey(
+  pid: number,
+  ciphertext: Buffer,
+  nativeDir: string,
+  timeoutMs = 30_000,
+): Promise<string | null> {
   const helper = helperPath(nativeDir)
   if (!helper || ciphertext.length < 16 || pid <= 0) return null
   try {
-    const { stdout } = await execFileAsync(helper, ['--image', String(pid), ciphertext.subarray(0, 16).toString('hex')], {
-      timeout: Math.max(10_000, timeoutMs),
-      maxBuffer: 1024 * 1024,
-      encoding: 'utf8',
-    })
-    const payload = parseHelperPayload(stdout) as { success?: boolean; aesKeyHex?: string } | null
+    const { stdout } = await execFileAsync(
+      helper,
+      ['--image', String(pid), ciphertext.subarray(0, 16).toString('hex')],
+      {
+        timeout: Math.max(10_000, timeoutMs),
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+      },
+    )
+    const payload = parseHelperPayload(stdout)
     const keyHex = payload?.aesKeyHex
     if (payload?.success && typeof keyHex === 'string' && /^[0-9a-fA-F]{32}$/.test(keyHex)) {
       return Buffer.from(keyHex, 'hex').toString('ascii')
@@ -160,7 +195,12 @@ function parseHookResult(raw: string): { key?: string; code?: string; detail?: s
   if (!text) return { code: 'UNKNOWN' }
   const fromJson = extractHookKeyFromJson(text)
   if (fromJson) return { key: fromJson }
-  const lastLine = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
+  const lastLine =
+    text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .at(-1) ?? ''
   if (isValidKeyHex(lastLine)) return { key: lastLine.toLowerCase() }
   if (lastLine.startsWith('ERROR:')) {
     const parts = lastLine.split(':')
@@ -171,9 +211,11 @@ function parseHookResult(raw: string): { key?: string; code?: string; detail?: s
 
 function mapHookError(code?: string, detail?: string): string {
   if (code === 'PROCESS_NOT_FOUND') return '微信主进程未运行'
-  if (code === 'ATTACH_FAILED') return `无法附加微信进程（${detail || 'operation not permitted'}）。请关闭 SIP 或授予调试权限后重试。`
+  if (code === 'ATTACH_FAILED')
+    return `无法附加微信进程（${detail || 'operation not permitted'}）。请关闭 SIP 或授予调试权限后重试。`
   if (code === 'SCAN_FAILED') return `未定位到目标函数（${detail || 'sink pattern not found'}）`
-  if (code === 'HOOK_FAILED') return `已定位目标，但等待超时（${detail || 'hook timeout'}）。请在提示出现后登录微信或退出后重新登录。`
+  if (code === 'HOOK_FAILED')
+    return `已定位目标，但等待超时（${detail || 'hook timeout'}）。请在提示出现后登录微信或退出后重新登录。`
   if (code === 'HOOK_TARGET_ONLY') return `仅定位到目标地址，尚未捕获到最终密钥（${detail || ''}）`
   return detail ? `${code || 'UNKNOWN'}：${detail}` : '密钥获取失败'
 }
@@ -200,7 +242,7 @@ export async function captureMacDbKeyViaHook(
   const waitMs = Math.max(timeoutMs, 30_000)
 
   onStatus?.(`已找到微信进程 PID=${pid}，正在安装挂钩…`)
-  return await new Promise<MacHookCaptureResult>((resolve) => {
+  return new Promise<MacHookCaptureResult>((resolve) => {
     const child = spawn(helper, [String(pid), String(waitMs)], { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''

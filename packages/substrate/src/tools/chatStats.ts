@@ -5,14 +5,26 @@
 import type { StatsQuery } from '@aiwc/protocol'
 import { z } from 'zod'
 import { scopeBotSession } from './botScope'
-import { READ_PROFILES, TimeRangeRefinement, defineSubstrateTool, describeToolError, fail, fmtTime, ok } from './shared'
+import {
+  READ_PROFILES,
+  TimeRangeRefinement,
+  defineSubstrateTool,
+  describeToolError,
+  fail,
+  fmtTime,
+  ok,
+  timeFrom,
+  timeTo,
+} from './shared'
 
 const ChatStatsInput = z
   .object({
-    metric: z.enum(['overview', 'ranking', 'time_distribution']).describe('overview 总览；ranking 互动排行；time_distribution 时间分布'),
+    metric: z
+      .enum(['overview', 'ranking', 'time_distribution'])
+      .describe('overview 总览；ranking 互动排行；time_distribution 时间分布'),
     sessionId: z.string().trim().min(1).optional().describe('限定某会话（username）；不传则全局'),
-    from: z.number().int().nonnegative().optional().describe('起始时间，毫秒时间戳'),
-    to: z.number().int().nonnegative().optional().describe('结束时间，毫秒时间戳'),
+    from: timeFrom().optional(),
+    to: timeTo().optional(),
     groupBy: z.enum(['hour', 'weekday', 'day', 'month']).optional().describe('time_distribution 的分组维度，默认 hour'),
     limit: z.number().int().min(1).max(100).default(20).describe('ranking 返回条数（≤100）'),
   })

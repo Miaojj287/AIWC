@@ -44,8 +44,20 @@ export interface WxContact {
 }
 
 export type MessageKind =
-  | 'text' | 'image' | 'voice' | 'video' | 'file' | 'sticker' | 'link' | 'card'
-  | 'location' | 'transfer' | 'quote' | 'system' | 'revoke' | 'other'
+  | 'text'
+  | 'image'
+  | 'voice'
+  | 'video'
+  | 'file'
+  | 'sticker'
+  | 'link'
+  | 'card'
+  | 'location'
+  | 'transfer'
+  | 'quote'
+  | 'system'
+  | 'revoke'
+  | 'other'
 
 export interface WxMedia {
   kind: 'image' | 'voice' | 'video' | 'file' | 'sticker'
@@ -60,7 +72,19 @@ export interface WxMedia {
 
 /** Structured, read-only presentation of a WeChat rich message. */
 export interface WxRichContent {
-  type: 'link' | 'article' | 'miniProgram' | 'channel' | 'music' | 'chatHistory' | 'contact' | 'location' | 'transfer' | 'redPacket' | 'announcement' | 'gift'
+  type:
+    | 'link'
+    | 'article'
+    | 'miniProgram'
+    | 'channel'
+    | 'music'
+    | 'chatHistory'
+    | 'contact'
+    | 'location'
+    | 'transfer'
+    | 'redPacket'
+    | 'announcement'
+    | 'gift'
   title: string
   description?: string
   url?: string
@@ -128,6 +152,12 @@ export interface SearchQuery {
   to?: Millis
   limit: number
   mode?: 'keyword' | 'semantic' | 'hybrid'
+  /**
+   * 'exact' (default): every term must occur as typed — what a search box in the UI means.
+   * 'relaxed': Chinese runs are also matched by their dictionary words and short words are OR-ed,
+   * ranked by how many match — what an agent asking a natural-language question needs.
+   */
+  match?: 'exact' | 'relaxed'
 }
 
 export interface SearchHit {
@@ -184,7 +214,10 @@ export type SubstrateEvent =
 
 /** Voice → text port. Implementations: local (sherpa-onnx) / online provider. */
 export interface VoiceTranscriber {
-  transcribe(audioPath: string, opts?: { language?: string; signal?: AbortSignal }): Promise<{ text: string; durationMs?: number }>
+  transcribe(
+    audioPath: string,
+    opts?: { language?: string; signal?: AbortSignal },
+  ): Promise<{ text: string; durationMs?: number }>
 }
 
 export interface SubstrateService {
@@ -198,7 +231,9 @@ export interface SubstrateService {
   /** ±N messages around an anchor. */
   getContext(anchor: MessageAnchor, radius: number): Promise<WxMessage[]>
   search(q: SearchQuery): Promise<SearchHit[]>
-  listContacts(q: { query?: string; kind?: WxContact['kind'] | 'all' } & PageRequest): Promise<{ items: WxContact[]; total: number }>
+  listContacts(
+    q: { query?: string; kind?: WxContact['kind'] | 'all' } & PageRequest,
+  ): Promise<{ items: WxContact[]; total: number }>
   getContact(username: string): Promise<WxContact | undefined>
   listGroupMembers(groupId: string, q?: PageRequest): Promise<{ items: WxContact[]; total: number }>
   stats(q: StatsQuery): Promise<StatsResult>
@@ -208,9 +243,16 @@ export interface SubstrateService {
   sync(opts?: { full?: boolean }): Promise<SyncStatus>
   subscribe(listener: (event: SubstrateEvent) => void): () => void
   /** Read-only SQL escape hatch (audited). Only whitelisted DBs, SELECT only. */
-  querySql?(req: { db: 'message' | 'contact' | 'session'; sql: string; limit?: number }): Promise<{ columns: string[]; rows: unknown[][] }>
+  querySql?(req: {
+    db: 'message' | 'contact' | 'session'
+    sql: string
+    limit?: number
+  }): Promise<{ columns: string[]; rows: unknown[][] }>
   /** Local-only session flags kept in the mirror (never written back to WeChat). */
-  setSessionFlags?(sessionId: string, flags: { pinned?: boolean; muted?: boolean; hidden?: boolean; read?: boolean }): Promise<void>
+  setSessionFlags?(
+    sessionId: string,
+    flags: { pinned?: boolean; muted?: boolean; hidden?: boolean; read?: boolean },
+  ): Promise<void>
   /** Drop a session's local index (messages, chunks, vectors); the source is untouched. */
   removeIndex?(sessionId: string): Promise<void>
   /** Drop and re-sync one session. */

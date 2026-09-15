@@ -17,11 +17,6 @@ export interface ContextFragment {
   render(): string
 }
 
-export interface FragmentBounds {
-  kind: string
-  tokenCap: number
-}
-
 /** Cheap token estimate shared across the codebase (CJK-aware: ~1 token per 1.6 chars). */
 export function estimateTokens(text: string): number {
   if (!text) return 0

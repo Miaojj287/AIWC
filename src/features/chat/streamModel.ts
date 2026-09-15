@@ -3,6 +3,7 @@
  * locating anchors and producing copy text. No React, no bridge — all covered by streamModel.test.ts.
  */
 import type { MessageKind, WxMessage } from '@aiwc/protocol'
+import { t, type MessageKey } from '@/i18n'
 
 export type StreamRow = { kind: 'day'; id: string; at: number } | { kind: 'message'; id: string; message: WxMessage }
 
@@ -13,13 +14,14 @@ function localDayKey(ms: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
 }
 
-export function sameLocalDay(a: number, b: number): boolean {
-  return localDayKey(a) === localDayKey(b)
-}
-
 /** Sort by seq (then id for stability) and drop duplicate ids — pages from the substrate may overlap. */
-export function mergeMessages(existing: readonly WxMessage[], incoming: readonly WxMessage[], mode: MergeMode): WxMessage[] {
-  const source = mode === 'replace' ? incoming : mode === 'prepend' ? [...incoming, ...existing] : [...existing, ...incoming]
+export function mergeMessages(
+  existing: readonly WxMessage[],
+  incoming: readonly WxMessage[],
+  mode: MergeMode,
+): WxMessage[] {
+  const source =
+    mode === 'replace' ? incoming : mode === 'prepend' ? [...incoming, ...existing] : [...existing, ...incoming]
   const seen = new Set<string>()
   const out: WxMessage[] = []
   for (const m of source) {
@@ -50,52 +52,65 @@ export function rowIndexOfMessage(rows: readonly StreamRow[], messageId: string)
   return rows.findIndex((r) => r.kind === 'message' && r.id === messageId)
 }
 
-const KIND_PLACEHOLDER: Partial<Record<MessageKind, string>> = {
-  image: '[图片]',
-  voice: '[语音]',
-  video: '[视频]',
-  file: '[文件]',
-  sticker: '[表情]',
-  link: '[链接]',
-  card: '[名片]',
-  location: '[位置]',
-  transfer: '[转账]',
-  other: '[消息]',
+const KIND_PLACEHOLDER: Partial<Record<MessageKind, MessageKey>> = {
+  image: 'chat.placeholder.image',
+  voice: 'chat.placeholder.voice',
+  video: 'chat.placeholder.video',
+  file: 'chat.placeholder.file',
+  sticker: 'chat.placeholder.sticker',
+  link: 'chat.placeholder.link',
+  card: 'chat.placeholder.card',
+  location: 'chat.placeholder.location',
+  transfer: 'chat.placeholder.transfer',
+  other: 'chat.placeholder.message',
 }
 
 /** What "复制" puts on the clipboard for one message. */
 export function plainTextOf(m: WxMessage): string {
-  if (m.rich) return [m.rich.title, m.rich.description, m.rich.amount, m.rich.url,
-    ...(m.rich.entries ?? []).map((entry) => [entry.title, entry.description, entry.url].filter(Boolean).join('\n')),
-  ].filter(Boolean).join('\n')
+  if (m.rich)
+    return [
+      m.rich.title,
+      m.rich.description,
+      m.rich.amount,
+      m.rich.url,
+      ...(m.rich.entries ?? []).map((entry) => [entry.title, entry.description, entry.url].filter(Boolean).join('\n')),
+    ]
+      .filter(Boolean)
+      .join('\n')
   switch (m.kind) {
     case 'text':
       return m.text
     case 'quote':
-      return m.quote ? `「${m.quote.senderName ?? ''}：${m.quote.text}」\n${m.text}` : m.text
+      return m.quote
+        ? `${t('chat.copy.quote', { name: m.quote.senderName ?? '', text: m.quote.text })}\n${m.text}`
+        : m.text
     case 'voice':
-      return m.media?.transcript ? m.media.transcript : m.text || '[语音]'
+      return m.media?.transcript ? m.media.transcript : m.text || t('chat.placeholder.voice')
     case 'file':
-      return m.media?.fileName ? `[文件] ${m.media.fileName}` : '[文件]'
+      return m.media?.fileName
+        ? t('chat.placeholder.fileNamed', { name: m.media.fileName })
+        : t('chat.placeholder.file')
     case 'system':
     case 'revoke':
       return m.text
     case 'link':
-      return m.text || '[链接]'
-    default:
-      return m.text || KIND_PLACEHOLDER[m.kind] || ''
+      return m.text || t('chat.placeholder.link')
+    default: {
+      const placeholder = KIND_PLACEHOLDER[m.kind]
+      return m.text || (placeholder ? t(placeholder) : '')
+    }
   }
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 /** Multi-message copy: one line per message with time and sender. */
-export function transcriptOf(messages: readonly WxMessage[], selfName = '我'): string {
+export function transcriptOf(messages: readonly WxMessage[], selfName = t('common.me')): string {
   return messages
     .map((m) => {
       const d = new Date(m.createdAt)
       const time = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
-      const who = m.kind === 'system' ? '系统' : m.isSelf ? selfName : m.senderName ?? m.senderId
+      const who = m.kind === 'system' ? t('chat.copy.systemSender') : m.isSelf ? selfName : (m.senderName ?? m.senderId)
       return `[${time}] ${who}: ${plainTextOf(m)}`
     })
     .join('\n')

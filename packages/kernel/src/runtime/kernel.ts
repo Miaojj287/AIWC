@@ -15,7 +15,7 @@ import {
   type ToolProfile,
   type UserInput,
 } from '@aiwc/protocol'
-import type { ThreadRecord } from '../ports'
+import type { RolloutStore, ThreadRecord } from '../ports'
 import { createEmitter } from './emitter'
 import { Thread, type ThreadDeps } from './thread'
 import type { ChildRunOptions, KernelInternal, KernelOptions } from './types'
@@ -37,7 +37,8 @@ export function profileForChannel(channel: ChannelKind): ToolProfile {
  * A group origin carries the sender (peerId) next to the room (chatId); a DM carries peerId === chatId or none.
  * Bot threads are keyed per (channel, chatId, peerId) for groups and per (channel, chatId) for DMs.
  */
-export const isGroupOrigin = (origin: ThreadOrigin): boolean => !!origin.chatId && !!origin.peerId && origin.peerId !== origin.chatId
+export const isGroupOrigin = (origin: ThreadOrigin): boolean =>
+  !!origin.chatId && !!origin.peerId && origin.peerId !== origin.chatId
 
 export const sameBotOrigin = (a: ThreadOrigin, b: ThreadOrigin): boolean => {
   if (a.channel !== b.channel || !a.chatId || a.chatId !== b.chatId) return false
@@ -46,6 +47,27 @@ export const sameBotOrigin = (a: ThreadOrigin, b: ThreadOrigin): boolean => {
 
 const botThreadKey = (origin: ThreadOrigin): string =>
   isGroupOrigin(origin) ? `${origin.channel}:${origin.chatId}:${origin.peerId}` : `${origin.channel}:${origin.chatId}`
+
+/**
+ * Profiles whose threads belong to the kernel rather than to any conversation list. Lookups exclude them, so a
+ * delegate child an older build persisted (and a crash never removed) cannot show up as a dead conversation.
+ */
+const UNLISTED_PROFILES: readonly ToolProfile[] = ['subagent']
+
+/**
+ * Store for delegate children: their history lives in memory for their single run, so nothing reaches the
+ * rollout files, the listing index or search, and a crash mid-delegate leaves nothing behind.
+ */
+const EPHEMERAL_ROLLOUT: RolloutStore = {
+  create: () => Promise.resolve(),
+  append: () => Promise.resolve(),
+  flush: () => Promise.resolve(),
+  resume: () => Promise.resolve(undefined),
+  list: () => Promise.resolve([]),
+  updateMeta: () => Promise.resolve(),
+  remove: () => Promise.resolve(),
+  search: () => Promise.resolve([]),
+}
 
 export function createKernel(opts: KernelOptions): KernelInternal {
   const { services } = opts
@@ -89,6 +111,12 @@ export function createKernel(opts: KernelOptions): KernelInternal {
     const job = (async () => {
       const state = await services.rollout.resume(threadId)
       if (!state) return undefined
+      if (state.skippedLines) {
+        logger?.('warn', 'thread resumed without its unreadable rollout lines', {
+          threadId,
+          skippedLines: state.skippedLines,
+        })
+      }
       const again = threads.get(threadId)
       if (again) return again
       const thread = new Thread(threadDeps(), {
@@ -112,19 +140,24 @@ export function createKernel(opts: KernelOptions): KernelInternal {
     return thread
   }
 
-  const createThread = async (threadId: ThreadId, origin: ThreadOrigin, settings: ThreadSettings, extra?: Pick<ThreadDeps, 'depth' | 'maxSteps'>): Promise<Thread> => {
+  const createThread = async (threadId: ThreadId, origin: ThreadOrigin, settings: ThreadSettings): Promise<Thread> => {
     if (threads.has(threadId)) throw new Error(`thread already exists: ${threadId}`)
     await services.rollout.create({ threadId, origin, settings, title: settings.title })
-    const thread = new Thread(threadDeps(extra), { threadId, origin, settings })
+    const thread = new Thread(threadDeps(), { threadId, origin, settings })
     threads.set(threadId, thread)
     emitter.emit({ type: 'thread.created', threadId, settings, origin })
     return thread
   }
 
-  const runToCompletion = async (thread: Thread, input: UserInput, signal?: AbortSignal): Promise<{ text: string; artifacts: ToolArtifact[] }> => {
+  const runToCompletion = async (
+    thread: Thread,
+    input: UserInput,
+    signal?: AbortSignal,
+  ): Promise<{ text: string; artifacts: ToolArtifact[] }> => {
     const artifacts: ToolArtifact[] = []
     const off = emitter.on((e: Event) => {
-      if (e.type === 'tool.call' && e.threadId === thread.id && e.status === 'done' && e.artifacts?.length) artifacts.push(...e.artifacts)
+      if (e.type === 'tool.call' && e.threadId === thread.id && e.status === 'done' && e.artifacts?.length)
+        artifacts.push(...e.artifacts)
     })
     try {
       const handle = await thread.startTurn(input, 'start')
@@ -159,7 +192,8 @@ export function createKernel(opts: KernelOptions): KernelInternal {
         const loaded = await loadThread(threadId)
         if (loaded) return loaded.id
       }
-      const create = async (): Promise<ThreadId> => (await createThread(threadId ?? newThreadId(), origin, defaultSettings(origin, settings))).id
+      const create = async (): Promise<ThreadId> =>
+        (await createThread(threadId ?? newThreadId(), origin, defaultSettings(origin, settings))).id
       if (origin.channel === 'desktop' || !origin.chatId) return create()
 
       // check-then-create is racy: two messages from the same chat (or group member) arriving before its thread
@@ -171,7 +205,11 @@ export function createKernel(opts: KernelOptions): KernelInternal {
         for (const t of threads.values()) {
           if (t.depth === 0 && sameBotOrigin(t.origin, origin)) return t.id
         }
-        const records = await services.rollout.list({ channel: origin.channel, limit: 500 })
+        const records = await services.rollout.list({
+          channel: origin.channel,
+          limit: 500,
+          excludeProfiles: UNLISTED_PROFILES,
+        })
         const match = records.find((r) => sameBotOrigin(r.origin, origin))
         if (match) {
           const loaded = await loadThread(match.threadId)
@@ -189,33 +227,60 @@ export function createKernel(opts: KernelOptions): KernelInternal {
     },
 
     async runChild(child: ChildRunOptions) {
+      // A child acts on its parent's behalf, so it is bounded like the parent: the same permission mode (never
+      // wider) and the same model (a local-only thread's data must not reach the online default). Without a live
+      // parent there is nothing to inherit from, so the child is refused rather than run with defaults.
+      const parent = threads.get(child.parentThreadId)
+      if (!parent) throw new Error(`unknown parent thread: ${child.parentThreadId}`)
       const childId = newThreadId()
-      const settings: ThreadSettings = { permissionMode: 'bypass', profile: 'subagent', allowAlways: [], title: child.label }
-      const thread = await createThread(childId, child.origin, settings, { depth: child.depth, maxSteps: child.maxSteps })
+      const settings: ThreadSettings = {
+        permissionMode: parent.settings.permissionMode,
+        model: parent.settings.model,
+        profile: 'subagent',
+        allowAlways: [],
+        title: child.label,
+      }
+      // Registered so ops (interrupt, approvals) and kernel shutdown reach it, but never announced with
+      // thread.created: the renderer lists every created thread, and a child is not a conversation.
+      const thread = new Thread(
+        {
+          ...threadDeps({ depth: child.depth, maxSteps: child.maxSteps }),
+          services: { ...services, rollout: EPHEMERAL_ROLLOUT },
+        },
+        { threadId: childId, origin: child.origin, settings },
+      )
+      threads.set(childId, thread)
       emitter.emit({ type: 'subagent', threadId: child.parentThreadId, childId, status: 'started', label: child.label })
       try {
         const result = await runToCompletion(thread, child.input, child.signal)
         emitter.emit({ type: 'subagent', threadId: child.parentThreadId, childId, status: 'done', label: child.label })
         return result
       } catch (err) {
-        emitter.emit({ type: 'subagent', threadId: child.parentThreadId, childId, status: 'failed', label: child.label })
+        emitter.emit({
+          type: 'subagent',
+          threadId: child.parentThreadId,
+          childId,
+          status: 'failed',
+          label: child.label,
+        })
         throw err
       } finally {
-        await thread.shutdown().catch(() => undefined)
+        await thread.shutdown().catch((err) => logger?.('warn', 'child thread shutdown failed', err))
         threads.delete(childId)
-        await services.rollout.remove(childId).catch((err) => logger?.('warn', 'child rollout cleanup failed', err))
       }
     },
 
     listThreads(listOpts) {
-      return services.rollout.list(listOpts)
+      return services.rollout.list({ ...listOpts, excludeProfiles: UNLISTED_PROFILES })
     },
 
     async getThread(threadId) {
       const thread = await loadThread(threadId)
       if (!thread) return undefined
       const items: HistoryItem[] = [...thread.context.all()]
-      const listed = (await services.rollout.list({ includeArchived: true, limit: 1000 })).find((r) => r.threadId === threadId)
+      const listed = (await services.rollout.list({ includeArchived: true, limit: 1000 })).find(
+        (r) => r.threadId === threadId,
+      )
       const record: ThreadRecord = listed ?? {
         threadId,
         origin: thread.origin,

@@ -14,12 +14,11 @@ export interface WidthBounds {
 
 export const OBJECT_LIST_WIDTH: WidthBounds = { min: 240, max: 400, default: 280 }
 export const AGENT_PANEL_WIDTH: WidthBounds = { min: 320, max: 640, default: 360 }
-/** Collapsed Agent panel strip. */
-export const AGENT_STRIP_WIDTH = 40
 /** Collapsed ObjectList re-expand handle. */
 export const LIST_HANDLE_WIDTH = 12
 
-export const clampWidth = (value: number, bounds: WidthBounds): number => Math.round(Math.min(bounds.max, Math.max(bounds.min, value)))
+export const clampWidth = (value: number, bounds: WidthBounds): number =>
+  Math.round(Math.min(bounds.max, Math.max(bounds.min, value)))
 
 export interface ColumnLayout {
   listWidth: number
@@ -49,8 +48,12 @@ export function useColumnLayout(ui: Ui | undefined): ColumnLayout {
 
   const [listWidth, setListWidth] = useState(cfgList)
   const [agentWidth, setAgentWidth] = useState(cfgAgent)
+  // Width at drag start and the width last applied, per column. Only handlers and effects write them: setState
+  // updaters stay pure (StrictMode runs them twice), and a keyboard nudge commits before any re-render.
   const listStart = useRef(cfgList)
   const agentStart = useRef(cfgAgent)
+  const listLive = useRef(cfgList)
+  const agentLive = useRef(cfgAgent)
   const dragging = useRef<{ list: boolean; agent: boolean }>({ list: false, agent: false })
 
   // external changes (settings page, another window) win when not dragging
@@ -58,12 +61,14 @@ export function useColumnLayout(ui: Ui | undefined): ColumnLayout {
     if (!dragging.current.list) {
       setListWidth(cfgList)
       listStart.current = cfgList
+      listLive.current = cfgList
     }
   }, [cfgList])
   useEffect(() => {
     if (!dragging.current.agent) {
       setAgentWidth(cfgAgent)
       agentStart.current = cfgAgent
+      agentLive.current = cfgAgent
     }
   }, [cfgAgent])
 
@@ -76,36 +81,36 @@ export function useColumnLayout(ui: Ui | undefined): ColumnLayout {
 
   const resizeList = useCallback((delta: number) => {
     dragging.current.list = true
-    setListWidth(clampWidth(listStart.current + delta, OBJECT_LIST_WIDTH))
+    listLive.current = clampWidth(listStart.current + delta, OBJECT_LIST_WIDTH)
+    setListWidth(listLive.current)
   }, [])
   // the agent column sits on the right: dragging its handle to the right shrinks it
   const resizeAgent = useCallback((delta: number) => {
     dragging.current.agent = true
-    setAgentWidth(clampWidth(agentStart.current - delta, AGENT_PANEL_WIDTH))
+    agentLive.current = clampWidth(agentStart.current - delta, AGENT_PANEL_WIDTH)
+    setAgentWidth(agentLive.current)
   }, [])
   const commitList = useCallback(() => {
     dragging.current.list = false
-    setListWidth((w) => {
-      listStart.current = w
-      if (w !== cfgList) persist({ objectListWidth: w })
-      return w
-    })
+    const width = listLive.current
+    listStart.current = width
+    if (width !== cfgList) persist({ objectListWidth: width })
   }, [cfgList, persist])
   const commitAgent = useCallback(() => {
     dragging.current.agent = false
-    setAgentWidth((w) => {
-      agentStart.current = w
-      if (w !== cfgAgent) persist({ agentPanelWidth: w })
-      return w
-    })
+    const width = agentLive.current
+    agentStart.current = width
+    if (width !== cfgAgent) persist({ agentPanelWidth: width })
   }, [cfgAgent, persist])
   const resetList = useCallback(() => {
     listStart.current = OBJECT_LIST_WIDTH.default
+    listLive.current = OBJECT_LIST_WIDTH.default
     setListWidth(OBJECT_LIST_WIDTH.default)
     persist({ objectListWidth: OBJECT_LIST_WIDTH.default })
   }, [persist])
   const resetAgent = useCallback(() => {
     agentStart.current = AGENT_PANEL_WIDTH.default
+    agentLive.current = AGENT_PANEL_WIDTH.default
     setAgentWidth(AGENT_PANEL_WIDTH.default)
     persist({ agentPanelWidth: AGENT_PANEL_WIDTH.default })
   }, [persist])

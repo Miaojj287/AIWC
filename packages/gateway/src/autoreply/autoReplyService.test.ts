@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AutoReplyRecord, AutoReplyRule, GatewayEvent, MessageEvent, ReplyDraft, SendRequest, SendResult, SessionKey } from '@aiwc/protocol'
+import type {
+  AutoReplyRecord,
+  AutoReplyRule,
+  GatewayEvent,
+  MessageEvent,
+  ReplyDraft,
+  SendRequest,
+  SendResult,
+  SessionKey,
+} from '@aiwc/protocol'
 import { createAutoReplyService, type AutoReplyServiceDeps } from './autoReplyService'
 import { createAutoReplyRecordStore } from './recordStore'
 import { substituteTemplate, templateVars } from './template'
@@ -13,13 +22,22 @@ const rule = (sessionId: string, over: Partial<AutoReplyRule> = {}): AutoReplyRu
   source: 'fixed',
   fixedText: '{昵称}你好，已收到消息，稍后回复（{时间}）',
   historyCount: 30,
+  sendMode: 'auto',
   updatedAt: 0,
   ...over,
 })
 
 const KEY = 'agent:wechat-ilink:dm:u_alice' as SessionKey
 
-function setup(opts: { rules?: AutoReplyRule[]; countdownMs?: number; generate?: AutoReplyServiceDeps['generate']; sendImpl?: (req: SendRequest) => Promise<SendResult>; supportsRecall?: boolean } = {}) {
+function setup(
+  opts: {
+    rules?: AutoReplyRule[]
+    countdownMs?: number
+    generate?: AutoReplyServiceDeps['generate']
+    sendImpl?: (req: SendRequest) => Promise<SendResult>
+    supportsRecall?: boolean
+  } = {},
+) {
   const records = createAutoReplyRecordStore({ dbPath: ':memory:' })
   for (const r of opts.rules ?? [rule('u_alice')]) records.saveRule(r)
   const sent: SendRequest[] = []
@@ -46,15 +64,28 @@ function setup(opts: { rules?: AutoReplyRule[]; countdownMs?: number; generate?:
     supportsRecall: () => opts.supportsRecall ?? false,
   })
   service.events.on((e) => events.push(e))
-  const lastDraft = () => drafts[drafts.length - 1]
+  const lastDraft = (): ReplyDraft => {
+    const draft = drafts.at(-1)
+    if (!draft) throw new Error('expected the service to have produced a draft')
+    return draft
+  }
   return { service, records, gateway, sent, drafts, recs, events, lastDraft }
 }
 
-const ev = (over: Partial<MessageEvent> = {}) => fakeEvent({ id: 'trig_1', text: '请问报价多少', timestamp: 1_700_000_000_000, raw: { context_token: 'ctx-1' }, ...over })
+const ev = (over: Partial<MessageEvent> = {}) =>
+  fakeEvent({
+    id: 'trig_1',
+    text: '请问报价多少',
+    timestamp: 1_700_000_000_000,
+    raw: { context_token: 'ctx-1' },
+    ...over,
+  })
 
 describe('template substitution', () => {
   it('fills {昵称}{时间}{群名}', () => {
-    const e = ev({ source: { channel: 'wechat-ilink', peerId: 'u1', chatId: 'g1@chatroom', chatType: 'group', displayName: '王伟' } })
+    const e = ev({
+      source: { channel: 'wechat-ilink', peerId: 'u1', chatId: 'g1@chatroom', chatType: 'group', displayName: '王伟' },
+    })
     const vars = templateVars(e, { groupName: '产品群' }, new Date(2026, 8, 7, 9, 5).getTime())
     expect(vars).toEqual({ nickname: '王伟', time: '09:05', groupName: '产品群' })
     expect(substituteTemplate('{群名}·{昵称}·{时间}·{未知}', vars)).toBe('产品群·王伟·09:05·{未知}')
@@ -78,20 +109,30 @@ describe('createAutoReplyService', () => {
     h.service.hold(draft.id) // the reply desk's "wait, let me look at it"
     await h.service.stop()
     expect(h.records.getDraft(draft.id)?.state).toBe('pending')
-    const next = createAutoReplyService({ gateway: h.gateway, records: h.records, countdownMs: () => 5000, generate: async () => 'unused', onDraft: () => {} })
+    const next = createAutoReplyService({
+      gateway: h.gateway,
+      records: h.records,
+      countdownMs: () => 5000,
+      generate: async () => 'unused',
+      onDraft: () => {},
+    })
     next.start()
     await next.resolveDraft(draft.id, 'approve')
     expect(h.sent).toHaveLength(1)
-    expect(h.sent[0].contextToken).toBe('ctx-1')
+    expect(h.sent[0]?.contextToken).toBe('ctx-1')
     expect(h.records.getRecord(draft.recordId!)?.status).toBe('sent')
     await next.stop()
     h.records.close()
   })
 
   it('waits for an aborted generation before allowing the record store to close', async () => {
-    const h = setup({ rules: [rule('u_alice', { source: 'ai' })], generate: async (_event, _rule, context) => new Promise((_resolve, reject) => {
-      context.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
-    }) })
+    const h = setup({
+      rules: [rule('u_alice', { source: 'ai' })],
+      generate: async (_event, _rule, context) =>
+        new Promise((_resolve, reject) => {
+          context.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        }),
+    })
     const generation = h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     await h.service.stop()
     await generation
@@ -105,18 +146,32 @@ describe('createAutoReplyService', () => {
     await service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
 
     expect(drafts).toHaveLength(1)
-    expect(drafts[0]).toMatchObject({ state: 'pending', mode: 'auto', draft: 'Alice你好，已收到消息，稍后回复（10:30）', countdownEndsAt: Date.now() + 3000 })
+    expect(drafts[0]).toMatchObject({
+      state: 'pending',
+      mode: 'auto',
+      draft: 'Alice你好，已收到消息，稍后回复（10:30）',
+      countdownEndsAt: Date.now() + 3000,
+    })
     expect(events[0]).toEqual({ type: 'autoreply.queued', draftId: drafts[0]!.id })
     expect(events[1]).toEqual({ type: 'autoreply.countdown', draftId: drafts[0]!.id, remainingMs: 3000 })
     expect(recs[0]).toMatchObject({ status: 'pending', triggerMessage: { id: 'trig_1', text: '请问报价多少' } })
     expect(sent).toHaveLength(0)
 
     await vi.advanceTimersByTimeAsync(2000)
-    expect(events.filter((e) => e.type === 'autoreply.countdown').map((e) => (e.type === 'autoreply.countdown' ? e.remainingMs : -1))).toEqual([3000, 2000, 1000])
+    expect(
+      events
+        .filter((e) => e.type === 'autoreply.countdown')
+        .map((e) => (e.type === 'autoreply.countdown' ? e.remainingMs : -1)),
+    ).toEqual([3000, 2000, 1000])
     expect(sent).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(1000)
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toMatchObject({ reason: 'auto_reply', contextToken: 'ctx-1', to: { chatId: 'u_alice' }, parts: [{ type: 'text', text: 'Alice你好，已收到消息，稍后回复（10:30）' }] })
+    expect(sent[0]).toMatchObject({
+      reason: 'auto_reply',
+      contextToken: 'ctx-1',
+      to: { chatId: 'u_alice' },
+      parts: [{ type: 'text', text: 'Alice你好，已收到消息，稍后回复（10:30）' }],
+    })
     expect(drafts.map((d) => d.state)).toEqual(['pending', 'sending', 'sent'])
     const rec = records.listRecords({ sessionId: 'u_alice' })[0]!
     expect(rec.status).toBe('sent')
@@ -141,7 +196,12 @@ describe('createAutoReplyService', () => {
     const { service, sent, drafts, records } = setup({ rules: [rule('u_alice', { source: 'ai' })] })
     await service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     service.hold(drafts[0]!.id)
-    expect(drafts.at(-1)).toMatchObject({ state: 'pending', mode: 'confirm', draft: 'AI 草稿', expiresAt: Date.now() + 30 * 60_000 })
+    expect(drafts.at(-1)).toMatchObject({
+      state: 'pending',
+      mode: 'confirm',
+      draft: 'AI 草稿',
+      expiresAt: Date.now() + 30 * 60_000,
+    })
     await vi.advanceTimersByTimeAsync(60_000)
     expect(sent).toHaveLength(0)
 
@@ -165,7 +225,9 @@ describe('createAutoReplyService', () => {
       { type: 'text', text: '改过的回复' },
       { type: 'text', text: '第二条' },
     ])
-    expect(records.listRecords({ status: 'sent' }).find((r) => r.triggerMessage.id === 'trig_3')?.replyText).toBe('改过的回复\n---wx-next---\n第二条')
+    expect(records.listRecords({ status: 'sent' }).find((r) => r.triggerMessage.id === 'trig_3')?.replyText).toBe(
+      '改过的回复\n---wx-next---\n第二条',
+    )
   })
 
   it('no rule / rule disabled / decision reply=false → nothing happens', async () => {
@@ -207,7 +269,10 @@ describe('createAutoReplyService', () => {
   it('cancel() rejects a pending draft; different chats do not supersede each other', async () => {
     const { service, sent, drafts, records } = setup({ countdownMs: 1000, rules: [rule('u_alice'), rule('u_bob')] })
     await service.handle(ev({ id: 'a' }), { reply: true, reason: 'ok' }, KEY)
-    const bob = ev({ id: 'b', source: { channel: 'wechat-ilink', peerId: 'u_bob', chatId: 'u_bob', chatType: 'dm', displayName: 'Bob' } })
+    const bob = ev({
+      id: 'b',
+      source: { channel: 'wechat-ilink', peerId: 'u_bob', chatId: 'u_bob', chatType: 'dm', displayName: 'Bob' },
+    })
     await service.handle(bob, { reply: true, reason: 'ok' }, 'agent:wechat-ilink:dm:u_bob' as SessionKey)
     expect(drafts.filter((d) => d.state === 'pending')).toHaveLength(2)
 
@@ -259,7 +324,8 @@ describe('createAutoReplyService', () => {
     await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     await vi.advanceTimersByTimeAsync(0)
     expect(h.sent).toHaveLength(1)
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('a successful attempt stays latched, so a redelivered trigger never double-sends', async () => {
@@ -274,7 +340,8 @@ describe('createAutoReplyService', () => {
     await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY, { force: true })
     await vi.advanceTimersByTimeAsync(0)
     expect(h.sent).toHaveLength(2)
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('generation failure → failed draft + failed record, no send', async () => {
@@ -298,7 +365,10 @@ describe('createAutoReplyService', () => {
     expect(plain.records.listRecords()[0]?.status).toBe('failed')
     expect(plain.service.halted).toBe(false)
 
-    const verified = setup({ countdownMs: 0, sendImpl: async () => ({ ok: false, verified: false, error: '发到了别的会话' }) })
+    const verified = setup({
+      countdownMs: 0,
+      sendImpl: async () => ({ ok: false, verified: false, error: '发到了别的会话' }),
+    })
     await verified.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     await vi.advanceTimersByTimeAsync(0)
     expect(verified.service.halted).toBe(true)
@@ -344,7 +414,11 @@ describe('createAutoReplyService', () => {
 
       await service.resolveDraft('drf_handoff', 'edit', '改一下再发')
       expect(sent).toHaveLength(1)
-      expect(sent[0]).toMatchObject({ to: handoff().source, reason: 'auto_reply', parts: [{ type: 'text', text: '改一下再发' }] })
+      expect(sent[0]).toMatchObject({
+        to: handoff().source,
+        reason: 'auto_reply',
+        parts: [{ type: 'text', text: '改一下再发' }],
+      })
       expect(records.getDraft('drf_handoff')?.state).toBe('sent')
       // a handoff has no AutoReplyRecord of its own; the gateway outbound event is its audit trail
       expect(recs).toHaveLength(0)
@@ -369,9 +443,17 @@ describe('createAutoReplyService', () => {
       service.enqueueDraft(handoff())
       expect(records.getDraft(first.id)).toMatchObject({ state: 'expired', error: expect.stringContaining('新草稿') })
       await service.handle(ev({ id: 'trig_2' }), { reply: true, reason: 'ok' }, KEY)
-      expect(records.getDraft('drf_handoff')).toMatchObject({ state: 'expired', error: expect.stringContaining('新消息') })
+      expect(records.getDraft('drf_handoff')).toMatchObject({
+        state: 'expired',
+        error: expect.stringContaining('新消息'),
+      })
       const second = drafts.filter((d) => d.triggerMessageId === 'trig_2').at(-1)!
-      service.enqueueDraft(handoff({ id: 'drf_bob', source: { channel: 'wechat-ilink', chatId: 'u_bob', peerId: 'u_bob', chatType: 'dm' } }))
+      service.enqueueDraft(
+        handoff({
+          id: 'drf_bob',
+          source: { channel: 'wechat-ilink', chatId: 'u_bob', peerId: 'u_bob', chatType: 'dm' },
+        }),
+      )
       expect(records.getDraft(second.id)?.state).toBe('pending') // another chat does not interfere
       expect(sent).toHaveLength(0)
     })
@@ -400,15 +482,25 @@ describe('createAutoReplyService', () => {
   it('drops an old generation when a newer message arrives before the model finishes', async () => {
     let finish!: (text: string) => void
     let calls = 0
-    const h = setup({ rules: [rule('u_alice', { source: 'ai' })], generate: () => ++calls === 1 ? new Promise((resolve) => { finish = resolve }) : Promise.resolve('新回复') })
+    const h = setup({
+      rules: [rule('u_alice', { source: 'ai' })],
+      generate: () =>
+        ++calls === 1
+          ? new Promise((resolve) => {
+              finish = resolve
+            })
+          : Promise.resolve('新回复'),
+    })
     const first = h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     await Promise.resolve()
     await h.service.handle(ev({ id: 'new', text: '补充问题' }), { reply: true, reason: 'ok' }, KEY)
-    finish('已过时的回复'); await first
+    finish('已过时的回复')
+    await first
     await vi.advanceTimersByTimeAsync(5000)
     expect(h.sent).toHaveLength(1)
     expect(h.sent[0]?.parts).toEqual([{ type: 'text', text: '新回复' }])
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('holding a countdown makes the draft editable and prevents automatic sending', async () => {
@@ -420,12 +512,13 @@ describe('createAutoReplyService', () => {
     expect(h.sent).toEqual([])
     await h.service.resolveDraft(id, 'edit', '修改后的回复')
     expect(h.sent[0]?.parts).toEqual([{ type: 'text', text: '修改后的回复' }])
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('reports send failure to the caller, and can retry an ordinary network failure', async () => {
     let attempts = 0
-    const h = setup({ sendImpl: async () => ++attempts === 1 ? { ok: false, error: 'offline' } : { ok: true } })
+    const h = setup({ sendImpl: async () => (++attempts === 1 ? { ok: false, error: 'offline' } : { ok: true }) })
     await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
     const id = h.lastDraft()!.id
     h.service.hold(id)
@@ -433,7 +526,8 @@ describe('createAutoReplyService', () => {
     await h.service.retry(id)
     expect(h.records.getDraft(id)?.state).toBe('sent')
     expect(h.records.listRecords()[0]?.status).toBe('sent')
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('does not send expired approvals even without opening the reply desk', async () => {
@@ -444,14 +538,33 @@ describe('createAutoReplyService', () => {
     await vi.advanceTimersByTimeAsync(31 * 60000)
     await expect(h.service.resolveDraft(id, 'approve')).rejects.toThrow('已过期')
     expect(h.sent).toEqual([])
-    h.service.stop(); h.records.close()
+    h.service.stop()
+    h.records.close()
   })
 
   it('start() subscribes to the gateway and expires stale auto drafts from a previous run', async () => {
     const records = createAutoReplyRecordStore({ dbPath: ':memory:' })
     records.saveRule(rule('u_alice'))
-    records.saveDraft({ id: 'old_auto', source: ev().source, triggerMessageId: 'x', triggerText: 'x', draft: 'x', state: 'pending', createdAt: 1, mode: 'auto' })
-    records.saveDraft({ id: 'old_confirm', source: ev().source, triggerMessageId: 'y', triggerText: 'y', draft: 'y', state: 'pending', createdAt: 1, mode: 'confirm' })
+    records.saveDraft({
+      id: 'old_auto',
+      source: ev().source,
+      triggerMessageId: 'x',
+      triggerText: 'x',
+      draft: 'x',
+      state: 'pending',
+      createdAt: 1,
+      mode: 'auto',
+    })
+    records.saveDraft({
+      id: 'old_confirm',
+      source: ev().source,
+      triggerMessageId: 'y',
+      triggerText: 'y',
+      draft: 'y',
+      state: 'pending',
+      createdAt: 1,
+      mode: 'confirm',
+    })
 
     const gw = createGateway({ rules: async () => records.listRules() })
     const adapter = createFakeAdapter('wechat-ilink')
@@ -459,7 +572,13 @@ describe('createAutoReplyService', () => {
     const drafts: ReplyDraft[] = []
     const gwEvents: GatewayEvent[] = []
     gw.events.on((e) => gwEvents.push(e))
-    const service = createAutoReplyService({ gateway: gw, records, countdownMs: () => 0, onDraft: (d) => drafts.push(d), generate: async () => 'x' })
+    const service = createAutoReplyService({
+      gateway: gw,
+      records,
+      countdownMs: () => 0,
+      onDraft: (d) => drafts.push(d),
+      generate: async () => 'x',
+    })
     service.start()
     service.start() // idempotent
     expect(records.getDraft('old_auto')?.state).toBe('expired')
@@ -476,5 +595,90 @@ describe('createAutoReplyService', () => {
     expect(gwEvents.some((e) => e.type === 'outbound')).toBe(true)
     service.stop()
     expect(drafts.at(-1)?.state).toBe('sent')
+  })
+})
+
+describe('sendMode confirm (自动回复): the reply waits for the click', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 8, 7, 10, 30))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('parks the draft, links it to a pending record and never sends on its own', async () => {
+    const h = setup({ rules: [rule('u_alice', { sendMode: 'confirm' })] })
+    h.service.start()
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    const draft = h.lastDraft()
+    expect(draft).toMatchObject({ mode: 'confirm', state: 'pending', countdownEndsAt: undefined, expiresAt: undefined })
+    const record = h.records.getRecord(draft.recordId!)!
+    expect(record).toMatchObject({ status: 'pending', sendMode: 'confirm', draftId: draft.id, replyText: draft.draft })
+    await vi.advanceTimersByTimeAsync(60 * 60_000)
+    expect(h.sent).toHaveLength(0)
+    expect(h.records.getRecord(draft.recordId!)?.status).toBe('pending')
+    await h.service.resolveDraft(draft.id, 'edit', '改过的回复')
+    expect(h.sent).toHaveLength(1)
+    expect(h.sent[0]?.parts).toEqual([{ type: 'text', text: '改过的回复' }])
+    expect(h.records.getRecord(draft.recordId!)).toMatchObject({ status: 'sent', replyText: '改过的回复' })
+    await h.service.stop()
+    h.records.close()
+  })
+
+  it('keeps the parked draft across a restart and does not regenerate for the same message unless forced', async () => {
+    const generate = vi.fn(async () => 'AI 草稿')
+    const h = setup({ rules: [rule('u_alice', { sendMode: 'confirm', source: 'ai' })], generate })
+    h.service.start()
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    const draft = h.lastDraft()
+    await h.service.stop()
+    const next = createAutoReplyService({
+      gateway: h.gateway,
+      records: h.records,
+      countdownMs: () => 5000,
+      generate,
+      onDraft: (d) => h.drafts.push(d),
+    })
+    next.start()
+    // The monitor's catch-up re-offers the same unanswered message after a restart.
+    await next.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(h.records.getDraft(draft.id)?.state).toBe('pending')
+    // 立即触发一次 asks for a fresh draft on purpose.
+    await next.handle(ev(), { reply: true, reason: 'ok' }, KEY, { force: true })
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(h.records.getDraft(draft.id)?.state).toBe('expired')
+    expect(h.records.getRecord(draft.recordId!)?.status).toBe('rejected')
+    await next.stop()
+    h.records.close()
+  })
+
+  it('replaces the parked draft when the peer writes again, so the button always answers the latest message', async () => {
+    const h = setup({ rules: [rule('u_alice', { sendMode: 'confirm' })] })
+    h.service.start()
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    const first = h.lastDraft()
+    await h.service.handle(ev({ id: 'trig_2', text: '另外还想问个事' }), { reply: true, reason: 'ok' }, KEY)
+    const second = h.lastDraft()
+    expect(second.id).not.toBe(first.id)
+    expect(h.records.getDraft(first.id)).toMatchObject({ state: 'expired', error: '被同一会话的新消息取代' })
+    expect(h.records.getRecord(first.recordId!)?.status).toBe('rejected')
+    await expect(h.service.resolveDraft(first.id, 'approve')).rejects.toThrow('草稿不存在')
+    await h.service.resolveDraft(second.id, 'approve')
+    expect(h.sent).toHaveLength(1)
+    await h.service.stop()
+    h.records.close()
+  })
+
+  it('a reply-desk retry still times out, a parked rule reply does not', async () => {
+    const h = setup({ rules: [rule('u_alice', { sendMode: 'confirm' })] })
+    h.service.start()
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    const parked = h.lastDraft()
+    await vi.advanceTimersByTimeAsync(31 * 60_000)
+    expect(h.service.listDrafts().find((d) => d.id === parked.id)?.state).toBe('pending')
+    await h.service.stop()
+    h.records.close()
   })
 })

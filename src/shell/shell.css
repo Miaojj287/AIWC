@@ -9,6 +9,7 @@
   --rail-tile-chat: linear-gradient(135deg, rgb(255 178 87) 0%, rgb(255 106 31) 100%);
   --rail-tile-autoreply: linear-gradient(135deg, rgb(124 181 255) 0%, rgb(61 110 224) 100%);
   --rail-tile-clone: linear-gradient(135deg, rgb(255 154 134) 0%, rgb(227 69 63) 100%);
+  --rail-tile-tasks: linear-gradient(135deg, rgb(102 214 176) 0%, rgb(24 150 118) 100%);
   --rail-tile-user: linear-gradient(135deg, rgb(74 75 87) 0%, rgb(42 43 51) 100%);
 
   /* Scrollbar thumb overlays — the same white 12% / 20% the base sheet already used, lifted into
@@ -52,13 +53,13 @@
   background: var(--scrollbar-thumb-hover);
 }
 
-/* Native controls occupy existing columns, never a full-width title row. */
-[data-runtime='electron'][data-platform='darwin'] nav[aria-label='功能'] {
+/* Native controls occupy existing columns, never a full-width title row. Column rules key on the shell-* classes,
+ * never on test ids or aria-label (translated copy; AGENTS.md §2.5). */
+[data-runtime='electron'][data-platform='darwin'] .shell-rail {
   padding-top: 44px;
 }
-[data-runtime='electron'] nav[aria-label='功能'] {
-  -webkit-app-region: drag;
-}
+/* Do not make the rail draggable: it overlaps the sibling window controls,
+ * and native drag hit-testing can swallow their clicks regardless of z-index. */
 [data-runtime='electron'] .workspace-tab-strip,
 [data-runtime='electron'] .workspace-tab-strip [role='tablist'] {
   -webkit-app-region: drag;
@@ -68,10 +69,10 @@
   -webkit-app-region: no-drag;
 }
 /* Windows caption buttons sit above the Agent tools in their own column. */
-[data-runtime='electron'][data-platform='win32'] [data-testid='agent-panel']:not([hidden]) {
+[data-runtime='electron'][data-platform='win32'] .shell-agent-panel:not([hidden]) {
   padding-top: 32px;
 }
-[data-runtime='electron'][data-platform='win32'] [data-testid='agent-strip'] {
+[data-runtime='electron'][data-platform='win32'] .shell-agent-strip {
   padding-top: 40px;
 }
 [data-runtime='electron'][data-platform='win32'][data-agent-collapsed='true'] .workspace-tab-strip {
@@ -81,18 +82,21 @@
 /* 12px dots, 18px centre spacing: fits the 64px navigation column. */
 .mac-window-controls {
   position: absolute;
-  top: 12px;
-  left: 8px;
+  top: 6px;
+  left: 5px;
   z-index: 50;
   display: flex;
-  gap: 6px;
+  gap: 0;
+  -webkit-app-region: no-drag;
 }
 .mac-window-control {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
-  height: 12px;
+  position: relative;
+  width: 18px;
+  height: 24px;
+  background: transparent;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -100,12 +104,102 @@
   font: 12px/1 Arial, sans-serif;
   -webkit-app-region: no-drag;
 }
-.mac-window-control[data-action='close'] { background: #ff5f57; }
-.mac-window-control[data-action='minimize'] { background: #febc2e; }
-.mac-window-control[data-action='fullscreen'] { background: #28c840; }
-.mac-window-controls[data-focused='false']:not(:hover) .mac-window-control { background: #55565b; }
-.mac-window-control span { opacity: 0; }
+.mac-window-control::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--window-dot);
+  pointer-events: none;
+}
+.mac-window-control[data-action='close'] { --window-dot: #ff5f57; }
+.mac-window-control[data-action='minimize'] { --window-dot: #febc2e; }
+.mac-window-control[data-action='fullscreen'] { --window-dot: #28c840; }
+.mac-window-controls[data-focused='false']:not(:hover) .mac-window-control { --window-dot: #55565b; }
+.mac-window-control span { position: relative; pointer-events: none; opacity: 0; }
 .mac-window-controls:hover .mac-window-control span,
 .mac-window-control:focus-visible span { opacity: 1; }
-.mac-window-control:focus-visible { outline: 2px solid var(--color-fg, #e8e9ee); outline-offset: 2px; }
+.mac-window-control:focus-visible { outline: 2px solid var(--color-fg, #ffffff); outline-offset: 2px; }
 .mac-window-control:active { filter: brightness(.8); }
+
+/*
+ * 透明效果 (设置 › 常规 › 外观). <html data-glass="true"> is stamped by platform/appearance applyTransparency, and only
+ * on the desktop runtimes whose window carries a native blur layer behind the page (macOS vibrancy, Windows 11
+ * acrylic — electron/main/windows/mainWindow.ts). The rail and the object list become tinted glass over the
+ * desktop; the workspace and the Agent panel stay opaque so content keeps its contrast. "Liquid glass" details
+ * on top of the plain tint: a 1px specular line along the top inner edge, a faint vertical sheen, and translucent
+ * (never opaque) fills for the few controls that sit on the sheet. Everything derives from the palette tokens,
+ * so custom colours and the light theme tint their own glass. These rules are unlayered on purpose: they must
+ * beat the Tailwind utilities (bg-shell / bg-panel / bg-content) already on the elements.
+ */
+:root[data-glass='true'] {
+  /* Light tints on purpose. The native material (macOS sidebar vibrancy / Windows acrylic) already keeps text readable
+   * over white pages and dark editors alike; measured on macOS 26, a 50% tint on top made the glass look nearly opaque,
+   * while 18% / 12% lets the wallpaper colour through and still carries a trace of the palette. */
+  --glass-rail: color-mix(in srgb, var(--bg-shell) 18%, transparent);
+  --glass-list: color-mix(in srgb, var(--bg-panel) 12%, transparent);
+  --glass-control: color-mix(in srgb, var(--bg-content) 28%, transparent);
+  /* 1px specular line along the top edge, painted as a background layer (no box-shadow in the shell — CLAUDE.md §2.1). */
+  --glass-edge: linear-gradient(color-mix(in srgb, var(--fg) 14%, transparent), color-mix(in srgb, var(--fg) 14%, transparent));
+  --glass-sheen: linear-gradient(180deg, color-mix(in srgb, var(--fg) 6%, transparent) 0%, transparent 36%);
+}
+:root[data-glass='true'] body,
+:root[data-glass='true'] .shell-root {
+  background: transparent;
+}
+:root[data-glass='true'] .shell-rail,
+:root[data-glass='true'] .shell-list {
+  background-color: var(--glass-list);
+  background-image: var(--glass-edge), var(--glass-sheen);
+  background-size: 100% 1px, 100% 100%;
+  background-repeat: no-repeat;
+}
+:root[data-glass='true'] .shell-rail {
+  background-color: var(--glass-rail);
+}
+/* Controls on the sheet: the list search box and the header tools (更多筛选, 刷新) drop their opaque content ground. */
+:root[data-glass='true'] .shell-list [role='search'],
+:root[data-glass='true'] .shell-list .shell-list-tool {
+  background-color: var(--glass-control);
+}
+:root[data-glass='true'] .shell-list .shell-list-tool:hover {
+  background-color: color-mix(in srgb, var(--bg-content) 45%, transparent);
+}
+
+/*
+ * Agent 窗口 (CLAUDE.md §12, src/shell/AgentWindowFrame.tsx): sidebar | conversation | on-demand workspace pane.
+ * The header row above the conversation is the drag region; its controls opt out. The sidebar keeps the rail's
+ * rule (never draggable: it overlaps the window controls) and only makes room for them, like the rail does.
+ */
+[data-runtime='electron'][data-platform='darwin'] .shell-agent-sidebar {
+  padding-top: 44px;
+}
+[data-runtime='electron'][data-platform='darwin'] .shell-agent-window[data-sidebar-collapsed='true'] .shell-agent-header {
+  padding-left: 76px;
+}
+[data-runtime='electron'] .shell-agent-header {
+  -webkit-app-region: drag;
+}
+[data-runtime='electron'] .shell-agent-header button,
+[data-runtime='electron'] .shell-agent-header [role='button'],
+[data-runtime='electron'] .shell-agent-header [role='combobox'] {
+  -webkit-app-region: no-drag;
+}
+/* Windows caption buttons overlay the top-right corner: the header while the pane is hidden, else the pane's tab strip. */
+[data-runtime='electron'][data-platform='win32'] .shell-agent-window[data-pane-visible='false'] .shell-agent-header {
+  padding-right: 100px;
+}
+[data-runtime='electron'][data-platform='win32'] .shell-agent-pane .workspace-tab-strip {
+  padding-right: 100px;
+}
+/* 透明效果: the Agent window's sidebar is the object list's counterpart and gets the same tinted glass. */
+:root[data-glass='true'] .shell-agent-sidebar {
+  background-color: var(--glass-list);
+  background-image: var(--glass-edge), var(--glass-sheen);
+  background-size: 100% 1px, 100% 100%;
+  background-repeat: no-repeat;
+}
+:root[data-glass='true'] .shell-agent-sidebar [role='search'] {
+  background-color: var(--glass-control);
+}

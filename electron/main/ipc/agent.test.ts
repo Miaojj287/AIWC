@@ -2,7 +2,8 @@ import type { Op, ThreadId, ThreadOrigin } from '@aiwc/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppContext } from '../contracts'
 import { registerAgentIpc } from './agent'
-import type { Handle, Handler, HostBridge } from './register'
+import type { HostBridge } from './register'
+import { createHandlerHarness } from './testing/handlerHarness'
 
 const desktopThread = 'thr_desktop' as ThreadId
 const botThread = 'thr_bot' as ThreadId
@@ -24,19 +25,19 @@ function setup() {
     logger,
     broadcast,
   } as unknown as AppContext
-  const handlers = new Map<string, Handler<never>>()
-  const handle: Handle = (channel, fn) => {
-    handlers.set(channel, fn as Handler<never>)
-  }
-  registerAgentIpc(ctx, {} as HostBridge, handle)
-  const submitHandler = handlers.get('agent:submit') as unknown as (raw: unknown) => Promise<void>
-  return { submit, warn, broadcast, invoke: (raw: unknown) => submitHandler(raw) }
+  const ipc = createHandlerHarness()
+  registerAgentIpc(ctx, {} as HostBridge, ipc.handle)
+  return { submit, warn, broadcast, invoke: async (raw: unknown) => ipc.invokeRaw('agent:submit', raw) }
 }
 
 describe('agent:submit IPC handler', () => {
   it('forwards a valid renderer op to the kernel untouched', async () => {
     const { submit, invoke, broadcast } = setup()
-    const op = { type: 'turn.start', threadId: desktopThread, input: { content: [{ type: 'text', text: 'hi' }], mentions: [] } }
+    const op = {
+      type: 'turn.start',
+      threadId: desktopThread,
+      input: { content: [{ type: 'text', text: 'hi' }], mentions: [] },
+    }
     await invoke(op)
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[0]).toEqual(op)
@@ -45,13 +46,20 @@ describe('agent:submit IPC handler', () => {
 
   it('on violation: logs, broadcasts an error event to the thread and throws without reaching the kernel', async () => {
     const { submit, warn, broadcast, invoke } = setup()
-    const op = { type: 'turn.start', threadId: botThread, input: { content: [{ type: 'text', text: 'hi' }], mentions: [] } }
+    const op = {
+      type: 'turn.start',
+      threadId: botThread,
+      input: { content: [{ type: 'text', text: 'hi' }], mentions: [] },
+    }
     await expect(invoke(op)).rejects.toThrow(/wechat-ilink/)
     expect(submit).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('forbidden_thread')
     expect(broadcast).toHaveBeenCalledTimes(1)
-    const [channel, event] = broadcast.mock.calls[0] as [string, { type: string; threadId: string; error: { code: string } }]
+    const [channel, event] = broadcast.mock.calls[0] as [
+      string,
+      { type: string; threadId: string; error: { code: string } },
+    ]
     expect(channel).toBe('agent:event')
     expect(event.type).toBe('error')
     expect(event.threadId).toBe(botThread)

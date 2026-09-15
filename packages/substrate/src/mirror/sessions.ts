@@ -79,7 +79,9 @@ export function createSessionOps(db: Db): SessionOps {
     }
     const query = q.query?.trim()
     if (query) {
-      clauses.push("(nickname LIKE ? ESCAPE '\\' OR remark LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')")
+      clauses.push(
+        "(nickname LIKE ? ESCAPE '\\' OR remark LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')",
+      )
       const p = likePattern(query)
       params.push(p, p, p, p)
     }
@@ -124,7 +126,12 @@ export function createSessionOps(db: Db): SessionOps {
       const limit = Math.max(1, Math.floor(q.limit || 50))
       const offset = Math.max(0, Math.floor(q.offset ?? 0))
       const total = num(db.get<{ c: number }>(`SELECT COUNT(*) AS c FROM sessions ${where}`, ...params)?.c)
-      const rows = db.all<SessionRow>(`SELECT * FROM sessions ${where} ${SESSION_ORDER} LIMIT ? OFFSET ?`, ...params, limit, offset)
+      const rows = db.all<SessionRow>(
+        `SELECT * FROM sessions ${where} ${SESSION_ORDER} LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset,
+      )
       const items = rows.map(rowToSession)
       return { items, total, hasMore: offset + items.length < total }
     },
@@ -153,7 +160,16 @@ export function createSessionOps(db: Db): SessionOps {
       if (!contacts.length) return
       db.tx(() => {
         for (const c of contacts) {
-          db.run(upsertContactSql, c.username, c.nickname ?? '', c.remark ?? null, c.alias ?? null, c.avatarPath ?? null, c.kind, c.lastContactAt ?? null)
+          db.run(
+            upsertContactSql,
+            c.username,
+            c.nickname ?? '',
+            c.remark ?? null,
+            c.alias ?? null,
+            c.avatarPath ?? null,
+            c.kind,
+            c.lastContactAt ?? null,
+          )
         }
       })
     },
@@ -182,7 +198,12 @@ export function createSessionOps(db: Db): SessionOps {
         db.run('DELETE FROM group_members WHERE group_id = ?', groupId)
         for (const m of members) {
           if (!m.username) continue
-          db.run('INSERT OR REPLACE INTO group_members (group_id, username, display_name) VALUES (?, ?, ?)', groupId, m.username, m.displayName ?? null)
+          db.run(
+            'INSERT OR REPLACE INTO group_members (group_id, username, display_name) VALUES (?, ?, ?)',
+            groupId,
+            m.username,
+            m.displayName ?? null,
+          )
         }
         db.run('UPDATE sessions SET member_count = ? WHERE id = ?', members.length, groupId)
       })

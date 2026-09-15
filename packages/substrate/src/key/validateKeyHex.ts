@@ -1,5 +1,9 @@
 import { normalizeWechatHex, validateWechatKey, type WechatKeyKind } from '@aiwc/protocol'
-export interface KeyHexValidation { ok: boolean; error?: string; normalized?: string }
+export interface KeyHexValidation {
+  ok: boolean
+  error?: string
+  normalized?: string
+}
 export const normalizeKeyHex = normalizeWechatHex
 const parse = (kind: WechatKeyKind, input: string): KeyHexValidation => {
   const result = validateWechatKey(kind, input)

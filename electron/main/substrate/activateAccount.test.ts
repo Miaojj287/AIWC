@@ -9,12 +9,19 @@ function setup(saved = 'a', connected = 'a', fail = false) {
   const opened: string[] = []
   const config = {
     get: () => value,
-    set: (patch: { account: Partial<AppConfig['account']> }) => { value = { ...value, account: { ...value.account, ...patch.account } }; return value },
-    replace: (next: AppConfig) => { value = next; return value },
+    set: (patch: { account: Partial<AppConfig['account']> }) => {
+      value = { ...value, account: { ...value.account, ...patch.account } }
+      return value
+    },
+    replace: (next: AppConfig) => {
+      value = next
+      return value
+    },
   }
   const status = () => ({ connection: 'ready', sync: { phase: 'idle' }, account })
   const substrate = {
-    status, refreshStatus: async () => status(),
+    status,
+    refreshStatus: async () => status(),
     reconnect: vi.fn(async () => {
       opened.push(value.account.wxid!)
       if (fail && value.account.wxid === 'b') return { ok: false, error: 'wrong key' }
@@ -42,7 +49,10 @@ describe('main-process account activation', () => {
   })
   it('serializes rapid account selections', async () => {
     const s = setup()
-    const results = await Promise.all([s.activate({ wxid: 'b', dbRoot: '/root' }), s.activate({ wxid: 'c', dbRoot: '/root' })])
+    const results = await Promise.all([
+      s.activate({ wxid: 'b', dbRoot: '/root' }),
+      s.activate({ wxid: 'c', dbRoot: '/root' }),
+    ])
     expect(results).toEqual([{ ok: true }, { ok: true }])
     expect(s.opened).toEqual(['b', 'c'])
     expect(s.substrate.status().account.wxid).toBe('c')
@@ -50,7 +60,10 @@ describe('main-process account activation', () => {
   it('rejects a successful reconnect that still reports the old identity', async () => {
     const s = setup()
     s.substrate.reconnect.mockImplementation(async () => ({ ok: true }))
-    expect(await s.activate({ wxid: 'b', dbRoot: '/root' })).toMatchObject({ ok: false, error: '实际连接账号与所选账号不一致' })
+    expect(await s.activate({ wxid: 'b', dbRoot: '/root' })).toMatchObject({
+      ok: false,
+      error: '实际连接账号与所选账号不一致',
+    })
     expect(s.config.get().account.wxid).toBe('a')
   })
 })

@@ -67,7 +67,11 @@ export function createIlinkSessionStore(stateDir: string, options: { persist?: b
       }
     },
     save(session, extra) {
-      write({ ...session, savedAt: new Date().toISOString(), getUpdatesBuf: extra?.getUpdatesBuf ?? cached?.getUpdatesBuf })
+      write({
+        ...session,
+        savedAt: new Date().toISOString(),
+        getUpdatesBuf: extra?.getUpdatesBuf ?? cached?.getUpdatesBuf,
+      })
     },
     saveCursor(getUpdatesBuf) {
       const current = cached ?? this.load()

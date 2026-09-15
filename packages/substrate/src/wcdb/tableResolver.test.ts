@@ -26,7 +26,8 @@ function fakeQuery(tablesByDb: Record<string, string[]>, columns: Record<string,
       return []
     },
     get: (dbPath, sql, params) => fakeQuery(tablesByDb, columns).all(dbPath, sql, params)[0],
-    tableExists: (dbPath, tableName) => (tablesByDb[dbPath] ?? []).some((n) => n.toLowerCase() === tableName.toLowerCase()),
+    tableExists: (dbPath, tableName) =>
+      (tablesByDb[dbPath] ?? []).some((n) => n.toLowerCase() === tableName.toLowerCase()),
     columns: (dbPath) => (columns[dbPath] ?? []).map((r) => String(r['name'])),
     tables: (dbPath, like) => {
       const names = tablesByDb[dbPath] ?? []
@@ -51,7 +52,13 @@ describe('MessageTableIndex', () => {
       [dbB]: ['Msg_deadbeefdeadbeefdeadbeefdeadbeef'],
     },
     {
-      [dbA]: [{ name: 'local_id' }, { name: 'create_time' }, { name: 'sort_seq' }, { name: 'real_sender_id' }, { name: 'server_id' }],
+      [dbA]: [
+        { name: 'local_id' },
+        { name: 'create_time' },
+        { name: 'sort_seq' },
+        { name: 'real_sender_id' },
+        { name: 'server_id' },
+      ],
     },
   )
 
@@ -76,7 +83,11 @@ describe('MessageTableIndex', () => {
 
   it('honours a TTL clock for rescanning', () => {
     let now = 0
-    const index = new MessageTableIndex(q, () => shards, () => now)
+    const index = new MessageTableIndex(
+      q,
+      () => shards,
+      () => now,
+    )
     expect(index.tablesFor('wxid_friend')).toHaveLength(1)
     index.invalidate()
     now = 1

@@ -1,12 +1,43 @@
 import { describe, expect, it } from 'vitest'
-import { asCallId, asItemId, asTurnId, newItemId, newStepId, type HistoryItem, type ToolResultItem } from '@aiwc/protocol'
+import {
+  asCallId,
+  asItemId,
+  asTurnId,
+  newItemId,
+  newStepId,
+  type HistoryItem,
+  type ToolResultItem,
+} from '@aiwc/protocol'
 import { ContextManager, dropOrphans } from './manager'
 
 const turn = asTurnId('trn_1')
 const step = newStepId()
-const user = (text: string): HistoryItem => ({ type: 'user_message', id: newItemId(), turnId: turn, createdAt: 1, content: [{ type: 'text', text }], mentions: [] })
-const assistant = (text: string): HistoryItem => ({ type: 'assistant_message', id: newItemId(), turnId: turn, stepId: step, createdAt: 2, text })
-const call = (id: string): HistoryItem => ({ type: 'tool_call', id: newItemId(), turnId: turn, stepId: step, createdAt: 3, callId: asCallId(id), toolName: 't', input: {} })
+const user = (text: string): HistoryItem => ({
+  type: 'user_message',
+  id: newItemId(),
+  turnId: turn,
+  createdAt: 1,
+  content: [{ type: 'text', text }],
+  mentions: [],
+})
+const assistant = (text: string): HistoryItem => ({
+  type: 'assistant_message',
+  id: newItemId(),
+  turnId: turn,
+  stepId: step,
+  createdAt: 2,
+  text,
+})
+const call = (id: string): HistoryItem => ({
+  type: 'tool_call',
+  id: newItemId(),
+  turnId: turn,
+  stepId: step,
+  createdAt: 3,
+  callId: asCallId(id),
+  toolName: 't',
+  input: {},
+})
 const result = (id: string, text = 'ok'): ToolResultItem => ({
   type: 'tool_result',
   id: newItemId(),
@@ -44,7 +75,10 @@ describe('ContextManager', () => {
 
   it('json outputs over the cap become truncated text', () => {
     const cm = new ContextManager([], { maxToolOutputChars: 50 })
-    const big: ToolResultItem = { ...result('c1'), output: { type: 'json', value: { rows: Array.from({ length: 40 }, (_, i) => i) } } }
+    const big: ToolResultItem = {
+      ...result('c1'),
+      output: { type: 'json', value: { rows: Array.from({ length: 40 }, (_, i) => i) } },
+    }
     const [rec] = cm.recordItems([big])
     expect(rec!.type === 'tool_result' && rec!.output.type).toBe('text')
     expect(rec!.type === 'tool_result' && rec!.truncated).toBe(true)
@@ -59,7 +93,17 @@ describe('ContextManager', () => {
     const d = user('d')
     const cm = new ContextManager([a, b, c1, r1, c2, d])
     expect(cm.forPrompt().map((i) => i.id)).toEqual([a, b, c1, r1, d].map((i) => i.id))
-    cm.recordItems([{ type: 'compaction_summary', id: asItemId('sum'), createdAt: 5, summary: '摘要', foldedItemCount: 4, foldedThroughId: r1.id, tokenEstimate: 3 }])
+    cm.recordItems([
+      {
+        type: 'compaction_summary',
+        id: asItemId('sum'),
+        createdAt: 5,
+        summary: '摘要',
+        foldedItemCount: 4,
+        foldedThroughId: r1.id,
+        tokenEstimate: 3,
+      },
+    ])
     const visible = cm.forPrompt()
     expect(visible[0]!.type).toBe('compaction_summary')
     expect(visible.slice(1).map((i) => i.id)).toEqual([d.id])
@@ -69,8 +113,26 @@ describe('ContextManager', () => {
   it('usage breakdown separates system/tools/memory/references/history', () => {
     const cm = new ContextManager([
       user('hello world'),
-      { type: 'context_fragment', id: newItemId(), turnId: null, createdAt: 1, kind: 'memory_snapshot', marker: '<m>', text: '<m>\nmem', tokenEstimate: 7 },
-      { type: 'context_fragment', id: newItemId(), turnId: null, createdAt: 1, kind: 'environment', marker: '<e>', text: '<e>\nenv', tokenEstimate: 5 },
+      {
+        type: 'context_fragment',
+        id: newItemId(),
+        turnId: null,
+        createdAt: 1,
+        kind: 'memory_snapshot',
+        marker: '<m>',
+        text: '<m>\nmem',
+        tokenEstimate: 7,
+      },
+      {
+        type: 'context_fragment',
+        id: newItemId(),
+        turnId: null,
+        createdAt: 1,
+        kind: 'environment',
+        marker: '<e>',
+        text: '<e>\nenv',
+        tokenEstimate: 5,
+      },
     ])
     const usage = cm.usage({ systemTokens: 100, toolSpecTokens: 20, maxTokens: 1000 })
     expect(usage.breakdown.system).toBe(100)
@@ -84,10 +146,15 @@ describe('ContextManager', () => {
 
   it('dropLastNUserTurns removes whole turns and invalidates', () => {
     let invalidated = 0
-    const cm = new ContextManager([user('1'), assistant('a1'), user('2'), assistant('a2'), user('3'), assistant('a3')], { onInvalidate: () => invalidated++ })
+    const cm = new ContextManager(
+      [user('1'), assistant('a1'), user('2'), assistant('a2'), user('3'), assistant('a3')],
+      { onInvalidate: () => invalidated++ },
+    )
     const removed = cm.dropLastNUserTurns(2)
     expect(removed).toHaveLength(4)
-    expect(cm.all().map((i) => (i.type === 'user_message' ? i.content[0]!.type === 'text' && i.content[0]!.text : 'a'))).toEqual(['1', 'a'])
+    expect(
+      cm.all().map((i) => (i.type === 'user_message' ? i.content[0]!.type === 'text' && i.content[0]!.text : 'a')),
+    ).toEqual(['1', 'a'])
     expect(invalidated).toBe(1)
     cm.clear()
     expect(cm.length).toBe(0)
@@ -96,6 +163,8 @@ describe('ContextManager', () => {
 
   it('dropOrphans keeps matched pairs only', () => {
     const items = [call('x'), result('x'), result('y'), call('z')]
-    expect(dropOrphans(items).map((i) => (i.type === 'tool_call' || i.type === 'tool_result' ? i.callId : ''))).toEqual(['x', 'x'])
+    expect(dropOrphans(items).map((i) => (i.type === 'tool_call' || i.type === 'tool_result' ? i.callId : ''))).toEqual(
+      ['x', 'x'],
+    )
   })
 })

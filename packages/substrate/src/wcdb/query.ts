@@ -35,7 +35,8 @@ export function createBridgeQuery(bridge: OpenWcdbBridge, keyFor: (dbPath: strin
     all,
     get: (dbPath, sql, params) => all(dbPath, sql, params)[0],
     tableExists: (dbPath, tableName) =>
-      all(dbPath, "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) = lower(?)", [tableName]).length > 0,
+      all(dbPath, "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) = lower(?)", [tableName]).length >
+      0,
     columns: (dbPath, tableName) => {
       const key = `${dbPath}\0${tableName}`
       const cached = columnCache.get(key)

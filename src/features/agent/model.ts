@@ -18,6 +18,7 @@ import type {
   ToolRisk,
   TurnId,
 } from '@aiwc/protocol'
+import { t } from '@/i18n'
 
 export type PlanStepStatus = 'todo' | 'doing' | 'done' | 'failed'
 export interface PlanStep {
@@ -78,11 +79,16 @@ export type ThreadItem =
   | { kind: 'tools'; id: string; turnId: TurnId; calls: ToolCallView[] }
   | { kind: 'artifact'; id: string; turnId: TurnId; callId: CallId; artifact: ToolArtifact }
   | { kind: 'plan'; id: string; turnId?: TurnId; steps: PlanStep[] }
-  | { kind: 'compaction'; id: string; summaryItemId?: string; freedTokens?: number; summary?: string; foldedItemCount?: number }
+  | {
+      kind: 'compaction'
+      id: string
+      summaryItemId?: string
+      freedTokens?: number
+      summary?: string
+      foldedItemCount?: number
+    }
   | { kind: 'error'; id: string; turnId?: TurnId; error: ThreadError; actions: ErrorAction[] }
   | { kind: 'aborted'; id: string; turnId: TurnId; reason: Extract<Event, { type: 'turn.aborted' }>['reason'] }
-
-export type ThreadItemKind = ThreadItem['kind']
 
 /** Everything the panel needs to render one thread. Rebuilt from history, then folded by Events. */
 export interface ThreadViewState {
@@ -112,6 +118,15 @@ export const emptyDraft = (): ComposerDraft => ({ text: '', mentions: [] })
 /** Draft slot the composer writes to while no thread is open; moved onto the thread on first send. */
 export const SCRATCH_DRAFT_KEY = '__scratch__' as ThreadId
 
+/**
+ * Untitled threads carry an empty title and the panel shows agent.thread.untitled. Builds before the
+ * i18n migration stored the Chinese placeholder instead, so that stored value still counts as untitled.
+ */
+// eslint-disable-next-line aiwc/no-hardcoded-cjk -- legacy sentinel: the untitled-thread title persisted by older builds, not UI copy
+const LEGACY_UNTITLED_TITLE = '新会话'
+
+export const isUntitledTitle = (title: string | undefined): boolean => !title?.trim() || title === LEGACY_UNTITLED_TITLE
+
 export const createThreadView = (threadId: ThreadId, patch: Partial<ThreadViewState> = {}): ThreadViewState => ({
   threadId,
   items: [],
@@ -124,7 +139,15 @@ export const createThreadView = (threadId: ThreadId, patch: Partial<ThreadViewSt
 /** Text of a user item (image / file parts become placeholders). */
 export function userItemText(content: ContentPart[]): string {
   return content
-    .map((p) => (p.type === 'text' ? p.text : p.type === 'image' ? `[图片${p.name ? ` ${p.name}` : ''}]` : `[文件 ${p.name}]`))
+    .map((p) =>
+      p.type === 'text'
+        ? p.text
+        : p.type === 'image'
+          ? p.name
+            ? t('agent.message.imageNamed', { name: p.name })
+            : t('agent.message.image')
+          : t('agent.message.file', { name: p.name }),
+    )
     .join('\n')
     .trim()
 }
@@ -133,15 +156,6 @@ export function userItemText(content: ContentPart[]): string {
 export function usageRatio(usage: ContextUsage | undefined): number {
   if (!usage || usage.maxTokens <= 0) return 0
   return Math.max(0, Math.min(1, usage.usedTokens / usage.maxTokens))
-}
-
-/** 41k / 128k style token count. */
-export function formatTokens(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '0'
-  if (n < 1000) return String(Math.round(n))
-  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`
-  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
-  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
 }
 
 /** 3.2s / 0.8s / 1m 05s for tool rows and the assistant footer. */

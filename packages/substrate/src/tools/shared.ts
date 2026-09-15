@@ -4,7 +4,7 @@
  * ToolResult construction. Tools never touch WeChat files or SQLite directly — everything goes
  * through the injected SubstrateService, so the same tools work against WCDB, the mirror or fixtures.
  */
-import { defineTool } from '@aiwc/protocol'
+import { defineTool, formatCitation } from '@aiwc/protocol'
 import type {
   JsonValue,
   MessageAnchor,
@@ -64,7 +64,9 @@ export function clampLimit(value: number | undefined | null, def: number, max: n
 
 /** Collapse whitespace and cut to `max` characters (adds an ellipsis when cut). */
 export function squash(text: string | undefined | null, max: number): string {
-  const t = String(text ?? '').replace(/\s+/g, ' ').trim()
+  const t = String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (t.length <= max) return t
   return `${t.slice(0, Math.max(0, max - 1))}…`
 }
@@ -98,12 +100,76 @@ export const TimeRangeRefinement = {
   message: 'from 必须小于等于 to',
 } as const
 
+const DATE_INPUT = /^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+
+/**
+ * A time bound as the model naturally writes it. Numbers are epoch milliseconds (the original
+ * contract); strings may be a local date / date-time / month, or a numeric timestamp. Asking a model
+ * to convert "2 月 14 日" into epoch milliseconds itself was a steady source of wrong windows and
+ * therefore of "no evidence found". `edge` decides how a coarse value widens: 'start' → first
+ * millisecond of that day / minute / month, 'end' → last millisecond (so `to: "2026-02-14"` includes
+ * the whole day). Returns undefined for anything unrecognisable or impossible (2026-02-30).
+ */
+export function parseTimeInput(value: number | string, edge: 'start' | 'end'): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+  const text = value.trim()
+  if (/^\d{10}$/.test(text)) return Number(text) * 1000
+  if (/^\d{12,16}$/.test(text)) return Number(text)
+  const m = DATE_INPUT.exec(text)
+  if (!m) return undefined
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = m[3] === undefined ? undefined : Number(m[3])
+  const hour = m[4] === undefined ? undefined : Number(m[4])
+  const minute = m[5] === undefined ? undefined : Number(m[5])
+  const second = m[6] === undefined ? undefined : Number(m[6])
+  if (month < 1 || month > 12) return undefined
+  if (day === undefined) {
+    if (hour !== undefined) return undefined
+    return edge === 'start' ? new Date(year, month - 1, 1).getTime() : new Date(year, month, 1).getTime() - 1
+  }
+  if ((hour ?? 0) > 23 || (minute ?? 0) > 59 || (second ?? 0) > 59) return undefined
+  const at = new Date(year, month - 1, day, hour ?? 0, minute ?? 0, second ?? 0, 0)
+  if (at.getFullYear() !== year || at.getMonth() !== month - 1 || at.getDate() !== day) return undefined
+  if (edge === 'start') return at.getTime()
+  if (hour === undefined) return new Date(year, month - 1, day + 1).getTime() - 1
+  return at.getTime() + (second === undefined ? 59_999 : 999)
+}
+
+const TIME_FORMAT_ERROR =
+  '时间格式无法识别：请写「2026-02-14」「2026-02-14 19:28」或「2026-02」（本地时间），也可以给毫秒时间戳'
+
+function timeBound(edge: 'start' | 'end', description: string) {
+  return z
+    .union([z.number().int().nonnegative(), z.string().trim().min(1)])
+    .transform((value, ctx) => {
+      const ms = parseTimeInput(value, edge)
+      if (ms === undefined) {
+        ctx.addIssue({ code: 'custom', message: TIME_FORMAT_ERROR })
+        return z.NEVER
+      }
+      return ms
+    })
+    .describe(description)
+}
+
+/** Inclusive lower bound: 「2026-02-14」 = from 00:00 that day. */
+export const timeFrom = (
+  description = '起始时间（含）：「2026-02-14」「2026-02-14 19:28」「2026-02」按本地时间理解，也可以给毫秒时间戳',
+) => timeBound('start', description)
+/** Inclusive upper bound: 「2026-02-14」 = through 23:59:59 that day, 「2026-02」 = through the month's end. */
+export const timeTo = (
+  description = '结束时间（含）：只写日期表示到当天结束，只写月份表示到月底；也可以给毫秒时间戳',
+) => timeBound('end', description)
+
 // ---------------------------------------------------------------------------------------------
 // Compact shapes
 // ---------------------------------------------------------------------------------------------
 
 export interface CompactMessage {
   anchor: MessageAnchor
+  /** Paste-ready citation link for this message (see protocol formatCitation). */
+  cite: string
   time: string | null
   senderName: string
   isSelf: boolean
@@ -115,8 +181,15 @@ export interface CompactMessage {
 
 export function anchorOf(m: WxMessage): MessageAnchor {
   const a = m.anchor
-  if (a && a.sessionId && a.messageId) return { sessionId: a.sessionId, messageId: a.messageId, seq: a.seq, createdAt: a.createdAt }
+  if (a && a.sessionId && a.messageId)
+    return { sessionId: a.sessionId, messageId: a.messageId, seq: a.seq, createdAt: a.createdAt }
   return { sessionId: m.sessionId, messageId: m.id, seq: m.seq, createdAt: m.createdAt }
+}
+
+/** `[MM-DD HH:mm](wx://session/message)` — short label, full ids; the UI resolves the rest. */
+export function citeOf(anchor: MessageAnchor): string {
+  const time = fmtTime(anchor.createdAt)
+  return formatCitation(anchor, time ? time.slice(5) : '消息')
 }
 
 export function displaySender(m: Pick<WxMessage, 'isSelf' | 'senderName' | 'senderId'>): string {
@@ -170,8 +243,10 @@ export function messageText(m: WxMessage, max = MAX_TEXT_CHARS): string {
 
 /** Compact, bounded, anchor-carrying view of a message. Never includes media paths or bytes. */
 export function compactMessage(m: WxMessage): CompactMessage {
+  const anchor = anchorOf(m)
   const out: CompactMessage = {
-    anchor: anchorOf(m),
+    anchor,
+    cite: citeOf(anchor),
     time: fmtTime(m.createdAt),
     senderName: displaySender(m),
     isSelf: m.isSelf,
@@ -190,6 +265,52 @@ export function compactMessage(m: WxMessage): CompactMessage {
     if (m.media.transcript) out.media.hasTranscript = true
   }
   return out
+}
+
+/**
+ * Sender names are frozen into the index when a message is first seen; a contact added or renamed
+ * later, or a group member with no cached name, comes back as a raw wxid. Fill those in from the
+ * contact book once per tool call (cached), so the model never has to guess who "wxid_x9k…" is.
+ */
+export function createNameResolver(substrate: Pick<SubstrateService, 'getContact' | 'getSession'>) {
+  const contacts = new Map<string, Promise<string | undefined>>()
+  const sessions = new Map<string, Promise<string | undefined>>()
+  const contact = (id: string): Promise<string | undefined> => {
+    let job = contacts.get(id)
+    if (!job) {
+      job = substrate
+        .getContact(id)
+        .then((c) => c?.remark?.trim() || c?.nickname?.trim() || undefined)
+        .catch(() => undefined)
+      contacts.set(id, job)
+    }
+    return job
+  }
+  const session = (id: string): Promise<string | undefined> => {
+    let job = sessions.get(id)
+    if (!job) {
+      job = substrate
+        .getSession(id)
+        .then((sess) => sess?.title?.trim() || undefined)
+        .catch(() => undefined)
+      sessions.set(id, job)
+    }
+    return job
+  }
+  const looksUnresolved = (m: WxMessage): boolean =>
+    !m.isSelf && !!m.senderId && (!m.senderName?.trim() || m.senderName.trim() === m.senderId)
+  /** Messages with their sender names filled from the contact book where the index had none. */
+  const withSenderNames = async (messages: readonly WxMessage[]): Promise<WxMessage[]> => {
+    const out = await Promise.all(
+      messages.map(async (m) => {
+        if (!looksUnresolved(m)) return m
+        const name = await contact(m.senderId)
+        return name ? { ...m, senderName: name } : m
+      }),
+    )
+    return out
+  }
+  return { contact, session, withSenderNames }
 }
 
 /** Ascending by seq, then createdAt, then id — the canonical reading order. */
@@ -248,7 +369,10 @@ export function compactContact(c: WxContact): CompactContact {
 
 export interface CompactHit {
   anchor: MessageAnchor
+  cite: string
   time: string | null
+  /** Title of the chat the hit came from — a global search otherwise only shows raw ids. */
+  chat?: string
   sender: string
   isSelf: boolean
   kind: MessageKind
@@ -259,8 +383,10 @@ export interface CompactHit {
 
 export function compactHit(h: SearchHit): CompactHit {
   const m = h.message
+  const anchor = anchorOf(m)
   return {
-    anchor: anchorOf(m),
+    anchor,
+    cite: citeOf(anchor),
     time: fmtTime(m.createdAt),
     sender: displaySender(m),
     isSelf: m.isSelf,
@@ -291,7 +417,13 @@ export interface Coverage {
 
 export function describeCoverage(
   substrate: SubstrateService,
-  opts: { sessionIds?: readonly string[]; from?: Millis; to?: Millis; scope?: Coverage['scope']; sessionCount?: number },
+  opts: {
+    sessionIds?: readonly string[]
+    from?: Millis
+    to?: Millis
+    scope?: Coverage['scope']
+    sessionCount?: number
+  },
 ): Coverage {
   let phase: SyncPhase = 'idle'
   let indexed: number | undefined
@@ -304,7 +436,8 @@ export function describeCoverage(
   } catch {
     /* status is best-effort */
   }
-  const scope: Coverage['scope'] = opts.scope ?? (opts.sessionIds && opts.sessionIds.length > 0 ? 'sessions' : 'all_indexed')
+  const scope: Coverage['scope'] =
+    opts.scope ?? (opts.sessionIds && opts.sessionIds.length > 0 ? 'sessions' : 'all_indexed')
   const out: Coverage = { scope, syncPhase: phase, bounded: scope !== 'sessions', note: '' }
   if (opts.sessionIds && opts.sessionIds.length > 0) {
     out.sessionIds = [...opts.sessionIds]
@@ -317,14 +450,21 @@ export function describeCoverage(
   if (typeof indexed === 'number') out.indexedMessages = indexed
   out.lastSyncedAt = fmtTime(lastSyncedAt)
 
-  const syncHint = phase === 'syncing' ? '本地索引仍在同步中，结果可能不完整。' : phase === 'error' ? '上次同步失败，索引可能过旧。' : ''
+  const syncHint =
+    phase === 'syncing'
+      ? '本地索引仍在同步中，结果可能不完整。'
+      : phase === 'error'
+        ? '上次同步失败，索引可能过旧。'
+        : ''
   if (scope === 'sessions') {
     out.note = `仅搜索指定的 ${out.sessionCount} 个会话中已同步到本地索引的消息。${syncHint}`.trim()
   } else if (scope === 'recent_sessions') {
-    out.note = `只扫描了最近活跃的 ${out.sessionCount ?? 0} 个会话，且每个会话只取最近一段；更早或不活跃的会话不在范围内。${syncHint}`.trim()
+    out.note =
+      `只扫描了最近活跃的 ${out.sessionCount ?? 0} 个会话，且每个会话只取最近一段；更早或不活跃的会话不在范围内。${syncHint}`.trim()
   } else {
     const count = typeof indexed === 'number' ? `约 ${indexed} 条` : '数量未知'
-    out.note = `全局搜索只覆盖已同步到本地索引的消息（${count}）；结果可能不完整，建议用 sessionIds 限定范围。${syncHint}`.trim()
+    out.note =
+      `全局搜索只覆盖已同步到本地索引的消息（${count}）；结果可能不完整，建议用 sessionIds 限定范围。${syncHint}`.trim()
   }
   return out
 }
@@ -351,7 +491,14 @@ export function fail(message: string, extra?: Record<string, unknown>): ToolResu
 
 /** UI-facing evidence anchors (never sent to the model — see ToolResult.meta). */
 export function anchorsMeta(anchors: readonly MessageAnchor[]): Record<string, unknown> {
-  return { anchors: anchors.map((a) => ({ sessionId: a.sessionId, messageId: a.messageId, seq: a.seq, createdAt: a.createdAt })) }
+  return {
+    anchors: anchors.map((a) => ({
+      sessionId: a.sessionId,
+      messageId: a.messageId,
+      seq: a.seq,
+      createdAt: a.createdAt,
+    })),
+  }
 }
 
 function readableMessage(error: unknown): string {

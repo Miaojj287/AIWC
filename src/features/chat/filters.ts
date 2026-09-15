@@ -3,6 +3,7 @@
  * and a sender multi-select. Pure helpers — the state itself lives in `tab.state.filters`.
  */
 import type { ListMessagesQuery } from '@aiwc/protocol'
+import { t, type MessageKey } from '@/i18n'
 
 export type DateRangePreset = 'today' | '7d' | '30d' | 'all'
 
@@ -16,11 +17,15 @@ export interface ChatFilters {
 
 export const DEFAULT_FILTERS: ChatFilters = { range: { preset: 'all' }, senderIds: [] }
 
-export const RANGE_PRESETS: ReadonlyArray<{ value: DateRangePreset; label: string; description: string }> = [
-  { value: 'today', label: '今天', description: '只看今天 0 点以后的消息' },
-  { value: '7d', label: '最近 7 天', description: '含今天在内的 7 个自然日' },
-  { value: '30d', label: '最近 30 天', description: '含今天在内的 30 个自然日' },
-  { value: 'all', label: '全部', description: '不限制时间' },
+export const RANGE_PRESETS: ReadonlyArray<{
+  value: DateRangePreset
+  labelKey: MessageKey
+  descriptionKey?: MessageKey
+}> = [
+  { value: 'today', labelKey: 'chat.dateRange.today' },
+  { value: '7d', labelKey: 'chat.dateRange.last7Days' },
+  { value: '30d', labelKey: 'chat.dateRange.last30Days' },
+  { value: 'all', labelKey: 'chat.dateRange.all' },
 ]
 
 const DAY = 86_400_000
@@ -75,22 +80,28 @@ export function parseDateInput(value: string): number | undefined {
   return date.getTime()
 }
 
-export function validateCustomRange(fromInput: string, toInput: string, now: number = Date.now()): { ok: true; from: number; to: number } | { ok: false; error: string } {
+export function validateCustomRange(
+  fromInput: string,
+  toInput: string,
+  now: number = Date.now(),
+): { ok: true; from: number; to: number } | { ok: false; error: string } {
   const from = parseDateInput(fromInput)
   const to = parseDateInput(toInput)
-  if (from === undefined || to === undefined) return { ok: false, error: '日期格式应为 YYYY-MM-DD' }
-  if (from > to) return { ok: false, error: '开始日期不能晚于结束日期' }
-  if (from > endOfDay(now)) return { ok: false, error: '开始日期不能晚于今天' }
+  if (from === undefined || to === undefined) return { ok: false, error: t('chat.dateRange.errors.format') }
+  if (from > to) return { ok: false, error: t('chat.dateRange.errors.startAfterEnd') }
+  if (from > endOfDay(now)) return { ok: false, error: t('chat.dateRange.errors.startAfterToday') }
   return { ok: true, from, to }
 }
 
 /** Sync-bar label: 今天 / 最近 7 天 / … / 2026-04-22 至 今天. */
 export function rangeLabel(range: DateRange, now: number = Date.now()): string {
   if (range.preset === 'custom') {
-    const to = startOfDay(range.to) === startOfDay(now) ? '今天' : toDateInput(range.to)
-    return `${toDateInput(range.from)} 至 ${to}`
+    const from = toDateInput(range.from)
+    return startOfDay(range.to) === startOfDay(now)
+      ? t('chat.dateRange.customLabelToToday', { from })
+      : t('chat.dateRange.customLabel', { from, to: toDateInput(range.to) })
   }
-  return RANGE_PRESETS.find((p) => p.value === range.preset)?.label ?? '全部'
+  return t(RANGE_PRESETS.find((p) => p.value === range.preset)?.labelKey ?? 'chat.dateRange.all')
 }
 
 export function isFiltered(filters: ChatFilters): boolean {
@@ -104,18 +115,31 @@ export function parseFilters(raw: unknown): ChatFilters {
   let range: DateRange = DEFAULT_FILTERS.range
   if (obj.range && typeof obj.range === 'object') {
     const r = obj.range as { preset?: unknown; from?: unknown; to?: unknown }
-    if (r.preset === 'custom' && typeof r.from === 'number' && typeof r.to === 'number' && Number.isFinite(r.from) && Number.isFinite(r.to)) {
+    if (
+      r.preset === 'custom' &&
+      typeof r.from === 'number' &&
+      typeof r.to === 'number' &&
+      Number.isFinite(r.from) &&
+      Number.isFinite(r.to)
+    ) {
       range = { preset: 'custom', from: r.from, to: r.to }
     } else if (r.preset === 'today' || r.preset === '7d' || r.preset === '30d' || r.preset === 'all') {
       range = { preset: r.preset }
     }
   }
-  const senderIds = Array.isArray(obj.senderIds) ? obj.senderIds.filter((s): s is string => typeof s === 'string' && s.length > 0) : []
+  const senderIds = Array.isArray(obj.senderIds)
+    ? obj.senderIds.filter((s): s is string => typeof s === 'string' && s.length > 0)
+    : []
   return { range, senderIds: [...new Set(senderIds)] }
 }
 
 /** Base query for listMessages with the tab filters applied (paging keys added by the caller). */
-export function toListQuery(sessionId: string, filters: ChatFilters, limit: number, now: number = Date.now()): ListMessagesQuery {
+export function toListQuery(
+  sessionId: string,
+  filters: ChatFilters,
+  limit: number,
+  now: number = Date.now(),
+): ListMessagesQuery {
   const { from, to } = resolveRange(filters.range, now)
   const q: ListMessagesQuery = { sessionId, limit }
   if (from !== undefined) q.from = from
@@ -130,12 +154,14 @@ export interface ExportRange {
   from?: number
   to?: number
   messageIds?: string[]
+  /** The tab's sender filter; absent = everyone. */
+  senderIds?: string[]
 }
 
 /**
- * Export range (DESIGN-SPEC §1.2 底部操作条): default = current filters; when messages are ticked the
- * ticked set wins; `all` ignores filters. Sender filters cannot be expressed in the export contract,
- * so they are applied by narrowing to explicit message ids when the caller passes the loaded list.
+ * Export range (DESIGN-SPEC §1.2 底部操作条): default = current filters (date range and senders); when
+ * messages are ticked the ticked set wins; `all` ignores filters. The main process enforces `senderIds`
+ * on every exported message.
  */
 export function computeExportRange(
   mode: ExportRangeMode,
@@ -152,6 +178,7 @@ export function computeExportRange(
   const out: ExportRange = {}
   if (from !== undefined) out.from = from
   if (to !== undefined) out.to = to
+  if (filters.senderIds.length > 0) out.senderIds = [...filters.senderIds]
   return out
 }
 

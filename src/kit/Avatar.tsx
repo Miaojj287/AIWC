@@ -112,8 +112,20 @@ function MemberCell({ member }: { member: AvatarMember }) {
   const [broken, setBroken] = useState<string>()
   const showImage = Boolean(member.src) && broken !== member.src
   return (
-    <div className="min-h-0 min-w-0 overflow-hidden rounded-sm" style={showImage ? undefined : tileStyle(member.id)} aria-hidden>
-      {showImage ? <img src={member.src} alt="" draggable={false} onError={() => setBroken(member.src)} className="size-full object-cover" /> : null}
+    <div
+      className="min-h-0 min-w-0 overflow-hidden rounded-sm"
+      style={showImage ? undefined : tileStyle(member.id)}
+      aria-hidden
+    >
+      {showImage ? (
+        <img
+          src={member.src}
+          alt=""
+          draggable={false}
+          onError={() => setBroken(member.src)}
+          className="size-full object-cover"
+        />
+      ) : null}
     </div>
   )
 }

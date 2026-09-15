@@ -3,7 +3,11 @@ import { FOCUS_RING, Item, Row, Section, State } from '../gallery'
 
 export function TogglesSection() {
   return (
-    <Section id="toggles" title="② 开关 / 复选 / 单选" description="选中色统一用品牌橙；禁用 40% 透明；focus 用 2px 外描边">
+    <Section
+      id="toggles"
+      title="② 开关 / 复选 / 单选"
+      description="选中色统一用当前强调色；禁用 40% 透明；focus 用 2px 外描边"
+    >
       <Item label="开关">
         <Row align="start">
           <State name="关">

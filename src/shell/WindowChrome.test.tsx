@@ -4,7 +4,10 @@ import { WindowChrome } from './WindowChrome'
 
 const invoke = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('@/platform/bridge', () => ({ bridge: () => ({ invoke }) }))
-afterEach(() => { cleanup(); invoke.mockClear() })
+afterEach(() => {
+  cleanup()
+  invoke.mockClear()
+})
 
 it('dispatches each window action through the bridge', () => {
   render(<WindowChrome showControls title="会话" />)

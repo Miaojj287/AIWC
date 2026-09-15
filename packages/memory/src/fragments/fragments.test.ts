@@ -1,13 +1,25 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ChannelKind, FragmentProvider, FragmentProviderContext, ThreadSettings, ToolProfile } from '@aiwc/protocol'
+import type {
+  ChannelKind,
+  FragmentProvider,
+  FragmentProviderContext,
+  ThreadSettings,
+  ToolProfile,
+} from '@aiwc/protocol'
 import { asThreadId, estimateTokens, truncateToTokens } from '@aiwc/protocol'
 import { describe, expect, it } from 'vitest'
 import { createRelationshipStore } from '../relationship/relationshipStore'
 import { createMemoryStore } from '../store/memoryStore'
 import { sampleProfile } from '../testing/fakes'
-import { MEMORY_POLICY_FRAGMENT_KIND, MEMORY_POLICY_TOKEN_CAP, memoryAudience, memoryFilesFor, memoryFragmentProvider } from './memoryFragmentProvider'
+import {
+  MEMORY_POLICY_FRAGMENT_KIND,
+  MEMORY_POLICY_TOKEN_CAP,
+  memoryAudience,
+  memoryFilesFor,
+  memoryFragmentProvider,
+} from './memoryFragmentProvider'
 import { relationshipFragmentProvider } from './relationshipFragmentProvider'
 
 const tmp = (p: string) => mkdtempSync(join(tmpdir(), `aiwc-${p}-`))
@@ -20,7 +32,11 @@ const ctx = (peerId?: string) => ({
 })
 
 /** A thread the way the kernel creates it for a given channel/profile (peer bound for wechat channels). */
-const threadCtx = (channel: ChannelKind, profile: ToolProfile, permissionMode: ThreadSettings['permissionMode'] = 'bypass'): FragmentProviderContext => ({
+const threadCtx = (
+  channel: ChannelKind,
+  profile: ToolProfile,
+  permissionMode: ThreadSettings['permissionMode'] = 'bypass',
+): FragmentProviderContext => ({
   threadId: asThreadId('thr_bot'),
   origin: channel === 'desktop' ? { channel } : { channel, chatId: 'wxid_peer', peerId: 'wxid_peer' },
   settings: { permissionMode, profile, allowAlways: [] },
@@ -52,7 +68,12 @@ describe('memoryFragmentProvider', () => {
     const frags = await provider.provide(ctx())
     expect(frags).toHaveLength(4)
     expect(frags.map((f) => f.tokenCap)).toEqual([1500, 1500, 1500, 1500])
-    expect(frags.map((f) => f.marker)).toEqual(['<memory_snapshot file="MEMORY">', '<memory_snapshot file="USER">', '<memory_snapshot file="SOUL">', '<memory_snapshot file="AGENTS">'])
+    expect(frags.map((f) => f.marker)).toEqual([
+      '<memory_snapshot file="MEMORY">',
+      '<memory_snapshot file="USER">',
+      '<memory_snapshot file="SOUL">',
+      '<memory_snapshot file="AGENTS">',
+    ])
     const first = frags[0]?.render() ?? ''
     expect(first.startsWith('<memory_snapshot file="MEMORY">\n[MEMORY ')).toBe(true)
     expect(first).toContain('第一条事实')
@@ -128,7 +149,11 @@ describe('memoryFragmentProvider', () => {
     expect(stable).toContain('<memory_policy audience="third_party">')
 
     // same for the UI-injection channel and for a persona (clone) thread on any channel
-    for (const c of [threadCtx('wechat-ui', 'wechat-bot'), threadCtx('desktop', 'persona'), threadCtx('wechat-ilink', 'persona')]) {
+    for (const c of [
+      threadCtx('wechat-ui', 'wechat-bot'),
+      threadCtx('desktop', 'persona'),
+      threadCtx('wechat-ilink', 'persona'),
+    ]) {
       const s = await stablePromptOf([provider], c)
       expect(s).not.toContain('<memory_snapshot')
       expect(s).not.toContain(SECRET_USER)
@@ -137,12 +162,22 @@ describe('memoryFragmentProvider', () => {
 
     // the owner's own desktop thread still gets the full snapshot and no policy
     const desktop = await provider.provide(threadCtx('desktop', 'desktop-chat', 'ask'))
-    expect(desktop.map((f) => f.kind)).toEqual(['memory_snapshot', 'memory_snapshot', 'memory_snapshot', 'memory_snapshot'])
+    expect(desktop.map((f) => f.kind)).toEqual([
+      'memory_snapshot',
+      'memory_snapshot',
+      'memory_snapshot',
+      'memory_snapshot',
+    ])
     const ownerStable = await stablePromptOf([provider], threadCtx('desktop', 'desktop-chat', 'ask'))
     expect(ownerStable).toContain(SECRET_USER)
     expect(ownerStable).not.toContain('<memory_policy')
     // cron runs on the owner's behalf too
-    expect((await provider.provide(threadCtx('cron', 'cron'))).map((f) => f.kind)).toEqual(['memory_snapshot', 'memory_snapshot', 'memory_snapshot', 'memory_snapshot'])
+    expect((await provider.provide(threadCtx('cron', 'cron'))).map((f) => f.kind)).toEqual([
+      'memory_snapshot',
+      'memory_snapshot',
+      'memory_snapshot',
+      'memory_snapshot',
+    ])
   })
 
   it('lets the composition root narrow the selection, but the third-party policy still follows the audience', async () => {
@@ -209,7 +244,12 @@ describe('relationshipFragmentProvider', () => {
     expect(await provider.provide(t2)).toHaveLength(1)
     expect(await provider.provide(t2)).toEqual([])
     // a re-clone (new version / sample) changes the rendered card → injected again, once
-    await store.upsert(sampleProfile({ version: 2, samples: [...sampleProfile().samples, { prompt: '周末呢', reply: '爬山去', at: 1700000300000 }] }))
+    await store.upsert(
+      sampleProfile({
+        version: 2,
+        samples: [...sampleProfile().samples, { prompt: '周末呢', reply: '爬山去', at: 1700000300000 }],
+      }),
+    )
     const again = await provider.provide(t1)
     expect(again).toHaveLength(1)
     expect(again[0]?.render()).toContain('画像 v2')
@@ -230,11 +270,65 @@ describe('relationshipFragmentProvider', () => {
     expect(await provider.provide(t2)).toHaveLength(1)
   })
 
+  it('gives a third-party thread only the tone and forms of address, marked private — never the dossier', async () => {
+    const store = createRelationshipStore({ dir: tmp('rel-third-party') })
+    const provider = relationshipFragmentProvider(store)
+    await store.upsert(sampleProfile({ deep: { ...sampleProfile().deep, relationship: '前同事，其实不太喜欢他' } }))
+    const botOrigin = (channel: 'wechat-ilink' | 'wechat-ui', chatId: string) => ({
+      ...threadCtx(channel, 'wechat-bot'),
+      threadId: asThreadId(`thr_${channel}_${chatId}`),
+      origin: { channel, chatId, peerId: 'wxid_test01' },
+    })
+    // a bot DM with the profiled contact, and a group thread where that contact is the sender
+    for (const c of [botOrigin('wechat-ilink', 'wxid_test01'), botOrigin('wechat-ui', 'g1@chatroom')]) {
+      const frags = await provider.provide(c)
+      expect(frags).toHaveLength(1)
+      const [f] = frags
+      expect(f?.kind).toBe('relationship_style')
+      expect(f?.marker).toBe('<relationship_style audience="third_party">')
+      const text = f?.render() ?? ''
+      expect(text).toContain('不得向对方或群里的任何人透露')
+      expect(text).toContain('轻快')
+      expect(text).toContain('称呼用户「老张」')
+      for (const secret of [
+        '前同事',
+        '不聊前任',
+        '热心',
+        '吃饭',
+        '先调侃再安慰',
+        '晚上吃啥',
+        '随便',
+        '李娜',
+        'wxid_test01',
+      ])
+        expect(text, secret).not.toContain(secret)
+      expect(estimateTokens(text)).toBeLessThanOrEqual(f?.tokenCap ?? 0)
+    }
+    // nothing style-worthy in the profile → nothing at all
+    await store.upsert(sampleProfile({ card: { ...sampleProfile().card, tone: [], addressing: {} } }))
+    expect(
+      await provider.provide({ ...botOrigin('wechat-ilink', 'wxid_test01'), threadId: asThreadId('thr_x') }),
+    ).toEqual([])
+    // the owner's own thread keeps the full card, and so does a clone thread (its <persona> block holds all of it)
+    await store.upsert(sampleProfile())
+    expect((await provider.provide(ctx('wxid_test01')))[0]?.render()).toContain('边界（不要触碰）：不聊前任')
+    const persona = {
+      ...threadCtx('desktop', 'persona'),
+      origin: { channel: 'desktop' as const, chatId: 'wxid_test01', peerId: 'wxid_test01' },
+    }
+    expect((await provider.provide(persona))[0]?.marker).toBe('<relationship_profile>')
+  })
+
   it('truncates an oversized profile to the cap via the protocol helper', async () => {
     const store = createRelationshipStore({ dir: tmp('rel-big') })
     const provider = relationshipFragmentProvider(store)
     const long = (s: string) => Array.from({ length: 60 }, (_, i) => `${s}${i}`)
-    await store.upsert(sampleProfile({ card: { ...sampleProfile().card, catchphrases: long('口头禅非常非常长') }, deep: { ...sampleProfile().deep, boundaries: long('一条很长很长的边界描述，长到需要被截断才行') } }))
+    await store.upsert(
+      sampleProfile({
+        card: { ...sampleProfile().card, catchphrases: long('口头禅非常非常长') },
+        deep: { ...sampleProfile().deep, boundaries: long('一条很长很长的边界描述，长到需要被截断才行') },
+      }),
+    )
     const [f] = await provider.provide(ctx('wxid_test01'))
     const text = f?.render() ?? ''
     expect(estimateTokens(text)).toBeLessThanOrEqual(1200)

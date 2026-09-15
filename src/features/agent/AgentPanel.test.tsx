@@ -54,7 +54,8 @@ function fakeBridge(threads: ThreadSummary[] = []): FakeBridge {
 
 const flush = () => act(() => new Promise((r) => setTimeout(r, 0)))
 const textarea = () => screen.getByRole('textbox', { name: '给 Agent 的消息' }) as HTMLTextAreaElement
-const type = (value: string) => fireEvent.change(textarea(), { target: { value, selectionStart: value.length, selectionEnd: value.length } })
+const type = (value: string) =>
+  fireEvent.change(textarea(), { target: { value, selectionStart: value.length, selectionEnd: value.length } })
 
 beforeEach(() => {
   __resetAgentStoreForTests()

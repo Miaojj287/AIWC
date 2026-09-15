@@ -1,8 +1,12 @@
+import { useT } from '@/i18n'
 import { Button, Card, InlineHint, toast } from '@/kit'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
 
 /** macOS keeps the accessibility grant behind this pane; deep-linking saves a five-click hunt. */
 const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+
+/** The halt reason is free text from the gateway / main process (not UI copy); this spots the accessibility-permission one. */
+const ACCESSIBILITY_HALT = /辅助功能|accessibility/i
 
 /**
  * Whatever currently stands between an enabled rule and a sent message.
@@ -12,6 +16,7 @@ const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.secur
  * an empty warning strip would just be another thing to scan past.
  */
 export function AutoReplyControl() {
+  const t = useT()
   const status = useInvoke('autoreply:status', undefined, [])
   useBridgeEvent('substrate:event', () => status.reload())
   useBridgeEvent('gateway:event', (e) => {
@@ -22,7 +27,7 @@ export function AutoReplyControl() {
     try {
       await invoke('autoreply:resume', undefined)
     } catch (e) {
-      toast.error('恢复失败', { detail: String(e) })
+      toast.error(t('autoreply.control.resumeFailed'), { detail: String(e) })
     }
     status.reload()
   }
@@ -33,19 +38,26 @@ export function AutoReplyControl() {
   return (
     <Card variant="rows">
       <div className="flex flex-col gap-2 px-4 py-3">
-        {blocked === 'demo' ? <InlineHint kind="warning">当前是演示数据，真实微信消息监听未启动。</InlineHint> : null}
-        {blocked === 'offline' ? <InlineHint kind="warning">请先在设置中连接微信数据，连接成功后才能监听新消息。</InlineHint> : null}
+        {blocked === 'demo' ? <InlineHint kind="warning">{t('autoreply.control.demo')}</InlineHint> : null}
+        {blocked === 'offline' ? <InlineHint kind="warning">{t('autoreply.control.offline')}</InlineHint> : null}
         {status.data?.halted ? (
           <>
-            <InlineHint kind="error">自动发送已暂停：{status.data.halted}</InlineHint>
+            <InlineHint kind="error">{t('autoreply.control.halted', { reason: status.data.halted })}</InlineHint>
             <div className="flex flex-wrap items-center gap-2">
-              {status.data.halted.includes('辅助功能') ? (
-                <Button variant="outline" onClick={() => void invoke('app:openUrl', { url: ACCESSIBILITY_PANE }).catch(() => toast.error('打不开系统设置，请手动前往「隐私与安全性 → 辅助功能」'))}>
-                  打开「辅助功能」设置
+              {ACCESSIBILITY_HALT.test(status.data.halted) ? (
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    void invoke('app:openUrl', { url: ACCESSIBILITY_PANE }).catch(() =>
+                      toast.error(t('autoreply.control.openSettingsFailed')),
+                    )
+                  }
+                >
+                  {t('autoreply.control.openAccessibility')}
                 </Button>
               ) : null}
               <Button variant="outline" onClick={() => void resume()}>
-                我已确认，恢复自动发送
+                {t('autoreply.control.resume')}
               </Button>
             </div>
           </>

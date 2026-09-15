@@ -6,7 +6,7 @@ import { Spinner } from './Spinner'
 
 /**
  * Button — the only five kinds allowed (CLAUDE.md §3): primary / ghost / outline / danger / link.
- * One primary per screen; danger only inside destructive confirmations; link for inline actions.
+ * One primary per independent task section; danger only inside destructive confirmations; link for inline actions.
  * Figma 154:419. h30 r6 px12 gap6, label 12.5 Medium, icon 13; sm = h26.
  */
 export const buttonVariants = cva(
@@ -22,7 +22,8 @@ export const buttonVariants = cva(
       variant: {
         primary: 'bg-accent text-(--fg-on-accent) hover:bg-accent-hover active:bg-accent-active',
         ghost: 'border border-line-6 bg-line-8 text-fg hover:bg-(--fill-13) active:bg-(--line-16)',
-        outline: 'border border-(--line-16) text-fg hover:border-(--line-25) hover:bg-(--fill-13) active:bg-(--line-16)',
+        outline:
+          'border border-(--line-16) text-fg hover:border-(--line-25) hover:bg-(--fill-13) active:bg-(--line-16)',
         danger: 'bg-danger text-white hover:brightness-[1.08] active:brightness-[0.9]',
         link: 'text-accent hover:bg-accent/8 active:bg-accent/14',
       },
@@ -45,7 +46,18 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>, Va
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant, size, icon: Icon, trailingIcon: TrailingIcon, loading = false, disabled, className, children, type = 'button', ...rest },
+  {
+    variant,
+    size,
+    icon: Icon,
+    trailingIcon: TrailingIcon,
+    loading = false,
+    disabled,
+    className,
+    children,
+    type = 'button',
+    ...rest
+  },
   ref,
 ) {
   const iconSize = size === 'sm' ? 12 : ICON_SIZE.button

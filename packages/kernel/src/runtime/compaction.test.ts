@@ -1,25 +1,77 @@
 import { describe, expect, it } from 'vitest'
 import { asTurnId, newItemId, newStepId, type HistoryItem } from '@aiwc/protocol'
-import { selectCompactionSplit, shouldCompact } from './compaction'
+import { renderTranscript, selectCompactionSplit, shouldCompact, TRANSCRIPT_CHAR_CAP } from './compaction'
 import { createMockModelClient } from './model/mock'
 import { createThreadHarness, userInput } from './testing/harness'
 
-const longText = (seed: string): string => `${seed}：这是一段相当长的对话内容，用来把上下文占用推高，包含会话 sess_${seed} 与消息 msg_${seed} 作为证据锚点。`.repeat(3)
+const longText = (seed: string): string =>
+  `${seed}：这是一段相当长的对话内容，用来把上下文占用推高，包含会话 sess_${seed} 与消息 msg_${seed} 作为证据锚点。`.repeat(
+    3,
+  )
 
 function seedHistory(turns: number): HistoryItem[] {
   const items: HistoryItem[] = []
   for (let i = 0; i < turns; i++) {
     const turnId = asTurnId(`trn_${i}`)
-    items.push({ type: 'user_message', id: newItemId(), turnId, createdAt: i * 10, content: [{ type: 'text', text: longText(`u${i}`) }], mentions: [] })
-    items.push({ type: 'assistant_message', id: newItemId(), turnId, stepId: newStepId(), createdAt: i * 10 + 1, text: longText(`a${i}`) })
+    items.push({
+      type: 'user_message',
+      id: newItemId(),
+      turnId,
+      createdAt: i * 10,
+      content: [{ type: 'text', text: longText(`u${i}`) }],
+      mentions: [],
+    })
+    items.push({
+      type: 'assistant_message',
+      id: newItemId(),
+      turnId,
+      stepId: newStepId(),
+      createdAt: i * 10 + 1,
+      text: longText(`a${i}`),
+    })
   }
   return items
 }
 
 describe('compaction', () => {
   it('shouldCompact compares against threshold × window', () => {
-    expect(shouldCompact({ usedTokens: 81, maxTokens: 100, breakdown: { system: 0, memory: 0, references: 0, history: 81, tools: 0 } }, 0.8)).toBe(true)
-    expect(shouldCompact({ usedTokens: 80, maxTokens: 100, breakdown: { system: 0, memory: 0, references: 0, history: 80, tools: 0 } }, 0.8)).toBe(false)
+    expect(
+      shouldCompact(
+        { usedTokens: 81, maxTokens: 100, breakdown: { system: 0, memory: 0, references: 0, history: 81, tools: 0 } },
+        0.8,
+      ),
+    ).toBe(true)
+    expect(
+      shouldCompact(
+        { usedTokens: 80, maxTokens: 100, breakdown: { system: 0, memory: 0, references: 0, history: 80, tools: 0 } },
+        0.8,
+      ),
+    ).toBe(false)
+  })
+
+  it('renderTranscript keeps the previous summary and whole newest lines when the prefix exceeds the cap', () => {
+    const summary: HistoryItem = {
+      type: 'compaction_summary',
+      id: newItemId(),
+      createdAt: 0,
+      summary: '第一次压缩的摘要',
+      foldedItemCount: 4,
+      foldedThroughId: newItemId(),
+      tokenEstimate: 10,
+    }
+    const prefix = [summary, ...seedHistory(400)]
+    const text = renderTranscript(prefix)
+    expect(text.length).toBeLessThanOrEqual(TRANSCRIPT_CHAR_CAP)
+    expect(text.startsWith('前情摘要：第一次压缩的摘要')).toBe(true)
+    expect(text).toContain('a399：')
+    expect(text).not.toContain('u0：')
+    // Whole lines only: every line is the summary, a user line or an assistant line.
+    for (const line of text.split('\n')) expect(line).toMatch(/^(前情摘要|用户|AI)：/)
+  })
+
+  it('renderTranscript is unchanged for a prefix under the cap', () => {
+    const items = seedHistory(2)
+    expect(renderTranscript(items).split('\n')).toHaveLength(4)
   })
 
   it('selectCompactionSplit keeps the last user turn(s) within 30% of the window', () => {
@@ -33,7 +85,10 @@ describe('compaction', () => {
 
   it('(7) triggers before the turn, records a summary and forPrompt() starts with it', async () => {
     const model = createMockModelClient({ steps: [{ text: '继续。' }], ref: { contextWindow: 600 }, loopLast: true })
-    const aux = createMockModelClient({ steps: [{ text: '摘要：用户此前讨论了 sess_u0 与 msg_a1 等内容。' }], loopLast: true })
+    const aux = createMockModelClient({
+      steps: [{ text: '摘要：用户此前讨论了 sess_u0 与 msg_a1 等内容。' }],
+      loopLast: true,
+    })
     const h = await createThreadHarness({ model, auxiliary: aux, config: { compactionThreshold: 0.5 } })
     h.thread.context.recordItems(seedHistory(6))
     const before = h.thread.context.historyTokens()
@@ -50,7 +105,11 @@ describe('compaction', () => {
     expect(summaries[0]!.summary).toContain('sess_u0')
     const visible = h.thread.context.forPrompt()
     expect(visible[0]!.type).toBe('compaction_summary')
-    expect(visible.some((i) => i.type === 'user_message' && i.content[0]!.type === 'text' && i.content[0]!.text === '接着说')).toBe(true)
+    expect(
+      visible.some(
+        (i) => i.type === 'user_message' && i.content[0]!.type === 'text' && i.content[0]!.text === '接着说',
+      ),
+    ).toBe(true)
     expect(h.thread.context.historyTokens()).toBeLessThan(before)
     expect(h.services.rollout.linesOf(h.thread.id).some((l) => l.type === 'compacted')).toBe(true)
     expect(h.services.hooks.calls.map((c) => c.event)).toEqual(expect.arrayContaining(['PreCompact', 'PostCompact']))

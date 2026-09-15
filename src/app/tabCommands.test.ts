@@ -4,7 +4,7 @@ import { clearToasts, getToasts } from '@/kit'
 import { __resetShellStoreForTests, useShellStore } from '@/shell/shellStore'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { onCommand, runCommand } from './commands'
-import { descriptorFor, fileName, installTabCommands, prefixedTitle, quoteRefFor } from './tabCommands'
+import { descriptorFor, fileName, installTabCommands, quoteRefFor } from './tabCommands'
 
 const tabs = () => useTabsStore.getState()
 
@@ -31,19 +31,41 @@ describe('descriptorFor', () => {
       title: '产品市场群',
       state: { focusMessageId: 'm9' },
     })
-    expect(descriptorFor('tab.openAutoReply', { sessionId: 's1', title: '产品市场群' })).toMatchObject({ kind: 'autoreply', title: '自动回复 · 产品市场群' })
-    expect(descriptorFor('tab.openClone', { contactId: 'c1', title: '张明' })).toMatchObject({ kind: 'clone', objectId: 'c1', title: '克隆 · 张明' })
-    expect(descriptorFor('tab.openFile', { path: '/tmp/out/周报草稿.md', title: '' })).toMatchObject({ kind: 'file', title: '周报草稿.md' })
-    expect(descriptorFor('tab.openSettings', { page: 'ai', highlight: 'ai.apiKey' })).toEqual({ kind: 'settings', objectId: 'settings', title: '设置', state: { page: 'ai', highlight: 'ai.apiKey' } })
-    expect(descriptorFor('tab.openSettings', undefined)).toEqual({ kind: 'settings', objectId: 'settings', title: '设置', state: undefined })
+    expect(descriptorFor('tab.openAutoReply', { sessionId: 's1', title: '产品市场群' })).toMatchObject({
+      kind: 'autoreply',
+      title: '产品市场群',
+    })
+    expect(descriptorFor('tab.openClone', { contactId: 'c1', title: '张明' })).toMatchObject({
+      kind: 'clone',
+      objectId: 'c1',
+      title: '张明',
+    })
+    expect(descriptorFor('tab.openFile', { path: '/tmp/out/周报草稿.md', title: '' })).toMatchObject({
+      kind: 'file',
+      title: '周报草稿.md',
+    })
+    expect(descriptorFor('tab.openSettings', { page: 'ai', highlight: 'ai.apiKey' })).toEqual({
+      kind: 'settings',
+      objectId: 'settings',
+      title: '设置',
+      state: { page: 'ai', highlight: 'ai.apiKey' },
+    })
+    expect(descriptorFor('tab.openSettings', undefined)).toEqual({
+      kind: 'settings',
+      objectId: 'settings',
+      title: '设置',
+      state: undefined,
+    })
     expect(descriptorFor('tab.openReplyDesk', undefined)).toMatchObject({ kind: 'replydesk' })
-    expect(descriptorFor('tab.openDiary', { date: '2026-09-05' })).toMatchObject({ kind: 'diary', state: { date: '2026-09-05' } })
+    expect(descriptorFor('tab.openDiary', { date: '2026-09-05' })).toMatchObject({
+      kind: 'diary',
+      state: { date: '2026-09-05' },
+    })
     expect(descriptorFor('tab.openKit', undefined)).toMatchObject({ kind: 'kit', objectId: 'gallery' })
     expect(descriptorFor('tab.openChat', undefined)).toBeUndefined()
   })
 
-  it('never double-prefixes titles and picks file names off paths', () => {
-    expect(prefixedTitle('自动回复', '自动回复 · 家庭群')).toBe('自动回复 · 家庭群')
+  it('stores raw object names (display prefixes are registered per tab kind) and picks file names off paths', () => {
     expect(fileName('C:\\Users\\me\\report.md')).toBe('report.md')
     expect(fileName('plain.md')).toBe('plain.md')
   })
@@ -111,8 +133,16 @@ describe('installTabCommands', () => {
   })
 
   it('maps tab kinds to @ references', () => {
-    expect(quoteRefFor({ id: 'autoreply:s1', kind: 'autoreply', objectId: 's1', title: '自动回复 · 家庭群' })).toEqual({ kind: 'session', id: 's1', label: '家庭群' })
-    expect(quoteRefFor({ id: 'file:/a.md', kind: 'file', objectId: '/a.md', title: 'a.md' })).toEqual({ kind: 'file', id: '/a.md', label: 'a.md' })
+    expect(quoteRefFor({ id: 'autoreply:s1', kind: 'autoreply', objectId: 's1', title: '家庭群' })).toEqual({
+      kind: 'session',
+      id: 's1',
+      label: '家庭群',
+    })
+    expect(quoteRefFor({ id: 'file:/a.md', kind: 'file', objectId: '/a.md', title: 'a.md' })).toEqual({
+      kind: 'file',
+      id: '/a.md',
+      label: 'a.md',
+    })
     expect(quoteRefFor({ id: 'kit:gallery', kind: 'kit', objectId: 'gallery', title: '组件库' })).toBeUndefined()
   })
 })

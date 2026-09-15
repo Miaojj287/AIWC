@@ -33,7 +33,9 @@ export function buildSessionKey(source: SessionSource): SessionKey {
 }
 
 /** Inverse helper for logs / UI: pulls the channel and chat id back out of a key. */
-export function parseSessionKey(key: string): { channel: string; chatType: 'dm' | 'group'; chatId: string; peerId: string; threadId?: string } | undefined {
+export function parseSessionKey(
+  key: string,
+): { channel: string; chatType: 'dm' | 'group'; chatId: string; peerId: string; threadId?: string } | undefined {
   const parts = key.split(':')
   if (parts.length < 4 || parts[0] !== NAMESPACE) return undefined
   const channel = parts[1] ?? ''

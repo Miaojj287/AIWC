@@ -20,7 +20,11 @@ function fakeOutbound() {
   }
 }
 
-function ctx(channel: ChannelKind, origin?: { channel: ChannelKind; chatId: string }, services: GatewayToolServices = {}): ToolContext<GatewayToolServices> {
+function ctx(
+  channel: ChannelKind,
+  origin?: { channel: ChannelKind; chatId: string },
+  services: GatewayToolServices = {},
+): ToolContext<GatewayToolServices> {
   return {
     threadId: asThreadId('thr_1'),
     turnId: asTurnId('trn_1'),
@@ -46,11 +50,19 @@ describe('gatewayTools', () => {
   it('exposes send_message / send_media (send risk) and draft_reply (read) with the right profiles', () => {
     const tools = gatewayTools(fakeOutbound().outbound)
     expect(tools.map((t) => t.name)).toEqual(['send_message', 'send_media', 'draft_reply'])
-    expect(byName('send_message')).toMatchObject({ risk: 'send', parallelSafe: false, profiles: ['desktop-chat', 'wechat-bot'] })
+    expect(byName('send_message')).toMatchObject({
+      risk: 'send',
+      parallelSafe: false,
+      profiles: ['desktop-chat', 'wechat-bot'],
+    })
     expect(byName('send_media')).toMatchObject({ risk: 'send', profiles: ['desktop-chat'] })
     // A bot thread runs on a remote contact's text: a read-any-file-and-upload tool there is exfiltration.
     expect(byName('send_media').profiles).not.toContain('wechat-bot')
-    expect(byName('draft_reply')).toMatchObject({ risk: 'read', parallelSafe: true, profiles: ['wechat-bot', 'cron'] })
+    expect(byName('draft_reply')).toMatchObject({
+      risk: 'read',
+      parallelSafe: true,
+      profiles: ['desktop-chat', 'wechat-bot', 'cron'],
+    })
     expect(byName('send_message').summarize?.({ text: '你好世界', to: 'u1' })).toBe('发送消息到 u1：你好世界')
     expect(byName('send_message').inputSchema.safeParse({ text: '' }).success).toBe(false)
     expect(byName('send_media').inputSchema.safeParse({ path: '/a.png', kind: 'gif' }).success).toBe(false)
@@ -59,7 +71,10 @@ describe('gatewayTools', () => {
   it('on a wechat channel, ignores `to` and sends to the origin chat', async () => {
     const fake = fakeOutbound()
     const [sendMessage] = gatewayTools(fake.outbound)
-    const res = await sendMessage!.execute({ text: '秘密', to: 'u_victim' }, ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u_owner' }))
+    const res = await sendMessage!.execute(
+      { text: '秘密', to: 'u_victim' },
+      ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u_owner' }),
+    )
     expect(res.isError).toBeFalsy()
     expect(res.content).toMatchObject({ ok: true, to: 'u_owner', channel: 'wechat-ilink', messageId: 'm1' })
     expect(fake.sent[0]?.to).toEqual({ channel: 'wechat-ilink', chatId: 'u_owner', peerId: 'u_owner', chatType: 'dm' })
@@ -69,23 +84,43 @@ describe('gatewayTools', () => {
   it('uses the origin even when the current channel is desktop but the thread came from wechat', async () => {
     const fake = fakeOutbound()
     const [sendMessage] = gatewayTools(fake.outbound)
-    await sendMessage!.execute({ text: 'x', to: 'other' }, ctx('desktop', { channel: 'wechat-ilink', chatId: 'g1@chatroom' }))
+    await sendMessage!.execute(
+      { text: 'x', to: 'other' },
+      ctx('desktop', { channel: 'wechat-ilink', chatId: 'g1@chatroom' }),
+    )
     expect(fake.sent[0]?.to).toMatchObject({ channel: 'wechat-ilink', chatId: 'g1@chatroom', chatType: 'group' })
   })
 
   it("treats the 'observed' channel as a bot context: `to` is ignored and the reply goes to the origin chat via the UI channel", async () => {
     const fake = fakeOutbound()
     const [sendMessage] = gatewayTools(fake.outbound)
-    const res = await sendMessage!.execute({ text: '秘密', to: 'u_victim' }, ctx('observed', { channel: 'observed', chatId: 'wxid_owner' }))
+    const res = await sendMessage!.execute(
+      { text: '秘密', to: 'u_victim' },
+      ctx('observed', { channel: 'observed', chatId: 'wxid_owner' }),
+    )
     expect(res.isError).toBeFalsy()
-    expect(fake.sent[0]?.to).toEqual({ channel: 'wechat-ui', chatId: 'wxid_owner', peerId: 'wxid_owner', chatType: 'dm' })
+    expect(fake.sent[0]?.to).toEqual({
+      channel: 'wechat-ui',
+      chatId: 'wxid_owner',
+      peerId: 'wxid_owner',
+      chatType: 'dm',
+    })
     // a desktop-profile turn on a thread that came from an observed chat is still bound to that chat
-    expect(resolveTarget({ channel: 'desktop', origin: { channel: 'observed', chatId: 'g1@chatroom' } }, 'other', 'wechat-ilink')).toEqual({
+    expect(
+      resolveTarget(
+        { channel: 'desktop', origin: { channel: 'observed', chatId: 'g1@chatroom' } },
+        'other',
+        'wechat-ilink',
+      ),
+    ).toEqual({
       ok: true,
       to: { channel: 'wechat-ui', chatId: 'g1@chatroom', peerId: 'g1@chatroom', chatType: 'group' },
     })
     // an observed turn without a known origin chat refuses instead of falling back to `to`
-    expect(resolveTarget({ channel: 'observed' }, 'u_victim', 'wechat-ui')).toEqual({ ok: false, error: expect.stringContaining('来源会话未知') })
+    expect(resolveTarget({ channel: 'observed' }, 'u_victim', 'wechat-ui')).toEqual({
+      ok: false,
+      error: expect.stringContaining('来源会话未知'),
+    })
     expect(isBotContext({ channel: 'observed' })).toBe(true)
     expect(isBotContext({ channel: 'desktop', origin: { channel: 'observed', chatId: 'x' } })).toBe(true)
   })
@@ -104,17 +139,26 @@ describe('gatewayTools', () => {
     const [sendMessage] = gatewayTools(fake.outbound)
     const missing = await sendMessage!.execute({ text: 'x' }, ctx('desktop', { channel: 'desktop', chatId: 'me' }))
     expect(missing.isError).toBe(true)
-    const ok = await sendMessage!.execute({ text: 'x', to: 'wxid_bob' }, ctx('desktop', { channel: 'desktop', chatId: 'me' }))
+    const ok = await sendMessage!.execute(
+      { text: 'x', to: 'wxid_bob' },
+      ctx('desktop', { channel: 'desktop', chatId: 'me' }),
+    )
     expect(ok.isError).toBeFalsy()
     expect(fake.sent[0]?.to).toEqual({ channel: 'wechat-ui', chatId: 'wxid_bob', peerId: 'wxid_bob', chatType: 'dm' })
-    expect(resolveTarget({ channel: 'desktop' }, 'g@chatroom', 'wechat-ilink')).toEqual({ ok: true, to: { channel: 'wechat-ilink', chatId: 'g@chatroom', peerId: 'g@chatroom', chatType: 'group' } })
+    expect(resolveTarget({ channel: 'desktop' }, 'g@chatroom', 'wechat-ilink')).toEqual({
+      ok: true,
+      to: { channel: 'wechat-ilink', chatId: 'g@chatroom', peerId: 'g@chatroom', chatType: 'group' },
+    })
   })
 
   it('prefers ctx.services.gateway over the closure outbound', async () => {
     const closure = fakeOutbound()
     const injected = fakeOutbound()
     const [sendMessage] = gatewayTools(closure.outbound)
-    await sendMessage!.execute({ text: 'x' }, ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }, { gateway: injected.outbound }))
+    await sendMessage!.execute(
+      { text: 'x' },
+      ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }, { gateway: injected.outbound }),
+    )
     expect(injected.sent).toHaveLength(1)
     expect(closure.sent).toHaveLength(0)
   })
@@ -123,7 +167,10 @@ describe('gatewayTools', () => {
     const fake = fakeOutbound()
     fake.outbound.send.mockResolvedValueOnce({ ok: false, error: '未登录' })
     const [sendMessage] = gatewayTools(fake.outbound)
-    const res = await sendMessage!.execute({ text: 'x' }, ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }))
+    const res = await sendMessage!.execute(
+      { text: 'x' },
+      ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }),
+    )
     expect(res.isError).toBe(true)
     expect(res.content).toMatchObject({ ok: false, error: '未登录' })
   })
@@ -148,10 +195,38 @@ describe('gatewayTools', () => {
     const fake = fakeOutbound()
     const onDraft = vi.fn()
     const draftReply = gatewayTools(fake.outbound, { onDraft })[2]!
-    const res = await draftReply.execute({ text: '这是草稿' }, ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }))
+    const res = await draftReply.execute(
+      { text: '这是草稿', to: 'someone_else' },
+      ctx('wechat-ilink', { channel: 'wechat-ilink', chatId: 'u1' }),
+    )
     expect(res.isError).toBeFalsy()
-    expect(res.content).toEqual({ drafted: true, text: '这是草稿', to: 'u1' })
-    expect(onDraft).toHaveBeenCalledWith({ text: '这是草稿', origin: { channel: 'wechat-ilink', chatId: 'u1' }, threadId: 'thr_1' })
+    expect(res.content).toMatchObject({ drafted: true, text: '这是草稿', to: 'u1' })
+    // On a bot channel `to` is ignored: the draft can only target the origin chat.
+    expect(onDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '这是草稿',
+        origin: { channel: 'wechat-ilink', chatId: 'u1' },
+        threadId: 'thr_1',
+        to: expect.objectContaining({ chatId: 'u1', channel: 'wechat-ilink' }),
+      }),
+    )
+    expect(fake.outbound.send).not.toHaveBeenCalled()
+  })
+
+  it('draft_reply on desktop needs an explicit target and hands over a wechat-ui source', async () => {
+    const fake = fakeOutbound()
+    const onDraft = vi.fn()
+    const draftReply = gatewayTools(fake.outbound, { onDraft })[2]!
+    const missing = await draftReply.execute({ text: '草稿' }, ctx('desktop'))
+    expect(missing.isError).toBe(true)
+    expect(onDraft).not.toHaveBeenCalled()
+    const res = await draftReply.execute({ text: '草稿', to: 'g1@chatroom' }, ctx('desktop'))
+    expect(res.isError).toBeFalsy()
+    expect(onDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: { channel: 'wechat-ui', chatId: 'g1@chatroom', peerId: 'g1@chatroom', chatType: 'group' },
+      }),
+    )
     expect(fake.outbound.send).not.toHaveBeenCalled()
   })
 
@@ -175,7 +250,10 @@ describe('gatewayTools', () => {
 
     const botOrigin = { channel: 'wechat-ilink' as const, chatId: 'u_attacker' }
     const bot = (services: GatewayToolServices = {}) => ctx('wechat-ilink', botOrigin, services)
-    const sendMediaWith = (fake: ReturnType<typeof fakeOutbound>, roots?: readonly string[] | (() => readonly string[])) => gatewayTools(fake.outbound, roots ? { mediaRoots: roots } : {})[1]!
+    const sendMediaWith = (
+      fake: ReturnType<typeof fakeOutbound>,
+      roots?: readonly string[] | (() => readonly string[]),
+    ) => gatewayTools(fake.outbound, roots ? { mediaRoots: roots } : {})[1]!
 
     it('isBotContext is true when either the channel or the origin is a wechat channel', () => {
       expect(isBotContext({ channel: 'wechat-ilink' })).toBe(true)
@@ -228,14 +306,20 @@ describe('gatewayTools', () => {
       const res = await tool.execute({ path: inside, kind: 'image' }, bot({ mediaRoots: () => [root] }))
       expect(res.isError).toBeFalsy()
       expect(fake.sent).toHaveLength(1)
-      const denied = await tool.execute({ path: join(outside, 'id_rsa'), kind: 'image' }, bot({ mediaRoots: () => [root] }))
+      const denied = await tool.execute(
+        { path: join(outside, 'id_rsa'), kind: 'image' },
+        bot({ mediaRoots: () => [root] }),
+      )
       expect(denied.isError).toBe(true)
     })
 
     it('desktop threads are held to the roots too once they are configured', async () => {
       const fake = fakeOutbound()
       const desktop = ctx('desktop', { channel: 'desktop', chatId: 'me' }, { mediaRoots: [root] })
-      const denied = await sendMediaWith(fake).execute({ path: join(outside, 'id_rsa'), kind: 'file', to: 'wxid_bob' }, desktop)
+      const denied = await sendMediaWith(fake).execute(
+        { path: join(outside, 'id_rsa'), kind: 'file', to: 'wxid_bob' },
+        desktop,
+      )
       expect(denied.isError).toBe(true)
       const ok = await sendMediaWith(fake).execute({ path: inside, kind: 'file', to: 'wxid_bob' }, desktop)
       expect(ok.isError).toBeFalsy()
@@ -244,7 +328,10 @@ describe('gatewayTools', () => {
 
     it('a desktop-profile thread whose origin is a wechat chat is still a bot context', async () => {
       const fake = fakeOutbound()
-      const res = await sendMediaWith(fake).execute({ path: inside, kind: 'file' }, ctx('desktop', { channel: 'wechat-ui', chatId: 'wxid_x' }))
+      const res = await sendMediaWith(fake).execute(
+        { path: inside, kind: 'file' },
+        ctx('desktop', { channel: 'wechat-ui', chatId: 'wxid_x' }),
+      )
       expect(res).toMatchObject({ isError: true, content: { error: MEDIA_ROOTS_MISSING_ERROR } })
       expect(fake.outbound.send).not.toHaveBeenCalled()
     })

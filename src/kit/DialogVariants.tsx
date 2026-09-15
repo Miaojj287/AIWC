@@ -1,5 +1,6 @@
 import { Check, Circle, CircleAlert, Info, Pencil, RefreshCw, Trash } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type SubmitEvent } from 'react'
+import { useT } from '@/i18n'
 import { Button } from './Button'
 import { cn } from './cn'
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, type DialogTone } from './Dialog'
@@ -7,6 +8,7 @@ import { ICON_STROKE, type IconComponent } from './icon'
 import { Input } from './Input'
 import { ProgressBar } from './ProgressBar'
 import { Spinner } from './Spinner'
+import { toast } from './toast/toastStore'
 
 interface BaseDialogProps {
   open: boolean
@@ -21,9 +23,11 @@ interface BaseDialogProps {
  * Guards the confirm / submit handler of every dialog variant: while the returned promise is pending
  * the button shows a spinner and a second click is dropped, so 删除 / 保存 / 发送 can never run twice
  * on a double click (CLAUDE.md §4.4, 交互准则 3). Callers that own the pending state pass `loading`
- * themselves; both sources are OR-ed.
+ * themselves; both sources are OR-ed. A handler that throws or rejects is reported in an error toast and
+ * the dialog stays open and enabled, so the user can retry or cancel (AGENTS.md §2.4).
  */
 function useConfirmGuard(handler: () => void | Promise<void>, external: boolean): { busy: boolean; run: () => void } {
+  const t = useT()
   const [pending, setPending] = useState(false)
   const inflight = useRef(false)
   const alive = useRef(true)
@@ -33,13 +37,23 @@ function useConfirmGuard(handler: () => void | Promise<void>, external: boolean)
       alive.current = false
     }
   }, [])
+  const report = (error: unknown) => {
+    const detail = error instanceof Error ? error.message : String(error)
+    toast.error(t('kit.dialog.failed'), { detail: detail.trim() || undefined })
+  }
   const run = () => {
     if (inflight.current || external) return
-    const result = handler()
+    let result: void | Promise<void>
+    try {
+      result = handler()
+    } catch (error) {
+      report(error)
+      return
+    }
     if (!(result instanceof Promise)) return
     inflight.current = true
     setPending(true)
-    void result.finally(() => {
+    void result.catch(report).finally(() => {
       inflight.current = false
       if (alive.current) setPending(false)
     })
@@ -67,29 +81,36 @@ export function ConfirmDialog({
   description,
   icon = Info,
   tone = 'info',
-  confirmLabel = '确定',
-  cancelLabel = '取消',
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   loading = false,
   children,
   className,
 }: ConfirmDialogProps) {
+  const t = useT()
   const cancelRef = useRef<HTMLButtonElement>(null)
   const { busy, run } = useConfirmGuard(onConfirm, loading)
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent size="sm" className={className} lockOutside={busy} lockEscape={busy} onOpenAutoFocus={(e) => {
-        e.preventDefault()
-        cancelRef.current?.focus()
-      }}>
+      <DialogContent
+        size="sm"
+        className={className}
+        lockOutside={busy}
+        lockEscape={busy}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          cancelRef.current?.focus()
+        }}
+      >
         <DialogHeader icon={icon} tone={tone} title={title} description={description} />
         {children ? <DialogBody>{children}</DialogBody> : null}
         <DialogFooter>
           <Button ref={cancelRef} variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            {cancelLabel}
+            {cancelLabel ?? t('kit.dialog.cancel')}
           </Button>
           <Button variant="primary" onClick={run} loading={busy}>
-            {confirmLabel}
+            {confirmLabel ?? t('kit.dialog.confirm')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -119,14 +140,15 @@ export function DangerDialog({
   title,
   description,
   icon = Trash,
-  confirmLabel = '删除',
-  cancelLabel = '取消',
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   loading = false,
   confirmWord,
   children,
   className,
 }: DangerDialogProps) {
+  const t = useT()
   const cancelRef = useRef<HTMLButtonElement>(null)
   const [typed, setTyped] = useState('')
   useEffect(() => {
@@ -152,20 +174,29 @@ export function DangerDialog({
             {children}
             {confirmWord ? (
               <div className="flex flex-col gap-1.5">
-                <span className="text-note text-fg-3">
-                  输入「{confirmWord}」以确认
-                </span>
-                <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={confirmWord} aria-label="确认词" />
+                <span className="text-note text-fg-3">{t('kit.dialog.typeToConfirm', { word: confirmWord })}</span>
+                <Input
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  placeholder={confirmWord}
+                  aria-label={t('kit.dialog.confirmWord')}
+                />
               </div>
             ) : null}
           </DialogBody>
         ) : null}
         <DialogFooter>
           <Button ref={cancelRef} variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            {cancelLabel}
+            {cancelLabel ?? t('kit.dialog.cancel')}
           </Button>
-          <Button variant="danger" onClick={run} loading={busy} disabled={gated} title={gated ? `请先输入确认词「${confirmWord}」` : undefined}>
-            {confirmLabel}
+          <Button
+            variant="danger"
+            onClick={run}
+            loading={busy}
+            disabled={gated}
+            title={gated ? t('kit.dialog.confirmWordHint', { word: confirmWord }) : undefined}
+          >
+            {confirmLabel ?? t('kit.dialog.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -195,8 +226,8 @@ export function FormDialog({
   title,
   description,
   icon = Pencil,
-  submitLabel = '保存',
-  cancelLabel = '取消',
+  submitLabel,
+  cancelLabel,
   onSubmit,
   submitDisabled = false,
   submitDisabledReason,
@@ -205,8 +236,9 @@ export function FormDialog({
   children,
   className,
 }: FormDialogProps) {
+  const t = useT()
   const { busy, run } = useConfirmGuard(onSubmit, loading)
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (submitDisabled || busy) return
     run()
@@ -219,10 +251,16 @@ export function FormDialog({
           <DialogBody>{children}</DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-              {cancelLabel}
+              {cancelLabel ?? t('kit.dialog.cancel')}
             </Button>
-            <Button type="submit" variant="primary" loading={busy} disabled={submitDisabled} title={submitDisabled ? submitDisabledReason : undefined}>
-              {submitLabel}
+            <Button
+              type="submit"
+              variant="primary"
+              loading={busy}
+              disabled={submitDisabled}
+              title={submitDisabled ? submitDisabledReason : undefined}
+            >
+              {submitLabel ?? t('kit.dialog.save')}
             </Button>
           </DialogFooter>
         </form>
@@ -288,7 +326,20 @@ const STEP_ICON: Record<ProgressStepStatus, ReactNode> = {
  * 进度对话框 — long tasks (key acquisition, cloning, downloads; CLAUDE.md §4.5):
  * progress bar + status line + step list ✓/⟳/○/!, only a 取消 button, scrim and Escape do not close.
  */
-export function ProgressDialog({ open, title, description, icon = RefreshCw, value, status, steps, cancelLabel = '取消', onCancel, note, className }: ProgressDialogProps) {
+export function ProgressDialog({
+  open,
+  title,
+  description,
+  icon = RefreshCw,
+  value,
+  status,
+  steps,
+  cancelLabel,
+  onCancel,
+  note,
+  className,
+}: ProgressDialogProps) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel?.()}>
       <DialogContent size="md" lockOutside lockEscape={!onCancel} hideClose={!onCancel} className={className}>
@@ -306,8 +357,25 @@ export function ProgressDialog({ open, title, description, icon = RefreshCw, val
               {steps.map((s) => (
                 <li key={s.id} data-status={s.status} className="flex items-center gap-2 text-tab">
                   <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
-                  <span className={cn('min-w-0 flex-1 truncate', s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg')}>{s.label}</span>
-                  {s.detail ? <span className={cn('shrink-0 text-micro', s.status === 'failed' ? 'text-danger' : 'text-fg-3')}>{s.detail}</span> : null}
+                  <span
+                    className={cn(
+                      'min-w-0 flex-1 truncate',
+                      s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg',
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                  {s.detail ? (
+                    <span
+                      className={cn(
+                        'max-w-[55%] shrink-0 truncate text-micro',
+                        s.status === 'failed' ? 'text-danger' : 'text-fg-3',
+                      )}
+                      title={typeof s.detail === 'string' ? s.detail : undefined}
+                    >
+                      {s.detail}
+                    </span>
+                  ) : null}
                 </li>
               ))}
             </ol>
@@ -318,7 +386,7 @@ export function ProgressDialog({ open, title, description, icon = RefreshCw, val
             {note ? <span className="text-note text-fg-3">{note}</span> : null}
             {onCancel ? (
               <Button variant="ghost" onClick={onCancel} autoFocus>
-                {cancelLabel}
+                {cancelLabel ?? t('kit.dialog.cancel')}
               </Button>
             ) : null}
           </DialogFooter>

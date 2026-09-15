@@ -1,11 +1,15 @@
 import { Search, X } from 'lucide-react'
 import { forwardRef, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE } from './icon'
 import { IconButton } from './IconButton'
 import { mergeRefs } from './internal/refs'
 
-export interface SearchBoxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'defaultValue' | 'onChange' | 'onSubmit' | 'size' | 'type'> {
+export interface SearchBoxProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'defaultValue' | 'onChange' | 'onSubmit' | 'size' | 'type'
+> {
   value?: string
   defaultValue?: string
   onValueChange?: (value: string) => void
@@ -23,9 +27,23 @@ export interface SearchBoxProps extends Omit<InputHTMLAttributes<HTMLInputElemen
  * Figma 154:835. Escape clears first, then blurs.
  */
 export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBox(
-  { value, defaultValue, onValueChange, onSubmit, size = 'default', shortcut, wrapperClassName, className, placeholder = '搜索', disabled, onKeyDown, ...rest },
+  {
+    value,
+    defaultValue,
+    onValueChange,
+    onSubmit,
+    size = 'default',
+    shortcut,
+    wrapperClassName,
+    className,
+    placeholder,
+    disabled,
+    onKeyDown,
+    ...rest
+  },
   ref,
 ) {
+  const t = useT()
   const inner = useRef<HTMLInputElement>(null)
   const [uncontrolled, setUncontrolled] = useState(defaultValue ?? '')
   const isControlled = value !== undefined
@@ -75,20 +93,28 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
         type="search"
         value={current}
         disabled={disabled}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('kit.search')}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         className={cn(
-          'h-full min-w-0 flex-1 bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
+          'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
           '[&::-webkit-search-cancel-button]:hidden',
           className,
         )}
         {...rest}
       />
       {current ? (
-        <IconButton size="xs" icon={X} iconSize={ICON_SIZE.inputTrailing} label="清除" tabIndex={-1} onClick={() => setValue('')} className="text-fg-3" />
+        <IconButton
+          size="xs"
+          icon={X}
+          iconSize={ICON_SIZE.inputTrailing}
+          label={t('kit.clear')}
+          tabIndex={-1}
+          onClick={() => setValue('')}
+          className="text-fg-3"
+        />
       ) : shortcut ? (
-        <span className="pr-1 font-latin text-micro text-fg-3">{shortcut}</span>
+        <span className="shrink-0 pr-1 font-latin text-micro text-fg-3">{shortcut}</span>
       ) : null}
     </div>
   )

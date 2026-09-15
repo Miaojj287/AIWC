@@ -8,12 +8,18 @@ import { onCommand } from './commands'
 import { formatShortcut, installShortcuts, matchShortcut, resolveShortcutEnv, shortcutLabel } from './shortcuts'
 import { installTabCommands } from './tabCommands'
 
-const key = (overrides: Partial<KeyboardEventInit> & { key: string }) => new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...overrides })
+const key = (overrides: Partial<KeyboardEventInit> & { key: string }) =>
+  new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...overrides })
 
 describe('matchShortcut', () => {
   it('maps ⌘1/2/3 to rail.select with the function payload', () => {
-    expect(matchShortcut(key({ key: '1', metaKey: true }), { mac: true })).toMatchObject({ command: 'rail.select', payload: { fn: 'chat' } })
-    expect(matchShortcut(key({ key: '2', metaKey: true }), { mac: true })).toMatchObject({ payload: { fn: 'autoreply' } })
+    expect(matchShortcut(key({ key: '1', metaKey: true }), { mac: true })).toMatchObject({
+      command: 'rail.select',
+      payload: { fn: 'chat' },
+    })
+    expect(matchShortcut(key({ key: '2', metaKey: true }), { mac: true })).toMatchObject({
+      payload: { fn: 'autoreply' },
+    })
     expect(matchShortcut(key({ key: '3', metaKey: true }), { mac: true })).toMatchObject({ payload: { fn: 'clone' } })
   })
 
@@ -24,16 +30,29 @@ describe('matchShortcut', () => {
   })
 
   it('distinguishes shifted chords and upper-case keys', () => {
-    expect(matchShortcut(key({ key: 'T', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe('tab.reopenClosed')
+    expect(matchShortcut(key({ key: 'T', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe(
+      'tab.reopenClosed',
+    )
     expect(matchShortcut(key({ key: 't', metaKey: true }), { mac: true })).toBeUndefined()
-    expect(matchShortcut(key({ key: 'A', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe('agent.quoteActiveTab')
-    expect(matchShortcut(key({ key: 'B', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe('objectList.toggleCollapsed')
-    expect(matchShortcut(key({ key: 'J', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe('agent.toggleCollapsed')
+    expect(matchShortcut(key({ key: 'A', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe(
+      'agent.quoteActiveTab',
+    )
+    expect(matchShortcut(key({ key: 'B', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe(
+      'objectList.toggleCollapsed',
+    )
+    expect(matchShortcut(key({ key: 'J', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe(
+      'agent.toggleCollapsed',
+    )
+    expect(matchShortcut(key({ key: 'L', metaKey: true, shiftKey: true }), { mac: true })?.command).toBe(
+      'shell.toggleMode',
+    )
   })
 
   it('only enables ⌘⇧K (kit gallery) in web mode', () => {
     expect(matchShortcut(key({ key: 'K', metaKey: true, shiftKey: true }), { mac: true })).toBeUndefined()
-    expect(matchShortcut(key({ key: 'K', metaKey: true, shiftKey: true }), { mac: true, web: true })?.command).toBe('tab.openKit')
+    expect(matchShortcut(key({ key: 'K', metaKey: true, shiftKey: true }), { mac: true, web: true })?.command).toBe(
+      'tab.openKit',
+    )
     expect(matchShortcut(key({ key: 'k', metaKey: true }), { mac: true })?.command).toBe('search.sessions')
   })
 
@@ -53,7 +72,11 @@ describe('installShortcuts', () => {
   it('dispatches the matched command and consumes the event', () => {
     const closeActive = vi.fn()
     const railSelect = vi.fn()
-    offs.push(onCommand('tab.closeActive', closeActive), onCommand('rail.select', railSelect), installShortcuts({ mac: true }))
+    offs.push(
+      onCommand('tab.closeActive', closeActive),
+      onCommand('rail.select', railSelect),
+      installShortcuts({ mac: true }),
+    )
 
     const w = key({ key: 'w', metaKey: true })
     window.dispatchEvent(w)
@@ -82,7 +105,12 @@ describe('installShortcuts', () => {
 /* ⌘⇧K end to end: keydown → shortcut table → command bus → tabCommands → tabsStore (kit gallery tab). */
 describe('⌘⇧K opens the kit gallery tab in web mode', () => {
   const offs: Array<() => void> = []
-  const fakeBridge = (runtime: AiwcBridge['runtime']): AiwcBridge => ({ runtime, platform: 'darwin', on: () => () => {}, invoke: (async () => undefined) as AiwcBridge['invoke'] })
+  const fakeBridge = (runtime: AiwcBridge['runtime']): AiwcBridge => ({
+    runtime,
+    platform: 'darwin',
+    on: () => () => {},
+    invoke: (async () => undefined) as AiwcBridge['invoke'],
+  })
   const activeTab = () => useTabsStore.getState().activeId
 
   beforeEach(() => {

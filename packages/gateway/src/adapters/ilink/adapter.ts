@@ -6,10 +6,19 @@
  * State machine:
  *   needs_login ──connect()──▶ connecting (QR shown, polled) ──confirmed──▶ connected
  *   connected ──session expired──▶ needs_login          connected ──network error──▶ connected (retry w/ backoff)
+ *   A poll answered with a non-zero `ret` is a failed poll (backoff; `ret` -14 = session expired), never data.
  *   any ──disconnect()──▶ disconnected (session kept unless `forget`)
  */
 import { join } from 'node:path'
-import type { AdapterState, MessageEvent, OutboundPart, PlatformAdapter, SendRequest, SendResult, SessionSource } from '@aiwc/protocol'
+import type {
+  AdapterState,
+  MessageEvent,
+  OutboundPart,
+  PlatformAdapter,
+  SendRequest,
+  SendResult,
+  SessionSource,
+} from '@aiwc/protocol'
 import { createEmitter, errorMessage, sleep as defaultSleep } from '../../core/emitter'
 import type { AdapterExtras } from '../../core/gateway'
 import { checkOutboundMedia, type MediaRoots } from '../../core/mediaPolicy'
@@ -18,6 +27,7 @@ import { downloadAttachment, type FetchLike } from './media'
 import {
   ILINK_BASE_URL,
   ILINK_MAX_TEXT_LENGTH,
+  IlinkApiError,
   IlinkMessageType,
   incomingKind,
   incomingText,
@@ -48,7 +58,7 @@ export interface IlinkAdapterOptions {
   qrPollMs?: number
   /** Pause between bubbles of one reply (min,max) to look less mechanical. 0 in tests. */
   bubblePauseMs?: [number, number]
-  /** Minimum idle wait after an empty poll (guards against hot loops when the server answers instantly). */
+  /** Idle wait after an empty poll (guards against hot loops when the server answers instantly); never below POLL_IDLE_MIN_MS. */
   pollIdleMs?: number
   seenLimit?: number
   logger?: (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
@@ -78,11 +88,16 @@ const QR_POLL_MS = 1000
 const QR_MAX_REFRESH = 3
 const RETRY_BASE_MS = 3000
 const RETRY_MAX_MS = 60_000
+/** Floor for the wait after an empty poll: the server normally holds a poll ~35 s, so this only bites when it answers at once. */
+const POLL_IDLE_MIN_MS = 1000
 const SEEN_LIMIT = 1000
 const DEFAULT_BUBBLE_PAUSE: [number, number] = [700, 2200]
 
 async function defaultRenderQr(content: string): Promise<string> {
-  const mod = (await import('qrcode')) as unknown as { toDataURL?: (text: string, opts?: unknown) => Promise<string>; default?: { toDataURL(text: string, opts?: unknown): Promise<string> } }
+  const mod = (await import('qrcode')) as unknown as {
+    toDataURL?: (text: string, opts?: unknown) => Promise<string>
+    default?: { toDataURL(text: string, opts?: unknown): Promise<string> }
+  }
   const toDataURL = mod.toDataURL ?? mod.default?.toDataURL
   if (!toDataURL) throw new Error('qrcode 模块不可用')
   return toDataURL(content, { width: 280, margin: 2, errorCorrectionLevel: 'H' })
@@ -106,7 +121,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
   const qrDeadlineMs = opts.qrDeadlineMs ?? QR_DEADLINE_MS
   const qrPollMs = opts.qrPollMs ?? QR_POLL_MS
   const bubblePause = opts.bubblePauseMs ?? DEFAULT_BUBBLE_PAUSE
-  const pollIdleMs = opts.pollIdleMs ?? 0
+  const pollIdleMs = Math.max(POLL_IDLE_MIN_MS, opts.pollIdleMs ?? POLL_IDLE_MIN_MS)
   const seenLimit = opts.seenLimit ?? SEEN_LIMIT
 
   const messages = createEmitter<MessageEvent>((err) => log('warn', 'ilink message listener threw', errorMessage(err)))
@@ -155,7 +170,9 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
     for (const [i, attachment] of parsed.attachments.entries()) {
       if (!attachment.url) continue
       try {
-        const downloaded = await downloadAttachment(fetchImpl, attachment, mediaDir, { id: `${id.replace(/[^a-z0-9]/gi, '')}_${i}` })
+        const downloaded = await downloadAttachment(fetchImpl, attachment, mediaDir, {
+          id: `${id.replace(/[^a-z0-9]/gi, '')}_${i}`,
+        })
         mediaPaths.push(downloaded.path)
       } catch (err) {
         log('warn', 'ilink attachment download failed', { filename: attachment.filename, error: errorMessage(err) })
@@ -192,7 +209,9 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
       try {
         const resp = await client.getUpdates(session, buf, signal)
         if (signal.aborted) break
-        if (resp.ret !== undefined && resp.ret !== 0) log('warn', 'getupdates ret != 0', { ret: resp.ret, errmsg: resp.errmsg })
+        // Decided on the structured code: the catch below backs off, or asks for a new login on -14.
+        if (resp.ret !== undefined && resp.ret !== 0)
+          throw new IlinkApiError(`getupdates ret=${resp.ret} ${resp.errmsg ?? ''}`.trim(), undefined, resp.ret)
         if (resp.get_updates_buf && resp.get_updates_buf !== buf) {
           buf = resp.get_updates_buf
           store.saveCursor(buf)
@@ -206,7 +225,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
           const event = await normalise(msg)
           if (event) messages.emit(event)
         }
-        if (msgs.length === 0 && pollIdleMs > 0) await sleep(pollIdleMs, signal)
+        if (msgs.length === 0) await sleep(pollIdleMs, signal)
       } catch (err) {
         if (signal.aborted) break
         if (isSessionExpiredError(err)) {
@@ -298,7 +317,12 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
     return verdict.path
   }
 
-  async function sendPart(current: IlinkSession, to: string, part: OutboundPart, contextToken: string | undefined): Promise<string | undefined> {
+  async function sendPart(
+    current: IlinkSession,
+    to: string,
+    part: OutboundPart,
+    contextToken: string | undefined,
+  ): Promise<string | undefined> {
     switch (part.type) {
       case 'text': {
         const bubbles = splitExplicitBubbles(part.text).flatMap((b) => chunkText(b, ILINK_MAX_TEXT_LENGTH))
@@ -314,7 +338,12 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
       case 'file':
         return (await client.sendFile(current, to, allowedPath(part.path), contextToken)).clientId
       case 'voice':
-        return (await client.sendVoice(current, to, allowedPath(part.path), { playtimeMs: part.durationMs ?? 1000, contextToken })).clientId
+        return (
+          await client.sendVoice(current, to, allowedPath(part.path), {
+            playtimeMs: part.durationMs ?? 1000,
+            contextToken,
+          })
+        ).clientId
       case 'sticker':
         throw new Error('iLink 通道不支持发送表情')
       default:
@@ -324,7 +353,12 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
 
   const adapter: IlinkAdapter = {
     channel: 'wechat-ilink',
-    capabilities: { typing: true, media: ['text', 'image', 'file', 'voice'], splitsLongMessages: false, maxTextLength: ILINK_MAX_TEXT_LENGTH },
+    capabilities: {
+      typing: true,
+      media: ['text', 'image', 'file', 'voice'],
+      splitsLongMessages: false,
+      maxTextLength: ILINK_MAX_TEXT_LENGTH,
+    },
     mentionPatterns: opts.mentionPatterns,
     get state() {
       return state

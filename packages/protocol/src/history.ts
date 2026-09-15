@@ -107,9 +107,3 @@ export type HistoryItem =
   | ContextFragmentItem
   | CompactionSummaryItem
   | TurnAbortedItem
-
-export type HistoryItemType = HistoryItem['type']
-
-/** Items that are model-visible but should NOT show in the user-facing transcript. */
-export const isInternalItem = (item: HistoryItem): boolean =>
-  item.type === 'context_fragment' || item.type === 'compaction_summary' || item.type === 'turn_aborted'

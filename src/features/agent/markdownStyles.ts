@@ -32,12 +32,11 @@ export const MARKDOWN_CLASS = {
   list: 'flex flex-col gap-1 pl-5 marker:text-fg-3',
   listItem: 'select-text',
   /** Fenced code <pre>: frame on the content ground + caption-size mono. Surfaces overlay chrome (复制) on a relative wrapper. */
-  codeBlock: 'select-text overflow-x-auto rounded-item border border-line-8 bg-content px-3 py-2.5 font-mono text-caption leading-[18px] text-fg-2',
+  codeBlock:
+    'select-text overflow-x-auto rounded-item border border-line-8 bg-content px-3 py-2.5 font-mono text-caption leading-[18px] text-fg-2',
   inlineCode: 'rounded-sm bg-line-8 px-1 py-px font-mono text-caption text-fg',
   quote: 'border-l-2 border-(--line-25) pl-3 text-fg-2',
   hr: 'my-1 border-0 border-t border-line-8',
   strong: 'font-medium text-fg',
   link: 'text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent',
 } as const
-
-export type MarkdownClassKey = keyof typeof MARKDOWN_CLASS

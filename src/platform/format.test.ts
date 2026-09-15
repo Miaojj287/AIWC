@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatClock, formatCount, formatDateDivider, formatDuration, formatRelative, formatTime, formatVoiceDuration, truncateMiddle } from './format'
+import {
+  formatBytes,
+  formatClock,
+  formatCount,
+  formatDateDivider,
+  formatDuration,
+  formatRelative,
+  formatTime,
+  formatVoiceDuration,
+  truncateMiddle,
+} from './format'
 
 // 2026-09-06 14:30 local time
 const NOW = new Date(2026, 8, 6, 14, 30, 0).getTime()

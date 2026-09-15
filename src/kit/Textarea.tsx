@@ -22,7 +22,21 @@ const PADDING_Y = 16
  * Figma 154:761. `autosize` resizes on every value change.
  */
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
-  { autosize = false, minRows = 3, maxRows = 12, mono = false, error, hint, wrapperClassName, className, disabled, value, defaultValue, rows, ...rest },
+  {
+    autosize = false,
+    minRows = 3,
+    maxRows = 12,
+    mono = false,
+    error,
+    hint,
+    wrapperClassName,
+    className,
+    disabled,
+    value,
+    defaultValue,
+    rows,
+    ...rest
+  },
   ref,
 ) {
   const inner = useRef<HTMLTextAreaElement>(null)

@@ -5,11 +5,34 @@
 import { FileText, RotateCcw, Save, Trash } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { MemoryBudget, MemoryFile } from '@aiwc/protocol'
-import { Badge, Button, Card, ConfirmDialog, DangerDialog, ICON_STROKE, InlineHint, Input, ProgressBar, SettingRow, Textarea, Toggle, cn, toast } from '@/kit'
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  DangerDialog,
+  ICON_STROKE,
+  InlineHint,
+  Input,
+  ProgressBar,
+  SettingRow,
+  Textarea,
+  Toggle,
+  cn,
+  toast,
+} from '@/kit'
+import { useT } from '@/i18n'
 import { useConfig } from '@/platform/configStore'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
 import { errorMessage, saveConfig } from '../hooks'
-import { MEMORY_FILES, budgetRatio, memoryFileName, memoryStatusLine, overBudget, parseMaxEntries } from '../memoryModel'
+import {
+  MEMORY_FILES,
+  budgetRatio,
+  memoryFileName,
+  memoryStatusLine,
+  overBudget,
+  parseMaxEntries,
+} from '../memoryModel'
 import { PagePlaceholder, SRow, Section, useReportDirty } from '../pageKit'
 
 interface FileInfo {
@@ -21,7 +44,10 @@ function useMemoryOverview() {
   const [info, setInfo] = useState<Partial<Record<MemoryFile, FileInfo>>>({})
   const load = useCallback(async (file: MemoryFile) => {
     try {
-      const [entries, budget] = await Promise.all([invoke('memory:entries', { file }), invoke('memory:budget', { file })])
+      const [entries, budget] = await Promise.all([
+        invoke('memory:entries', { file }),
+        invoke('memory:budget', { file }),
+      ])
       setInfo((s) => ({ ...s, [file]: { count: entries.length, budget } }))
     } catch {
       setInfo((s) => ({ ...s, [file]: {} }))
@@ -34,6 +60,7 @@ function useMemoryOverview() {
 }
 
 export function MemoryPage() {
+  const t = useT()
   const memory = useConfig((c) => c.memory)
   const appInfo = useInvoke('app:getInfo', undefined, [])
   const { info, reload } = useMemoryOverview()
@@ -88,9 +115,9 @@ export function MemoryPage() {
       await invoke('memory:write', { file, markdown: draft })
       setOriginal(draft)
       void reload(file)
-      toast.success(`已保存 ${memoryFileName(file)}`)
+      toast.success(t('settings.memory.editor.saved', { file: memoryFileName(file) }))
     } catch (e) {
-      toast.error('保存失败', { detail: errorMessage(e) })
+      toast.error(t('common.saveFailed'), { detail: errorMessage(e) })
     } finally {
       setSaving(false)
     }
@@ -102,9 +129,9 @@ export function MemoryPage() {
       setClearOpen(false)
       await loadFile(file)
       void reload(file)
-      toast.success(`已清空 ${memoryFileName(file)}`)
+      toast.success(t('settings.memory.clear.cleared', { file: memoryFileName(file) }))
     } catch (e) {
-      toast.error('清空失败', { detail: errorMessage(e) })
+      toast.error(t('settings.memory.clear.failed'), { detail: errorMessage(e) })
     }
   }
 
@@ -121,7 +148,7 @@ export function MemoryPage() {
 
   return (
     <>
-      <Section title="记忆文件">
+      <Section title={t('settings.memory.sections.files')}>
         <Card variant="rows" data-setting-row="memory.files">
           {MEMORY_FILES.map((m) => {
             const active = m.file === file
@@ -132,23 +159,43 @@ export function MemoryPage() {
                 onClick={() => select(m.file)}
                 title={
                   <span className="flex items-center gap-2">
-                    <span className={cn('flex size-7 items-center justify-center rounded-control', active ? 'bg-accent-15 text-accent' : 'bg-line-6 text-fg-3')}>
+                    <span
+                      className={cn(
+                        'flex size-7 items-center justify-center rounded-control',
+                        active ? 'bg-accent-15 text-accent' : 'bg-line-6 text-fg-3',
+                      )}
+                    >
                       <FileText size={13} strokeWidth={ICON_STROKE} aria-hidden />
                     </span>
                     <span className="font-mono">{memoryFileName(m.file)}</span>
-                    <span className="text-fg-2">{m.label}</span>
+                    <span className="text-fg-2">{t(m.label)}</span>
                   </span>
                 }
-                description={`${m.description} · ${memoryStatusLine(info[m.file]?.count, info[m.file]?.budget)}`}
+                description={`${t(m.description)} · ${memoryStatusLine(info[m.file]?.count, info[m.file]?.budget)}`}
               >
-                {active ? <Badge tone="accent">编辑中{dirty ? ' · 未保存' : ''}</Badge> : <Button variant="ghost" size="sm" onClick={() => select(m.file)}>编辑</Button>}
+                {active ? (
+                  <Badge tone="accent">
+                    {dirty ? t('settings.memory.editingUnsaved') : t('settings.memory.editing')}
+                  </Badge>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => select(m.file)}>
+                    {t('common.edit')}
+                  </Button>
+                )}
               </SettingRow>
             )
           })}
         </Card>
       </Section>
 
-      <Section title={`编辑 ${memoryFileName(file)}`} aside={<span className="font-mono" title={path}>{path}</span>}>
+      <Section
+        title={t('settings.memory.editor.section', { file: memoryFileName(file) })}
+        aside={
+          <span className="font-mono" title={path}>
+            {path}
+          </span>
+        }
+      >
         <Card className="flex flex-col gap-0 p-0" data-setting-row="memory.editor">
           {loadError ? (
             <div className="p-4">
@@ -160,39 +207,92 @@ export function MemoryPage() {
               autosize
               minRows={10}
               maxRows={26}
-              aria-label={`${memoryFileName(file)} 内容`}
+              aria-label={t('settings.memory.editor.label', { file: memoryFileName(file) })}
               value={draft}
               disabled={original === null}
-              placeholder={original === null ? '读取中…' : '（空文件）用 `- ` 开头写一条记忆'}
+              placeholder={original === null ? t('settings.memory.loading') : t('settings.memory.editor.placeholder')}
               onChange={(e) => setDraft(e.target.value)}
               className="rounded-b-none border-0 bg-transparent px-4 py-3 focus:border-0"
             />
           )}
           <div className="flex items-center gap-3 border-t border-line-6 px-4 py-2.5">
             <div className="flex min-w-0 flex-1 items-center gap-3">
-              {dirty ? <span className="text-caption text-accent">已修改 · 未保存</span> : <span className="text-caption text-fg-3">{budget ? `已用 ${budget.usedChars} / ${budget.limitChars} 字` : ''}</span>}
-              {budget ? <ProgressBar value={budgetRatio(budget) * 100} label="容量占用" className="w-[100px]" /> : null}
-              {tooLong ? <InlineHint kind="error">超出容量上限，请精简后再保存</InlineHint> : null}
+              {dirty ? (
+                <span className="text-caption text-accent">{t('settings.memory.editor.modified')}</span>
+              ) : (
+                <span className="text-caption text-fg-3">
+                  {budget ? t('settings.memory.used', { used: budget.usedChars, limit: budget.limitChars }) : ''}
+                </span>
+              )}
+              {budget ? (
+                <ProgressBar
+                  value={budgetRatio(budget) * 100}
+                  label={t('settings.memory.editor.capacity')}
+                  className="w-[100px]"
+                />
+              ) : null}
+              {tooLong ? (
+                <InlineHint kind="error" truncate>
+                  {t('settings.memory.editor.overBudget')}
+                </InlineHint>
+              ) : null}
             </div>
             <Button variant="ghost" icon={RotateCcw} disabled={!dirty} onClick={() => setConfirmReset(true)}>
-              重置
+              {t('common.reset')}
             </Button>
-            <Button variant="primary" icon={Save} disabled={!dirty || tooLong} loading={saving} onClick={() => void save()} title={!dirty ? '没有未保存的修改' : tooLong ? '内容超出容量上限' : undefined}>
-              保存
+            <Button
+              variant="primary"
+              icon={Save}
+              disabled={!dirty || tooLong}
+              loading={saving}
+              onClick={() => void save()}
+              title={
+                !dirty
+                  ? t('settings.memory.editor.noChanges')
+                  : tooLong
+                    ? t('settings.memory.editor.tooLong')
+                    : undefined
+              }
+            >
+              {t('common.save')}
             </Button>
           </div>
         </Card>
       </Section>
 
-      <Section title="记忆策略">
+      <Section title={t('settings.memory.sections.policy')}>
         <Card variant="rows">
-          <SRow id="memory.autoWrite" title="自动写入记忆" description="会话结束时由 Agent 提炼要点写入 MEMORY.md" htmlFor="memory-auto">
-            <Toggle id="memory-auto" checked={memory.autoWrite} onCheckedChange={(autoWrite) => void saveConfig({ memory: { autoWrite } })} />
+          <SRow
+            id="memory.autoWrite"
+            title={t('settings.memory.autoWrite.title')}
+            description={t('settings.memory.autoWrite.description')}
+            htmlFor="memory-auto"
+          >
+            <Toggle
+              id="memory-auto"
+              checked={memory.autoWrite}
+              onCheckedChange={(autoWrite) => void saveConfig({ memory: { autoWrite } })}
+            />
           </SRow>
-          <SRow id="memory.confirmBeforeWrite" title="写入前需要确认" description="关闭后 Agent 可直接修改记忆文件" htmlFor="memory-confirm">
-            <Toggle id="memory-confirm" checked={memory.confirmBeforeWrite} onCheckedChange={(confirmBeforeWrite) => void saveConfig({ memory: { confirmBeforeWrite } })} />
+          <SRow
+            id="memory.confirmBeforeWrite"
+            title={t('settings.memory.confirmBeforeWrite.title')}
+            description={t('settings.memory.confirmBeforeWrite.description')}
+            htmlFor="memory-confirm"
+          >
+            <Toggle
+              id="memory-confirm"
+              checked={memory.confirmBeforeWrite}
+              onCheckedChange={(confirmBeforeWrite) => void saveConfig({ memory: { confirmBeforeWrite } })}
+            />
           </SRow>
-          <SRow id="memory.maxEntries" title="记忆条数上限" description="超出后按最久未使用淘汰（10 – 2000）" htmlFor="memory-max" footer={maxCheck && !maxCheck.ok ? <InlineHint kind="error">{maxCheck.error}</InlineHint> : null}>
+          <SRow
+            id="memory.maxEntries"
+            title={t('settings.memory.maxEntries.title')}
+            description={t('settings.memory.maxEntries.description')}
+            htmlFor="memory-max"
+            footer={maxCheck && !maxCheck.ok ? <InlineHint kind="error">{maxCheck.error}</InlineHint> : null}
+          >
             <Input
               id="memory-max"
               type="number"
@@ -208,13 +308,22 @@ export function MemoryPage() {
                 if (e.key === 'Escape') setMaxRaw(null)
               }}
               error={maxCheck ? !maxCheck.ok : undefined}
-              trailing={<span className="text-micro text-fg-3">条</span>}
+              trailing={<span className="text-micro text-fg-3">{t('settings.memory.maxEntries.unit')}</span>}
               wrapperClassName="w-[104px]"
             />
           </SRow>
-          <SRow id="memory.clear" title={`清空 ${memoryFileName(file)}`} description={`删除 ${memoryFileName(file)} 中的所有条目，不影响其他记忆文件`}>
-            <Button variant="ghost" icon={Trash} className="text-danger hover:text-danger" onClick={() => setClearOpen(true)}>
-              清空
+          <SRow
+            id="memory.clear"
+            title={t('settings.memory.clear.title', { file: memoryFileName(file) })}
+            description={t('settings.memory.clear.description')}
+          >
+            <Button
+              variant="ghost"
+              icon={Trash}
+              className="text-danger hover:text-danger"
+              onClick={() => setClearOpen(true)}
+            >
+              {t('common.clear')}
             </Button>
           </SRow>
         </Card>
@@ -223,10 +332,10 @@ export function MemoryPage() {
       <ConfirmDialog
         open={pendingSwitch !== null}
         onOpenChange={(o) => !o && setPendingSwitch(null)}
-        title="放弃未保存的修改？"
-        description={`${memoryFileName(file)} 将恢复到上次保存的内容。`}
-        confirmLabel="放弃修改"
-        cancelLabel="继续编辑"
+        title={t('settings.memory.discard.title')}
+        description={t('settings.memory.discard.description', { file: memoryFileName(file) })}
+        confirmLabel={t('settings.memory.discard.confirm')}
+        cancelLabel={t('settings.memory.discard.cancel')}
         tone="warn"
         onConfirm={() => {
           if (pendingSwitch) setFile(pendingSwitch)
@@ -236,10 +345,10 @@ export function MemoryPage() {
       <ConfirmDialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
-        title="放弃未保存的修改？"
-        description={`${memoryFileName(file)} 将恢复到上次保存的内容。`}
-        confirmLabel="放弃修改"
-        cancelLabel="继续编辑"
+        title={t('settings.memory.discard.title')}
+        description={t('settings.memory.discard.description', { file: memoryFileName(file) })}
+        confirmLabel={t('settings.memory.discard.confirm')}
+        cancelLabel={t('settings.memory.discard.cancel')}
         tone="warn"
         onConfirm={() => {
           if (original !== null) setDraft(original)
@@ -249,9 +358,9 @@ export function MemoryPage() {
       <DangerDialog
         open={clearOpen}
         onOpenChange={setClearOpen}
-        title={`清空 ${memoryFileName(file)}？`}
-        description={`${info[file]?.count ?? 0} 条记忆将被永久删除，Agent 会忘记记在这里的事实与偏好。其他记忆文件不受影响。`}
-        confirmLabel="清空"
+        title={t('settings.memory.clear.dialogTitle', { file: memoryFileName(file) })}
+        description={t('settings.memory.clear.dialogDescription', { n: info[file]?.count ?? 0 })}
+        confirmLabel={t('common.clear')}
         confirmWord={file}
         onConfirm={clear}
       />

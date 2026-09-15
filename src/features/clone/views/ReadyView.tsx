@@ -5,6 +5,7 @@
 import { RefreshCw, Trash } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { CloneStatus, RelationshipProfile, ThreadId } from '@aiwc/protocol'
+import { useT } from '@/i18n'
 import { Avatar, Badge, Button, EmptyState, toast } from '@/kit'
 import { formatRelative } from '@/platform/format'
 import { invoke, useInvoke } from '@/platform/hooks'
@@ -29,7 +30,20 @@ export interface ReadyViewProps {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-export function ReadyView({ contactId, name, avatarPath, status, messageCount, modelLabel, threadId, onThreadId, onReclone, onDeleted, selfName }: ReadyViewProps) {
+export function ReadyView({
+  contactId,
+  name,
+  avatarPath,
+  status,
+  messageCount,
+  modelLabel,
+  threadId,
+  onThreadId,
+  onReclone,
+  onDeleted,
+  selfName,
+}: ReadyViewProps) {
+  const t = useT()
   const loaded = useInvoke('clone:get', { contactId }, [contactId, status.version, status.builtAt])
   const notes = useInvoke('clone:notes', { contactId }, [contactId, status.version])
   const [profile, setProfile] = useState<RelationshipProfile | undefined>()
@@ -40,12 +54,15 @@ export function ReadyView({ contactId, name, avatarPath, status, messageCount, m
     if (loaded.data) setProfile(loaded.data)
   }, [loaded.data])
 
-  const patch = async (p: Partial<Pick<RelationshipProfile, 'card' | 'deep' | 'samples'>>) => {
+  /** Saves a profile edit; a failure is toasted here and reported as `false`, so callers never toast success too. */
+  const patch = async (p: Partial<Pick<RelationshipProfile, 'card' | 'deep' | 'samples'>>): Promise<boolean> => {
     try {
       const next = await invoke('clone:updateProfile', { contactId, patch: p })
       setProfile(next)
+      return true
     } catch (e) {
-      toast.error('更新画像失败', { detail: message(e) })
+      toast.error(t('clone.ready.updateFailed'), { detail: message(e) })
+      return false
     }
   }
 
@@ -53,19 +70,31 @@ export function ReadyView({ contactId, name, avatarPath, status, messageCount, m
     if (!profile) return
     setRefining(true)
     try {
-      const next = await invoke('clone:updateProfile', { contactId, patch: { card: profile.card, deep: profile.deep, samples: profile.samples } })
+      const next = await invoke('clone:updateProfile', {
+        contactId,
+        patch: { card: profile.card, deep: profile.deep, samples: profile.samples },
+      })
       setProfile(next)
-      toast.success('画像已更新', { detail: `${next.card.tone.length} 个语气标签 · ${next.card.catchphrases.length} 个口头禅 · ${next.samples.length} 个样本` })
+      toast.success(t('clone.ready.updated'), {
+        detail: t('clone.ready.updatedDetail', {
+          tones: next.card.tone.length,
+          catchphrases: next.card.catchphrases.length,
+          samples: next.samples.length,
+        }),
+      })
     } catch (e) {
-      toast.error('重新提炼失败', { detail: message(e) })
+      toast.error(t('clone.ready.refineFailed'), { detail: message(e) })
     } finally {
       setRefining(false)
     }
   }
 
-  const saveSample = async (reply: string) => {
-    if (!profile) return
-    await patch({ samples: appendSample(profile.samples, '', reply, Date.now()) })
+  const saveSample = async (reply: string): Promise<boolean> => {
+    if (!profile) {
+      toast.error(t('clone.ready.updateFailed'), { detail: loaded.error?.message })
+      return false
+    }
+    return patch({ samples: appendSample(profile.samples, '', reply, Date.now()) })
   }
 
   const deleteNote = async (at: number) => {
@@ -73,7 +102,7 @@ export function ReadyView({ contactId, name, avatarPath, status, messageCount, m
       await invoke('clone:deleteNote', { contactId, at })
       notes.reload()
     } catch (e) {
-      toast.error('删除纠正失败', { detail: message(e) })
+      toast.error(t('clone.ready.deleteNoteFailed'), { detail: message(e) })
     }
   }
 
@@ -81,42 +110,76 @@ export function ReadyView({ contactId, name, avatarPath, status, messageCount, m
     try {
       await invoke('clone:delete', { contactId })
       setDialog(null)
-      toast.success(`已删除「${name}」的分身`)
+      toast.success(t('clone.toast.deleted', { name }))
       onDeleted()
     } catch (e) {
-      toast.error('删除失败', { detail: message(e) })
+      toast.error(t('clone.toast.deleteFailed'), { detail: message(e) })
     }
   }
+
+  const meta = `${messageCount !== undefined ? `${t('clone.ready.basedOn', { n: messageCount, count: messageCount.toLocaleString('en-US') })} · ` : ''}${t('clone.ready.built', { when: formatRelative(status.builtAt) })}${profile ? ` · ${profileMeta(profile, status, modelLabel)}` : ''}`
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line-6 px-5">
         <Avatar id={contactId} name={name} src={avatarPath} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-bubble font-medium leading-5 text-fg">{name} 的分身</span>
-            <Badge tone="ok">已克隆 · v{status.version}</Badge>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate text-bubble font-medium leading-5 text-fg">
+              {t('clone.ready.title', { name })}
+            </span>
+            <Badge tone="ok">{t('clone.ready.badge', { version: status.version })}</Badge>
           </div>
-          <span className="truncate text-caption text-fg-3">
-            {messageCount !== undefined ? `基于 ${messageCount.toLocaleString('en-US')} 条消息 · ` : ''}
-            {formatRelative(status.builtAt)}生成
-            {profile ? ` · ${profileMeta(profile, status, modelLabel)}` : ''}
+          <span className="truncate text-caption text-fg-3" title={meta}>
+            {meta}
           </span>
         </div>
         <Button variant="ghost" icon={RefreshCw} onClick={() => setDialog('reclone')}>
-          重新克隆
+          {t('clone.actions.reclone')}
         </Button>
-        <Button variant="ghost" icon={Trash} className="text-danger hover:text-danger" onClick={() => setDialog('delete')}>
-          删除
+        <Button
+          variant="ghost"
+          icon={Trash}
+          className="text-danger hover:text-danger"
+          onClick={() => setDialog('delete')}
+        >
+          {t('common.delete')}
         </Button>
       </header>
       <div className="flex min-h-0 flex-1">
-        <PersonaChat contactId={contactId} name={name} avatarPath={avatarPath} threadId={threadId} onThreadId={onThreadId} onSaveSample={saveSample} selfName={selfName} onNotesChanged={notes.reload} />
+        <PersonaChat
+          contactId={contactId}
+          name={name}
+          avatarPath={avatarPath}
+          threadId={threadId}
+          onThreadId={onThreadId}
+          onSaveSample={saveSample}
+          selfName={selfName}
+          onNotesChanged={notes.reload}
+        />
         {profile ? (
-          <ProfileEditor profile={profile} messageCount={messageCount} onPatch={patch} onRefine={refine} refining={refining} notes={notes.data ?? []} onDeleteNote={deleteNote} />
+          <ProfileEditor
+            profile={profile}
+            messageCount={messageCount}
+            onPatch={patch}
+            onRefine={refine}
+            refining={refining}
+            notes={notes.data ?? []}
+            onDeleteNote={deleteNote}
+          />
         ) : (
           <aside className="flex w-[260px] shrink-0 items-center justify-center border-l border-line-6">
-            {loaded.error ? <EmptyState compact variant="error" title="读取画像失败" description={loaded.error.message} action={{ label: '重试', onClick: loaded.reload }} /> : <EmptyState compact variant="loading" title="读取画像…" />}
+            {loaded.error ? (
+              <EmptyState
+                compact
+                variant="error"
+                title={t('clone.ready.profileLoadFailed')}
+                description={loaded.error.message}
+                action={{ label: t('common.retry'), onClick: loaded.reload }}
+              />
+            ) : (
+              <EmptyState compact variant="loading" title={t('clone.ready.profileLoading')} />
+            )}
           </aside>
         )}
       </div>
@@ -131,7 +194,12 @@ export function ReadyView({ contactId, name, avatarPath, status, messageCount, m
           void onReclone(keep)
         }}
       />
-      <DeleteCloneDialog open={dialog === 'delete'} onOpenChange={(o) => !o && setDialog(null)} name={name} onConfirm={remove} />
+      <DeleteCloneDialog
+        open={dialog === 'delete'}
+        onOpenChange={(o) => !o && setDialog(null)}
+        name={name}
+        onConfirm={remove}
+      />
     </div>
   )
 }

@@ -159,7 +159,11 @@ export async function collectGroupCorpus(
     if (messageCount >= TARGET_LINES) break
     try {
       opts.onProgress?.(`读取群聊 ${sessionCount + 1}/${speaking.length}（已收集 ${messageCount} 条发言）`)
-      const page = await substrate.listMessages({ sessionId: id, beforeSeq: Number.MAX_SAFE_INTEGER, limit: PER_GROUP_MESSAGES })
+      const page = await substrate.listMessages({
+        sessionId: id,
+        beforeSeq: Number.MAX_SAFE_INTEGER,
+        limit: PER_GROUP_MESSAGES,
+      })
       const ordered = page.items.slice().sort((a, b) => a.seq - b.seq)
       const snippets = extractGroupSnippets(ordered, contactId)
       if (snippets.length === 0) continue

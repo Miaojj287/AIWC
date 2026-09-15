@@ -50,7 +50,9 @@ export function loadWin32Native(): Native | null {
         GetWindowTextW: user32.func('int32 GetWindowTextW(void* hwnd, void* text, int32 maxCount)'),
         GetWindowRect: user32.func('bool GetWindowRect(void* hwnd, void* rect)'),
         GetForegroundWindow: user32.func('void* GetForegroundWindow()'),
-        DwmGetWindowAttribute: dwmapi.func('int32 DwmGetWindowAttribute(void* hwnd, uint32 attr, void* rect, uint32 cb)'),
+        DwmGetWindowAttribute: dwmapi.func(
+          'int32 DwmGetWindowAttribute(void* hwnd, uint32 attr, void* rect, uint32 cb)',
+        ),
         SetForegroundWindow: user32.func('bool SetForegroundWindow(void* hwnd)'),
         ShowWindow: user32.func('bool ShowWindow(void* hwnd, int32 nCmdShow)'),
         AttachThreadInput: user32.func('bool AttachThreadInput(uint32 idAttach, uint32 idAttachTo, bool fAttach)'),
@@ -84,7 +86,9 @@ function readTitle(n: Native, hwnd: Any): string {
 }
 
 function hasArea(n: Native, hwnd: Any): boolean {
-  const ok = n.fn.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, n.rectBuf, 16) === 0 || n.fn.GetWindowRect(hwnd, n.rectBuf)
+  const ok =
+    n.fn.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, n.rectBuf, 16) === 0 ||
+    n.fn.GetWindowRect(hwnd, n.rectBuf)
   if (!ok) return false
   const [left, top, right, bottom] = n.koffi.decode(n.rectBuf, 'int32', 4)
   return right > left && bottom > top
@@ -111,7 +115,9 @@ export function findMainWindow(): Win32Window | null {
       if (!hasArea(n, hwnd)) continue
       return { hwnd, address: address(n, hwnd) }
     }
-  } catch { /* fall through to "not found" */ }
+  } catch {
+    /* fall through to "not found" */
+  }
   return null
 }
 

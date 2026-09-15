@@ -1,0 +1,36 @@
+import type { Messages } from '../../zh-CN'
+
+export const about: Messages['settings']['about'] = {
+  devBuild: 'Dev build',
+  versionFailed: "Couldn't read version info",
+  loading: 'Loading…',
+  update: {
+    title: 'Check for updates',
+    check: 'Check for updates',
+    recheck: 'Check again',
+    checking: 'Checking…',
+    upToDate: "You're up to date",
+    upToDateVersion: "You're up to date (v{version})",
+    available: 'New version available: v{version}',
+    viewDetails: 'View details',
+    downloadProgress: 'Download progress',
+    preparing: 'Preparing download…',
+    ready: 'v{version} downloaded. Restart the app to finish installing',
+    failed: 'Failed to check for updates',
+    dialogTitle: 'AIWC v{version} available',
+    dialogDescription: 'Current v{version} · Downloads in the background; you’ll be asked to restart to install',
+    later: 'Later',
+  },
+  terms: { title: 'Terms of Service', view: 'View terms' },
+  privacy: { title: 'Privacy Policy', view: 'View policy' },
+  legalUpdated: 'Updated {date}',
+  logs: {
+    title: 'Logs',
+    description: 'No chat content included',
+    export: 'Export logs',
+    exported: 'Logs exported',
+    reveal: 'Show in folder',
+    revealFailed: "Couldn't show the file",
+    exportFailed: 'Failed to export logs',
+  },
+}

@@ -5,8 +5,6 @@
 import { registerTab } from '@/workspace/tabRegistry'
 import { KitTab } from './KitTab'
 
-export const KIT_TAB = { kind: 'kit', objectId: 'gallery', title: '组件库' } as const
-
 export function register(): void {
   registerTab({ kind: 'kit', icon: 'palette', component: KitTab })
 }

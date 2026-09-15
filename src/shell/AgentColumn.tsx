@@ -1,8 +1,11 @@
 import { Bot } from 'lucide-react'
 import { useEffect } from 'react'
-import { AgentPanel } from '@/features/agent'
+import { AgentPanel, useAgentPetSignal } from '@/features/agent'
+import { AgentPet, openPetSettings, useCurrentPet } from '@/features/pets'
 import { shortcutLabel } from '@/app/shortcuts'
-import { cn, IconButton, Tooltip } from '@/kit'
+import { useT } from '@/i18n'
+import { cn, ErrorBoundary, IconButton, Tooltip } from '@/kit'
+import { useConfig } from '@/platform/configStore'
 import { useBridgeEvent } from '@/platform/hooks'
 import { useShellStore } from './shellStore'
 
@@ -22,7 +25,11 @@ const UNREAD_EVENTS = new Set(['text.end', 'turn.completed', 'approval.requested
  * itself stays mounted while collapsed so thread state survives; it is just hidden.
  */
 export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentColumnProps) {
+  const t = useT()
   const unread = useShellStore((s) => s.agentUnread)
+  const petConfig = useConfig((c) => c.pet)
+  const pet = useCurrentPet(petConfig)
+  const petSignal = useAgentPetSignal()
   useBridgeEvent('agent:event', (e) => {
     if (collapsed && UNREAD_EVENTS.has(e.type)) useShellStore.getState().setAgentUnread(true)
   })
@@ -33,23 +40,55 @@ export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentC
   return (
     <>
       {collapsed ? (
-        <div className="flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-panel pt-2" data-testid="agent-strip">
-          <Tooltip content={unread ? 'Agent 有新消息' : '展开 Agent 面板'} kbd={shortcutLabel('agent.toggleCollapsed', mac)} side="left">
+        <div
+          className="shell-agent-strip flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-panel pt-2"
+          data-testid="agent-strip"
+        >
+          <Tooltip
+            content={unread ? t('shell.agent.unread') : t('shell.agent.expand')}
+            kbd={shortcutLabel('agent.toggleCollapsed', mac)}
+            side="left"
+          >
             <span className="relative inline-flex">
-              <IconButton icon={Bot} label="展开 Agent 面板" onClick={onToggleCollapsed} active={unread} />
-              {unread ? <span aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-chip bg-accent" /> : null}
+              <IconButton icon={Bot} label={t('shell.agent.expand')} onClick={onToggleCollapsed} active={unread} />
+              {unread ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-chip bg-accent"
+                />
+              ) : null}
             </span>
           </Tooltip>
+          {petConfig?.enabled && pet ? (
+            // The collapsed strip keeps the pet as an ambient status light: it runs while the Agent works.
+            // No room for an error state in 40px: a pet that fails to render is just left out.
+            <ErrorBoundary fallback={null}>
+              <AgentPet
+                variant="mini"
+                pet={pet}
+                config={petConfig}
+                signal={petSignal}
+                onOpenSettings={openPetSettings}
+                onActivate={onToggleCollapsed}
+                className="mt-2"
+              />
+            </ErrorBoundary>
+          ) : null}
         </div>
       ) : null}
       <div
         hidden={collapsed}
         aria-hidden={collapsed || undefined}
         style={collapsed ? undefined : { width }}
-        className={cn('h-full shrink-0 border-l border-line-6 bg-panel', collapsed ? 'hidden' : 'flex min-w-0 flex-col')}
+        className={cn(
+          'shell-agent-panel h-full shrink-0 border-l border-line-6 bg-panel',
+          collapsed ? 'hidden' : 'flex min-w-0 flex-col',
+        )}
         data-testid="agent-panel"
       >
-        <AgentPanel collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} />
+        <ErrorBoundary compact>
+          <AgentPanel collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} />
+        </ErrorBoundary>
       </div>
     </>
   )

@@ -5,6 +5,7 @@
  */
 import type { HistoryItem, ToolResultItem } from '@aiwc/protocol'
 import type { AssistantModelMessage, ModelMessage, ToolModelMessage, UserModelMessage } from 'ai'
+import { COMPACTION_SUMMARY_NOTICE } from '../compaction'
 import { turnAbortedFragment } from '../context/fragments/turnAborted'
 import { isImagePlaceholder, renderToolOutput } from '../context/manager'
 
@@ -24,7 +25,9 @@ export function toolResultOutput(item: ToolResultItem): ToolResultOutput {
     case 'text':
       return { type: 'text', value: out.text }
     case 'json':
-      return isImagePlaceholder(out.value) ? { type: 'text', value: renderToolOutput(out) } : { type: 'json', value: out.value }
+      return isImagePlaceholder(out.value)
+        ? { type: 'text', value: renderToolOutput(out) }
+        : { type: 'json', value: out.value }
     case 'image':
       return { type: 'text', value: renderToolOutput(out) }
   }
@@ -53,7 +56,9 @@ export function historyToModelMessages(items: readonly HistoryItem[]): ModelMess
     closeTool()
     if (text.trim()) userParts.push({ type: 'text', text })
   }
-  const openAssistant = (stepId: string): { message: AssistantModelMessage; parts: AssistantPart[]; stepId: string } => {
+  const openAssistant = (
+    stepId: string,
+  ): { message: AssistantModelMessage; parts: AssistantPart[]; stepId: string } => {
     flushUser()
     closeTool()
     if (assistant && assistant.stepId === stepId) return assistant
@@ -80,7 +85,7 @@ export function historyToModelMessages(items: readonly HistoryItem[]): ModelMess
         pushUserText(item.text)
         break
       case 'compaction_summary':
-        pushUserText(`<compaction_summary>\n${item.summary}`)
+        pushUserText(`<compaction_summary>\n${COMPACTION_SUMMARY_NOTICE}\n${item.summary}`)
         break
       case 'turn_aborted': {
         const f = turnAbortedFragment(item.reason)
@@ -110,7 +115,12 @@ export function historyToModelMessages(items: readonly HistoryItem[]): ModelMess
           messages.push(message)
           tool = { message, parts }
         }
-        tool.parts.push({ type: 'tool-result', toolCallId: item.callId, toolName: item.toolName, output: toolResultOutput(item) })
+        tool.parts.push({
+          type: 'tool-result',
+          toolCallId: item.callId,
+          toolName: item.toolName,
+          output: toolResultOutput(item),
+        })
         break
       }
     }

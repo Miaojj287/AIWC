@@ -32,19 +32,31 @@ describe('cacheDir policy', () => {
 
   it('with an allow-list, only already-allowed directories pass (no privilege escalation)', () => {
     const al = createAllowList(['/data/aiwc'], { home })
-    expect(validateCacheDir('/Volumes/ext/cache', { home, allowList: al })).toEqual({ ok: false, reason: CACHE_DIR_ERRORS.notAllowed })
+    expect(validateCacheDir('/Volumes/ext/cache', { home, allowList: al })).toEqual({
+      ok: false,
+      reason: CACHE_DIR_ERRORS.notAllowed,
+    })
     expect(validateCacheDir('/data/aiwc/cache', { home, allowList: al })).toEqual({ ok: true, dir: '/data/aiwc/cache' })
     // a directory the user picked through the dialog becomes allowed, so it may now be the cache dir
     expect(al.addRoot('/Volumes/ext/cache')).toBe(true)
-    expect(validateCacheDir('/Volumes/ext/cache/', { home, allowList: al })).toEqual({ ok: true, dir: '/Volumes/ext/cache' })
+    expect(validateCacheDir('/Volumes/ext/cache/', { home, allowList: al })).toEqual({
+      ok: true,
+      dir: '/Volumes/ext/cache',
+    })
     // …but picking cannot smuggle in '/' or home either
     expect(al.addRoot('/')).toBe(false)
-    expect(validateCacheDir('/etc', { home, allowList: al })).toEqual({ ok: false, reason: CACHE_DIR_ERRORS.notAllowed })
+    expect(validateCacheDir('/etc', { home, allowList: al })).toEqual({
+      ok: false,
+      reason: CACHE_DIR_ERRORS.notAllowed,
+    })
   })
 
   it('startup validation requires an existing directory', () => {
     expect(validateCacheDir(dir, { home, isDirectory: isDirectorySync })).toEqual({ ok: true, dir })
-    expect(validateCacheDir(join(dir, 'missing'), { home, isDirectory: isDirectorySync })).toEqual({ ok: false, reason: CACHE_DIR_ERRORS.missing })
+    expect(validateCacheDir(join(dir, 'missing'), { home, isDirectory: isDirectorySync })).toEqual({
+      ok: false,
+      reason: CACHE_DIR_ERRORS.missing,
+    })
     expect(isDirectorySync(join(dir, 'missing'))).toBe(false)
   })
 })

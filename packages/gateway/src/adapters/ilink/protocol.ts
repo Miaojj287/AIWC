@@ -11,7 +11,6 @@ export const ILINK_BOT_TYPE = '3'
 export const ILINK_CHANNEL_VERSION = '2.4.4'
 export const ILINK_APP_ID = 'bot'
 export const ILINK_BOT_AGENT = 'OpenClaw'
-export const ILINK_TEXT_BUBBLE_SEPARATOR = '---wx-next---'
 export const ILINK_MAX_TEXT_LENGTH = 4000
 
 export const UploadMediaType = { IMAGE: 1, VIDEO: 2, FILE: 3, VOICE: 4 } as const
@@ -138,9 +137,35 @@ export interface ParsedIncoming {
   voiceTranscript?: string
 }
 
+/** `ret` the server answers with once a bot session has expired (HTTP 200 or 401 body). */
+export const ILINK_SESSION_EXPIRED_RET = -14
+
+/** A failed iLink call. `status` is the HTTP status when the request itself failed; `ret` the body's result code. */
+export class IlinkApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly ret?: number,
+  ) {
+    super(message)
+    this.name = 'IlinkApiError'
+  }
+}
+
+/** The numeric `ret` of a JSON response body, when the body is JSON and carries one. */
+export function retOfBody(text: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    const ret = parsed && typeof parsed === 'object' ? (parsed as { ret?: unknown }).ret : undefined
+    return typeof ret === 'number' ? ret : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Decided from structured fields, never from substrings: `-14` also occurs in dates, status codes and `ret=-140`. */
 export function isSessionExpiredError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes('session timeout') || msg.includes('-14')
+  return err instanceof IlinkApiError && err.ret === ILINK_SESSION_EXPIRED_RET
 }
 
 /** iLink-App-ClientVersion: uint32 = major<<16 | minor<<8 | patch. */
@@ -298,6 +323,7 @@ export function messageKey(msg: IlinkMessage): string {
 /** Millisecond timestamp for an inbound message, tolerating seconds and missing fields. */
 export function messageTimestamp(msg: IlinkMessage, fallback: number): number {
   if (typeof msg.create_time_ms === 'number' && msg.create_time_ms > 0) return msg.create_time_ms
-  if (typeof msg.create_time === 'number' && msg.create_time > 0) return msg.create_time < 1e12 ? msg.create_time * 1000 : msg.create_time
+  if (typeof msg.create_time === 'number' && msg.create_time > 0)
+    return msg.create_time < 1e12 ? msg.create_time * 1000 : msg.create_time
   return fallback
 }

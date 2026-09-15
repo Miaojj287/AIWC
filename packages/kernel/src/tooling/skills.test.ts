@@ -36,8 +36,15 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 describe('parseSkillFile', () => {
   it('parses frontmatter fields and body', () => {
-    const { frontmatter, body } = parseSkillFile(skillMd('weekly', '生成周报', 'command: /周报\ntags: [report, weekly]\n'))
-    expect(frontmatter).toMatchObject({ name: 'weekly', description: '生成周报', command: '/周报', tags: ['report', 'weekly'] })
+    const { frontmatter, body } = parseSkillFile(
+      skillMd('weekly', '生成周报', 'command: /周报\ntags: [report, weekly]\n'),
+    )
+    expect(frontmatter).toMatchObject({
+      name: 'weekly',
+      description: '生成周报',
+      command: '/周报',
+      tags: ['report', 'weekly'],
+    })
     expect(body.trim()).toBe('# 步骤\n\n做点什么。')
   })
   it('no frontmatter → undefined; invalid yaml → undefined', () => {
@@ -63,7 +70,13 @@ describe('createSkillIndex', () => {
     mkdirSync(join(user, 'not-a-skill'))
     writeFileSync(join(user, 'stray.md'), 'x')
 
-    const index = createSkillIndex({ dirs: [{ path: builtin, source: 'builtin' }, { path: user, source: 'user' }, { path: join(root, 'missing'), source: 'agent' }] })
+    const index = createSkillIndex({
+      dirs: [
+        { path: builtin, source: 'builtin' },
+        { path: user, source: 'user' },
+        { path: join(root, 'missing'), source: 'agent' },
+      ],
+    })
     expect(index.list()).toEqual([])
     await index.refresh()
     expect(index.get('weekly')).toMatchObject({ source: 'builtin', command: '/周报', description: '生成周报' })
@@ -101,10 +114,12 @@ describe('skillTools', () => {
     writeSkill(dir, 'weekly', skillMd('weekly', '周报'))
     const index = createSkillIndex({ dirs: [{ path: dir, source: 'user' }] })
     await index.refresh()
-    const [view, manage] = skillTools(index)
+    const [view, manage, remove] = skillTools(index)
     expect(view).toMatchObject({ name: 'skill_view', risk: 'read', parallelSafe: true })
     expect(view!.profiles).toContain('wechat-bot')
     expect(manage).toMatchObject({ name: 'skill_manage', risk: 'write', profiles: ['desktop-chat'] })
+    // Deleting must never ride on a remembered create/patch approval.
+    expect(remove).toMatchObject({ name: 'skill_delete', risk: 'destructive', profiles: ['desktop-chat'] })
     expect(await view!.execute({ name: 'weekly' }, ctx())).toMatchObject({ content: '# 步骤\n\n做点什么。' })
     expect(await view!.execute({ name: 'zzz' }, ctx())).toMatchObject({ isError: true })
   })
@@ -115,46 +130,80 @@ describe('skillTools', () => {
     const user = join(root, 'user')
     mkdirSync(agent)
     writeSkill(builtin, 'core', skillMd('core', '内置'))
-    const index = createSkillIndex({ dirs: [{ path: builtin, source: 'builtin' }, { path: agent, source: 'agent' }, { path: user, source: 'user' }] })
+    const index = createSkillIndex({
+      dirs: [
+        { path: builtin, source: 'builtin' },
+        { path: agent, source: 'agent' },
+        { path: user, source: 'user' },
+      ],
+    })
     await index.refresh()
-    const manage = skillTools(index)[1]!
-    const run = (input: Record<string, unknown>) => manage.execute(input, ctx())
+    const [, manage, remove] = skillTools(index)
+    const run = (input: Record<string, unknown>) => manage!.execute(input, ctx())
+    const del = (name: string) => remove!.execute({ name }, ctx())
 
-    expect(await run({ action: 'create', name: 'Bad Name', content: skillMd('Bad Name', 'x') })).toMatchObject({ isError: true })
+    expect(await run({ action: 'create', name: 'Bad Name', content: skillMd('Bad Name', 'x') })).toMatchObject({
+      isError: true,
+    })
     expect(await run({ action: 'create', name: 'a', content: skillMd('a', 'x') })).toMatchObject({ isError: true })
-    expect(await run({ action: 'create', name: 'ok-skill', content: '# 无 frontmatter' })).toMatchObject({ isError: true })
-    expect(await run({ action: 'create', name: 'ok-skill', content: skillMd('other', 'x') })).toMatchObject({ isError: true })
-    expect(await run({ action: 'create', name: 'ok-skill', content: '---\nname: ok-skill\n---\nbody' })).toMatchObject({ isError: true })
-    expect(await run({ action: 'create', name: 'ok-skill', content: skillMd('ok-skill', 'x', '', 'y'.repeat(30_000)) })).toMatchObject({ isError: true })
+    expect(await run({ action: 'create', name: 'ok-skill', content: '# 无 frontmatter' })).toMatchObject({
+      isError: true,
+    })
+    expect(await run({ action: 'create', name: 'ok-skill', content: skillMd('other', 'x') })).toMatchObject({
+      isError: true,
+    })
+    expect(await run({ action: 'create', name: 'ok-skill', content: '---\nname: ok-skill\n---\nbody' })).toMatchObject({
+      isError: true,
+    })
+    expect(
+      await run({ action: 'create', name: 'ok-skill', content: skillMd('ok-skill', 'x', '', 'y'.repeat(30_000)) }),
+    ).toMatchObject({ isError: true })
     expect(await run({ action: 'create', name: 'ok-skill' })).toMatchObject({ isError: true })
-    expect(await run({ action: 'create', name: 'core', content: skillMd('core', 'x') })).toMatchObject({ isError: true })
+    expect(await run({ action: 'create', name: 'core', content: skillMd('core', 'x') })).toMatchObject({
+      isError: true,
+    })
     expect(await run({ action: 'patch', name: 'core', content: skillMd('core', 'x') })).toMatchObject({ isError: true })
-    expect(await run({ action: 'delete', name: 'core' })).toMatchObject({ isError: true })
+    expect(await del('core')).toMatchObject({ isError: true })
 
     const created = await run({ action: 'create', name: 'ok-skill', content: skillMd('ok-skill', '新技能') })
     expect(created.isError).toBeUndefined()
     const written = await fsp.readFile(join(agent, 'ok-skill', 'SKILL.md'), 'utf8')
     expect(written).toMatch(/^---\nname: ok-skill\ndescription: 新技能\ncreated_by: agent\n---/)
     expect(index.get('ok-skill')).toMatchObject({ source: 'agent' })
-    expect(await run({ action: 'create', name: 'ok-skill', content: skillMd('ok-skill', 'dup') })).toMatchObject({ isError: true })
+    expect(await run({ action: 'create', name: 'ok-skill', content: skillMd('ok-skill', 'dup') })).toMatchObject({
+      isError: true,
+    })
 
-    expect(await run({ action: 'patch', name: 'ok-skill', find: '做点什么', replace: '做别的' })).toMatchObject({ content: expect.stringContaining('已更新') })
+    expect(await run({ action: 'patch', name: 'ok-skill', find: '做点什么', replace: '做别的' })).toMatchObject({
+      content: expect.stringContaining('已更新'),
+    })
     expect(await index.read('ok-skill')).toContain('做别的')
-    expect(await run({ action: 'patch', name: 'ok-skill', find: '不存在', replace: 'x' })).toMatchObject({ isError: true })
+    expect(await run({ action: 'patch', name: 'ok-skill', find: '做别的', replace: 'echo "$& $$ $1"' })).toMatchObject({
+      content: expect.stringContaining('已更新'),
+    })
+    expect(await index.read('ok-skill')).toContain('echo "$& $$ $1"')
+    expect(await run({ action: 'patch', name: 'ok-skill', find: '不存在', replace: 'x' })).toMatchObject({
+      isError: true,
+    })
     expect(await run({ action: 'patch', name: 'ok-skill' })).toMatchObject({ isError: true })
-    expect(await run({ action: 'patch', name: 'ok-skill', content: skillMd('ok-skill', '改描述') })).toMatchObject({ content: expect.stringContaining('已更新') })
+    expect(await run({ action: 'patch', name: 'ok-skill', content: skillMd('ok-skill', '改描述') })).toMatchObject({
+      content: expect.stringContaining('已更新'),
+    })
     expect(index.get('ok-skill')?.description).toBe('改描述')
 
-    expect(await run({ action: 'delete', name: 'ok-skill' })).toMatchObject({ content: expect.stringContaining('已删除') })
+    expect(await del('ok-skill')).toMatchObject({ content: expect.stringContaining('已删除') })
     expect(index.get('ok-skill')).toBeUndefined()
     await expect(fsp.access(join(agent, 'ok-skill'))).rejects.toThrow()
-    expect(await run({ action: 'delete', name: 'ok-skill' })).toMatchObject({ isError: true })
+    expect(await del('ok-skill')).toMatchObject({ isError: true })
+    expect(await del('..')).toMatchObject({ isError: true })
   })
 
   it('skill_manage without a writable dir errors; stampCreatedBy is idempotent', async () => {
     const index = createSkillIndex({ dirs: [{ path: join(root, 'b'), source: 'builtin' }] })
     const manage = skillTools(index)[1]!
-    expect(await manage.execute({ action: 'create', name: 'x-y', content: skillMd('x-y', 'd') }, ctx())).toMatchObject({ isError: true })
+    expect(await manage.execute({ action: 'create', name: 'x-y', content: skillMd('x-y', 'd') }, ctx())).toMatchObject({
+      isError: true,
+    })
     const once = stampCreatedBy(skillMd('x-y', 'd'))
     expect(stampCreatedBy(once)).toBe(once)
     expect(once.match(/created_by/g)).toHaveLength(1)
@@ -166,7 +215,10 @@ describe('planTools', () => {
     const [tool] = planTools()
     expect(tool).toMatchObject({ name: 'update_plan', risk: 'read', profiles: ['desktop-chat', 'subagent'] })
     const emit = vi.fn<(e: Event) => void>()
-    const steps = [{ title: '读取', status: 'done' }, { title: '总结', status: 'doing' }]
+    const steps = [
+      { title: '读取', status: 'done' },
+      { title: '总结', status: 'doing' },
+    ]
     const parsed = tool!.inputSchema.safeParse({ steps })
     expect(parsed.success).toBe(true)
     expect(tool!.inputSchema.safeParse({ steps: [] }).success).toBe(false)

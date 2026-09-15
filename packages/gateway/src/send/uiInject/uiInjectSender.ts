@@ -12,12 +12,27 @@
  *  - still missing: probe up to 3 other recently-changed sessions → 'wrong-session'
  *  - any non-ok verdict → halt latch: queue cleared, nothing sends until resume()
  */
-import type { AdapterState, GatewayEvent, PlatformAdapter, SendRequest, SendResult, SubstrateService, WxMessage } from '@aiwc/protocol'
+import type {
+  AdapterState,
+  GatewayEvent,
+  PlatformAdapter,
+  SendRequest,
+  SendResult,
+  SubstrateService,
+  WxMessage,
+} from '@aiwc/protocol'
 import { createEmitter, errorMessage, sleep as defaultSleep } from '../../core/emitter'
 import { shapeOutboundText } from '../../adapters/ilink/textSplit'
-import { INJECT_FAILURE_TEXT, InjectorError, createDarwinInjector, createInjector, type WeChatInjector } from './injectors'
+import {
+  INJECT_FAILURE_TEXT,
+  InjectorError,
+  createDarwinInjector,
+  createInjector,
+  type WeChatInjector,
+} from './injectors'
 
-export type VerifyVerdict = { verdict: 'ok'; message: WxMessage } | { verdict: 'wrong-session'; where: string } | { verdict: 'not-sent' }
+export type VerifyVerdict =
+  { verdict: 'ok'; message: WxMessage } | { verdict: 'wrong-session'; where: string } | { verdict: 'not-sent' }
 
 export interface UiInjectSenderDeps {
   substrate: Pick<SubstrateService, 'listMessages' | 'listSessions' | 'getSession'>
@@ -72,7 +87,9 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   const log = deps.logger ?? (() => {})
   const now = deps.now ?? (() => Date.now())
   const sleep = deps.sleep ?? defaultSleep
-  const injector = deps.injector ?? (deps.platform === 'darwin' ? createDarwinInjector({ logger: log }) : createInjector(deps.platform))
+  const injector =
+    deps.injector ??
+    (deps.platform === 'darwin' ? createDarwinInjector({ logger: log }) : createInjector(deps.platform))
   const verifyTimeout = deps.verifyTimeoutMs ?? VERIFY_TIMEOUT_MS
   const verifyPoll = deps.verifyPollMs ?? VERIFY_POLL_MS
   const slack = deps.verifyClockSlackMs ?? VERIFY_SLACK_MS
@@ -106,11 +123,21 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   const isMine = (m: WxMessage, expected: string, sentAt: number, before: Set<string>): boolean =>
     m.isSelf && !before.has(m.id) && m.createdAt >= sentAt - slack && norm(m.text) === expected
 
-  async function findMine(sessionId: string, expected: string, sentAt: number, before = new Set<string>()): Promise<WxMessage | undefined> {
+  async function findMine(
+    sessionId: string,
+    expected: string,
+    sentAt: number,
+    before = new Set<string>(),
+  ): Promise<WxMessage | undefined> {
     return (await tail(sessionId)).find((m) => isMine(m, expected, sentAt, before))
   }
 
-  async function verify(sessionId: string, text: string, sentAt: number, before = new Set<string>()): Promise<VerifyVerdict> {
+  async function verify(
+    sessionId: string,
+    text: string,
+    sentAt: number,
+    before = new Set<string>(),
+  ): Promise<VerifyVerdict> {
     const expected = norm(text)
     const deadline = now() + verifyTimeout
     // Poll: WeChat commits its own write a few hundred ms after the composer clears.
@@ -130,7 +157,9 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   async function probeStray(sessionId: string, text: string, sentAt: number): Promise<VerifyVerdict> {
     const expected = norm(text)
     const sessions = await deps.substrate.listSessions({ limit: 30 })
-    const suspects = sessions.items.filter((s) => s.id !== sessionId && (s.lastMessageAt ?? 0) >= sentAt - slack).slice(0, strayLimit)
+    const suspects = sessions.items
+      .filter((s) => s.id !== sessionId && (s.lastMessageAt ?? 0) >= sentAt - slack)
+      .slice(0, strayLimit)
     log('warn', 'probing other chats for a stray send', { sessionId, suspects: suspects.map((s) => s.id) })
     for (const s of suspects) {
       if (await findMine(s.id, expected, sentAt)) return { verdict: 'wrong-session', where: s.title || s.id }
@@ -142,7 +171,8 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   function halt(reason: string, detail?: string): SendResult {
     halted = true
     haltReason = detail ?? HALT_TEXT[reason] ?? reason
-    for (const job of queue.splice(0)) job.resolve({ ok: false, verified: false, error: `自动发送已熔断：${haltReason}` })
+    for (const job of queue.splice(0))
+      job.resolve({ ok: false, verified: false, error: `自动发送已熔断：${haltReason}` })
     log('error', 'ui-inject halted', { reason, detail })
     events.emit({ type: 'autoreply.halted', reason: haltReason })
     states.emit({ state: 'error', detail: haltReason })
@@ -223,10 +253,19 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
       }
       if (result.verdict === 'not-sent') result = await probeStray(sessionId, bubble, sentAt)
       if (result.verdict !== 'ok') {
-        return halt(result.verdict, result.verdict === 'wrong-session' ? `发到了「${result.where}」，已停止后续发送` : undefined)
+        return halt(
+          result.verdict,
+          result.verdict === 'wrong-session' ? `发到了「${result.where}」，已停止后续发送` : undefined,
+        )
       }
       // A steady stream of `retried: true` means the paste settle is too short for this machine.
-      log(retried ? 'warn' : 'debug', 'ui-inject bubble verified', { sessionId, index: i, of: bubbles.length, chars: bubble.length, retried })
+      log(retried ? 'warn' : 'debug', 'ui-inject bubble verified', {
+        sessionId,
+        index: i,
+        of: bubbles.length,
+        chars: bubble.length,
+        retried,
+      })
       lastId = result.message.id
       if (i < bubbles.length - 1) await sleep(gap[0] + Math.floor(Math.random() * Math.max(0, gap[1] - gap[0] + 1)))
     }
@@ -247,7 +286,8 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
           result = halt('not-sent', errorMessage(err))
         }
         job.resolve(result)
-        if (queue.length && !halted) await sleep(itemGap[0]! + Math.floor(Math.random() * Math.max(0, itemGap[1]! - itemGap[0]! + 1)))
+        if (queue.length && !halted)
+          await sleep(itemGap[0] + Math.floor(Math.random() * Math.max(0, itemGap[1] - itemGap[0] + 1)))
       }
     } finally {
       draining = false

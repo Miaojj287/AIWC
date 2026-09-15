@@ -1,6 +1,7 @@
 /**
  * Classification helpers shared by the WCDB reader and the mirror: username → session kind,
- * local_type (+ appmsg subtype) → MessageKind.
+ * local_type (+ appmsg subtype) → MessageKind. The only implementation of the group / official /
+ * system username rules; wcdb/ imports these instead of keeping its own.
  */
 import type { MessageKind, SessionKind, WxContact } from '@aiwc/protocol'
 import { extractXmlValue } from './xml'
@@ -24,13 +25,18 @@ export const SYSTEM_USERNAMES: ReadonlySet<string> = new Set([
   'opencustomerservicemsg',
   'notification_messages',
   'userexperience_alarm',
+  // WeChat 4.x virtual session that folds collapsed groups (also seen as `@placeholder_foldgroup`).
+  'placeholder_foldgroup',
 ])
 
 export const SYSTEM_USERNAME_PREFIXES: readonly string[] = ['fake_', 'service_', 'weixin', 'notifymessage']
 export const SYSTEM_USERNAME_SUFFIXES: readonly string[] = ['@kefu.openim', '@app', '@qqim']
 
 export function isSystemUsername(username: string): boolean {
-  const lower = String(username ?? '').trim().toLowerCase().replace(/^@+/, '')
+  const lower = String(username ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, '')
   if (!lower) return true
   if (SYSTEM_USERNAMES.has(lower)) return true
   if (SYSTEM_USERNAME_PREFIXES.some((p) => lower.startsWith(p))) return true

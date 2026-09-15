@@ -4,7 +4,7 @@
  */
 import type { ComponentType } from 'react'
 
-export type TabKind = 'chat' | 'autoreply' | 'clone' | 'settings' | 'file' | 'diary' | 'replydesk' | 'kit'
+export type TabKind = 'chat' | 'autoreply' | 'clone' | 'task' | 'settings' | 'file' | 'diary' | 'replydesk' | 'kit'
 
 export interface TabDescriptor {
   /** stable identity: `${kind}:${objectId}` — the container de-duplicates on this */
@@ -33,6 +33,12 @@ export interface TabRegistration {
   /** lucide icon name, rendered by the tab strip */
   icon: string
   component: ComponentType<TabRendererProps>
+  /**
+   * Display title, resolved at render. Use it when the title is (or wraps) UI copy — 设置, 回复台,
+   * 自动回复 · {name} — so it follows the UI language; `tab.title` then stores only the object's own
+   * name (data). Omit for tabs titled by data alone (chat, file). CLAUDE.md §11.
+   */
+  title?: (tab: TabDescriptor) => string
   /** Called before close when tab.dirty; return false to cancel. Default: confirm dialog. */
   canClose?: (tab: TabDescriptor) => Promise<boolean>
 }
@@ -45,6 +51,11 @@ export function registerTab(reg: TabRegistration): void {
 
 export function getTabRegistration(kind: TabKind): TabRegistration | undefined {
   return registry.get(kind)
+}
+
+/** What the strip, window title and dialogs show for a tab: the renderer's localized title, else the stored one. */
+export function tabTitle(tab: TabDescriptor): string {
+  return registry.get(tab.kind)?.title?.(tab) ?? tab.title
 }
 
 export function tabId(kind: TabKind, objectId: string): string {

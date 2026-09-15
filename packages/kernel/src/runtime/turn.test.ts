@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { ContextFragment, Event } from '@aiwc/protocol'
+import type { ContextFragment, ContextFragmentItem, Event, HistoryItem } from '@aiwc/protocol'
+import { toJsonValue } from '../tooling/schema'
 import { createFragment } from './context/fragments/base'
 import { createMockModelClient } from './model/mock'
 import { createThreadHarness, userInput } from './testing/harness'
 import { waitForEvent, type FakeTool } from './testing/fakes'
 import { deferred, sleep } from './util/deferred'
+
+const isFragment = (item: HistoryItem, kind: string): item is ContextFragmentItem =>
+  item.type === 'context_fragment' && item.kind === kind
 
 const readTool = (name: string, delayMs = 0, parallelSafe = true): FakeTool => ({
   name,
@@ -12,7 +16,7 @@ const readTool = (name: string, delayMs = 0, parallelSafe = true): FakeTool => (
   risk: 'read',
   async execute(input) {
     await sleep(delayMs)
-    return { content: { tool: name, input } }
+    return { content: { tool: name, input: toJsonValue(input) } }
   },
 })
 
@@ -34,7 +38,9 @@ describe('turn loop', () => {
     expect(completed && completed.type === 'turn.completed' && completed.finalText).toBe('你好，我在。')
 
     const persisted = h.services.rollout.itemsOf(h.thread.id)
-    expect(persisted.map((i) => i.type)).toEqual(expect.arrayContaining(['user_message', 'context_fragment', 'assistant_message']))
+    expect(persisted.map((i) => i.type)).toEqual(
+      expect.arrayContaining(['user_message', 'context_fragment', 'assistant_message']),
+    )
     const log = h.services.rollout.log
     expect(log.lastIndexOf('flush')).toBeGreaterThan(log.findIndex((l) => l.includes('assistant_message')))
     expect(h.services.hooks.calls.map((c) => c.event)).toEqual(expect.arrayContaining(['UserPromptSubmit', 'Stop']))
@@ -55,9 +61,29 @@ describe('turn loop', () => {
     ])
     const completionOrder: string[] = []
     const tools: FakeTool[] = [
-      { ...readTool('slow_read', 40), async execute(input) { await sleep(40); completionOrder.push('slow_read'); return { content: { input } } } },
-      { ...readTool('fast_read', 0), async execute(input) { completionOrder.push('fast_read'); return { content: { input } } } },
-      { ...readTool('writer', 0, false), risk: 'write', async execute(input) { completionOrder.push('writer'); return { content: { input } } } },
+      {
+        ...readTool('slow_read', 40),
+        async execute(input) {
+          await sleep(40)
+          completionOrder.push('slow_read')
+          return { content: { input: toJsonValue(input) } }
+        },
+      },
+      {
+        ...readTool('fast_read', 0),
+        async execute(input) {
+          completionOrder.push('fast_read')
+          return { content: { input: toJsonValue(input) } }
+        },
+      },
+      {
+        ...readTool('writer', 0, false),
+        risk: 'write',
+        async execute(input) {
+          completionOrder.push('writer')
+          return { content: { input: toJsonValue(input) } }
+        },
+      },
     ]
     const h = await createThreadHarness({ model, tools })
     const result = await (await h.thread.startTurn(userInput('查一下'), 'start')).promise
@@ -77,7 +103,9 @@ describe('turn loop', () => {
   })
 
   it('(3) step cap aborts with step_cap', async () => {
-    const model = createMockModelClient(Array.from({ length: 6 }, (_, i) => ({ toolCalls: [{ name: 'read', input: { i } }] })))
+    const model = createMockModelClient(
+      Array.from({ length: 6 }, (_, i) => ({ toolCalls: [{ name: 'read', input: { i } }] })),
+    )
     const h = await createThreadHarness({ model, tools: [readTool('read')], config: { maxStepsPerTurn: 3 } })
     const result = await (await h.thread.startTurn(userInput('一直查'), 'start')).promise
     expect(result).toMatchObject({ status: 'aborted', reason: 'step_cap' })
@@ -88,7 +116,10 @@ describe('turn loop', () => {
   })
 
   it('(4a) loop guard trips on 3 identical calls and refuses the third batch BEFORE dispatch', async () => {
-    const model = createMockModelClient({ steps: [{ toolCalls: [{ name: 'read', input: { same: true } }] }], loopLast: true })
+    const model = createMockModelClient({
+      steps: [{ toolCalls: [{ name: 'read', input: { same: true } }] }],
+      loopLast: true,
+    })
     const h = await createThreadHarness({ model, tools: [readTool('read')] })
     const result = await (await h.thread.startTurn(userInput('循环'), 'start')).promise
     expect(result).toMatchObject({ status: 'aborted', reason: 'loop_guard' })
@@ -103,11 +134,15 @@ describe('turn loop', () => {
     expect(h.thread.context.all().at(-1)).toMatchObject({ type: 'turn_aborted', reason: 'loop_guard' })
     const types = h.events.types()
     expect(types[types.length - 1]).toBe('turn.aborted')
-    expect(h.services.rollout.log.lastIndexOf('flush')).toBeGreaterThan(h.services.rollout.log.findIndex((l) => l.includes('turn_aborted')))
+    expect(h.services.rollout.log.lastIndexOf('flush')).toBeGreaterThan(
+      h.services.rollout.log.findIndex((l) => l.includes('turn_aborted')),
+    )
   })
 
   it('(5c) the turn timeout aborts with reason timeout', async () => {
-    const model = createMockModelClient([{ text: '这是一段慢慢输出的很长很长的回复内容，永远写不完。', delayMs: 30, chunkSize: 1 }])
+    const model = createMockModelClient([
+      { text: '这是一段慢慢输出的很长很长的回复内容，永远写不完。', delayMs: 30, chunkSize: 1 },
+    ])
     const h = await createThreadHarness({ model, config: { turnTimeoutMs: 80 } })
     const result = await (await h.thread.startTurn(userInput('慢'), 'start')).promise
     expect(result).toMatchObject({ status: 'aborted', reason: 'timeout' })
@@ -117,11 +152,23 @@ describe('turn loop', () => {
 
   it('(6) an interrupt during in-flight compaction is an interruption, not compaction_failed', async () => {
     const model = createMockModelClient({
-      steps: [{ text: '第一轮的回答。'.repeat(40) }, { toolCalls: [{ name: 'read', input: { q: 1 } }] }, { text: '完成' }],
+      steps: [
+        { text: '第一轮的回答。'.repeat(40) },
+        { toolCalls: [{ name: 'read', input: { q: 1 } }] },
+        { text: '完成' },
+      ],
       ref: { contextWindow: 100 },
     })
-    const aux = createMockModelClient({ steps: [{ text: '摘要'.repeat(200), delayMs: 20, chunkSize: 1 }], loopLast: true })
-    const h = await createThreadHarness({ model, auxiliary: aux, tools: [readTool('read')], config: { compactionThreshold: 0.1 } })
+    const aux = createMockModelClient({
+      steps: [{ text: '摘要'.repeat(200), delayMs: 20, chunkSize: 1 }],
+      loopLast: true,
+    })
+    const h = await createThreadHarness({
+      model,
+      auxiliary: aux,
+      tools: [readTool('read')],
+      config: { compactionThreshold: 0.1 },
+    })
     expect(await (await h.thread.startTurn(userInput('一'), 'start')).promise).toMatchObject({ status: 'completed' })
     const handle = await h.thread.startTurn(userInput('二'), 'start')
     const start = Date.now()
@@ -185,10 +232,14 @@ describe('turn loop', () => {
     const model = createMockModelClient({ steps: [{ text: '好。' }], loopLast: true })
     const provider = {
       tier: 'turn' as const,
-      provide: async (): Promise<ContextFragment[]> => [createFragment('relationship_profile', '<relationship_profile>', 2000, () => '张三：老同学，聊天风格随意。')],
+      provide: async (): Promise<ContextFragment[]> => [
+        createFragment('relationship_profile', '<relationship_profile>', 2000, () => '张三：老同学，聊天风格随意。'),
+      ],
     }
     const h = await createThreadHarness({ model, tools: [readTool('read')], fragmentProviders: [provider] })
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
     const usage = h.events.events.find((e) => e.type === 'context.usage')
     expect(usage && usage.type === 'context.usage' && usage.usage.breakdown.memory).toBeGreaterThan(0)
     expect(usage && usage.type === 'context.usage' && usage.usage.breakdown.references).toBeGreaterThan(0)
@@ -204,11 +255,18 @@ describe('turn loop', () => {
   it('(11) image tool outputs are stored as a bounded placeholder, never raw base64', async () => {
     const data = 'QUJD'.repeat(400) // 1600 base64 chars → 1200 bytes
     const model = createMockModelClient([{ toolCalls: [{ name: 'shot', input: {} }] }, { text: '看到了。' }])
-    const shot: FakeTool = { name: 'shot', parallelSafe: true, execute: async () => ({ content: { type: 'image', mediaType: 'image/png', data } }) }
+    const shot: FakeTool = {
+      name: 'shot',
+      parallelSafe: true,
+      execute: async () => ({ content: { type: 'image', mediaType: 'image/png', data } }),
+    }
     const h = await createThreadHarness({ model, tools: [shot] })
     expect(await (await h.thread.startTurn(userInput('截图'), 'start')).promise).toMatchObject({ status: 'completed' })
     const result = h.thread.context.all().find((i) => i.type === 'tool_result')
-    expect(result && result.type === 'tool_result' && result.output).toEqual({ type: 'json', value: { type: 'image', mediaType: 'image/png', bytes: 1200 } })
+    expect(result && result.type === 'tool_result' && result.output).toEqual({
+      type: 'json',
+      value: { type: 'image', mediaType: 'image/png', bytes: 1200 },
+    })
     expect(JSON.stringify(h.thread.context.all())).not.toContain('QUJDQUJDQUJDQUJD')
     expect(JSON.stringify(h.services.rollout.itemsOf(h.thread.id))).not.toContain('QUJDQUJDQUJDQUJD')
     expect(JSON.stringify(model.requests[1]!.history)).not.toContain('QUJDQUJDQUJDQUJD')
@@ -217,7 +275,14 @@ describe('turn loop', () => {
   it('(4b) loop guard trips on A-B-A-B alternation', async () => {
     const a = { name: 'read', input: { k: 'a' } }
     const b = { name: 'read', input: { k: 'b' } }
-    const model = createMockModelClient([{ toolCalls: [a] }, { toolCalls: [b] }, { toolCalls: [a] }, { toolCalls: [b] }, { toolCalls: [a] }, { text: 'never' }])
+    const model = createMockModelClient([
+      { toolCalls: [a] },
+      { toolCalls: [b] },
+      { toolCalls: [a] },
+      { toolCalls: [b] },
+      { toolCalls: [a] },
+      { text: 'never' },
+    ])
     const h = await createThreadHarness({ model, tools: [readTool('read')] })
     const result = await (await h.thread.startTurn(userInput('交替'), 'start')).promise
     expect(result).toMatchObject({ status: 'aborted', reason: 'loop_guard' })
@@ -225,7 +290,9 @@ describe('turn loop', () => {
   })
 
   it('(5) interrupt mid-stream records turn_aborted and flushes before turn.aborted', async () => {
-    const model = createMockModelClient([{ text: '这是一段会被打断的很长很长的回复内容，一直往下写。', delayMs: 15, chunkSize: 2 }])
+    const model = createMockModelClient([
+      { text: '这是一段会被打断的很长很长的回复内容，一直往下写。', delayMs: 15, chunkSize: 2 },
+    ])
     const h = await createThreadHarness({ model })
     let logAtAbortEvent: string[] = []
     let itemsAtAbortEvent: string[] = []
@@ -268,7 +335,10 @@ describe('turn loop', () => {
   })
 
   it('(9) steer merges into the running turn', async () => {
-    const model = createMockModelClient([{ text: '第一步回答，比较长以便可以被并入。', delayMs: 10, chunkSize: 2 }, { text: '第二步补充。' }])
+    const model = createMockModelClient([
+      { text: '第一步回答，比较长以便可以被并入。', delayMs: 10, chunkSize: 2 },
+      { text: '第二步补充。' },
+    ])
     const h = await createThreadHarness({ model })
     const handle = await h.thread.startTurn(userInput('第一句'), 'start')
     await waitForEvent(h.emitter.on, 'text.delta')
@@ -312,28 +382,74 @@ describe('turn loop', () => {
     expect(h.thread.activeTurn).toBeUndefined()
   })
 
+  it('(9c) a blocking Stop hook gets exactly one more step, with its reason in context, and the correction is appended', async () => {
+    const model = createMockModelClient([
+      { text: '她说“已经在一起了”。' },
+      { text: '更正：原文里没有这句话。' },
+      { text: '不应被请求' },
+    ])
+    const h = await createThreadHarness({ model })
+    const seen: Array<{ text?: string; channel?: string; profile?: string }> = []
+    h.services.hooks.add({
+      name: 'audit',
+      events: ['Stop'],
+      async run(_event, payload) {
+        seen.push({ text: payload.text, channel: payload.origin?.channel, profile: payload.profile })
+        return { block: { reason: '引号里的「已经在一起了」不在引用的消息里' } }
+      },
+    })
+    const result = await (await h.thread.startTurn(userInput('他们在一起了吗'), 'start')).promise
+    expect(result).toMatchObject({ status: 'completed', text: '她说“已经在一起了”。\n\n更正：原文里没有这句话。' })
+    // Always blocking must not loop: one continuation, then the turn ends.
+    expect(model.requests).toHaveLength(2)
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toMatchObject({ text: '她说“已经在一起了”。', profile: 'desktop-chat' })
+    const fragment = h.thread.context.all().find((i) => i.type === 'context_fragment' && i.kind === 'stop_hook')
+    expect(fragment && fragment.type === 'context_fragment' && fragment.text).toContain('已经在一起了')
+    expect(JSON.stringify(model.requests[1]!.history)).toContain('不在引用的消息里')
+    expect(h.events.types().filter((t) => t === 'turn.completed')).toHaveLength(1)
+  })
+
+  it('(9d) a Stop hook that does not block leaves the turn as it was', async () => {
+    const model = createMockModelClient([{ text: '好的。' }, { text: '不应被请求' }])
+    const h = await createThreadHarness({ model })
+    h.services.hooks.add({ name: 'quiet', events: ['Stop'], run: async () => ({ additionalContext: 'ignored' }) })
+    const result = await (await h.thread.startTurn(userInput('嗨'), 'start')).promise
+    expect(result).toMatchObject({ status: 'completed', text: '好的。' })
+    expect(model.requests).toHaveLength(1)
+  })
+
   it('(10b) user_instructions are recorded once per distinct text, never duplicated into world_state', async () => {
     const model = createMockModelClient({ steps: [{ text: '好。' }], loopLast: true })
     let rules = '回复要简短。'
     const provider = {
       tier: 'turn' as const,
-      provide: async (): Promise<ContextFragment[]> => [createFragment('user_instructions', '<user_instructions>', 2000, () => rules)],
+      provide: async (): Promise<ContextFragment[]> => [
+        createFragment('user_instructions', '<user_instructions>', 2000, () => rules),
+      ],
     }
     const h = await createThreadHarness({ model, tools: [readTool('read')], fragmentProviders: [provider] })
-    const fragments = (kind: string) => h.thread.context.all().filter((i) => i.type === 'context_fragment' && i.kind === kind)
+    const fragments = (kind: string) =>
+      h.thread.context.all().filter((i): i is ContextFragmentItem => isFragment(i, kind))
 
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
     expect(fragments('user_instructions')).toHaveLength(1)
     expect(fragments('world_state')).toHaveLength(1)
     expect(fragments('world_state')[0]!.text).not.toContain('回复要简短')
     expect(fragments('world_state')[0]!.text).not.toContain('用户规则')
 
-    await (await h.thread.startTurn(userInput('二'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('二'), 'start')
+    ).promise
     expect(fragments('user_instructions')).toHaveLength(1)
     expect(fragments('world_state')).toHaveLength(1)
 
     rules = '回复要详细。'
-    await (await h.thread.startTurn(userInput('三'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('三'), 'start')
+    ).promise
     expect(fragments('user_instructions')).toHaveLength(2)
     expect(fragments('user_instructions')[1]!.text).toContain('回复要详细')
     expect(fragments('world_state')).toHaveLength(1)
@@ -350,21 +466,31 @@ describe('turn loop', () => {
   it('(10) world-state fragment is injected once and again only when permission mode changes', async () => {
     const model = createMockModelClient({ steps: [{ text: '好。' }], loopLast: true })
     const h = await createThreadHarness({ model, tools: [readTool('read')] })
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
-    const worldFragments = () => h.thread.context.all().filter((i) => i.type === 'context_fragment' && i.kind === 'world_state')
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
+    const worldFragments = () =>
+      h.thread.context.all().filter((i): i is ContextFragmentItem => isFragment(i, 'world_state'))
     expect(worldFragments()).toHaveLength(1)
     expect(worldFragments()[0]!.text).toContain('read')
-    await (await h.thread.startTurn(userInput('二'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('二'), 'start')
+    ).promise
     expect(worldFragments()).toHaveLength(1)
     h.thread.updateSettings({ permissionMode: 'ask' })
-    await (await h.thread.startTurn(userInput('三'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('三'), 'start')
+    ).promise
     expect(worldFragments()).toHaveLength(2)
     expect(worldFragments()[1]!.text).toContain('权限模式')
     expect(worldFragments()[1]!.text).not.toContain('可用工具')
   })
 
   it('replaces a running turn when a new turn.start arrives without steer', async () => {
-    const model = createMockModelClient([{ text: '第一轮很长很长的内容会被替换掉。', delayMs: 10, chunkSize: 2 }, { text: '第二轮。' }])
+    const model = createMockModelClient([
+      { text: '第一轮很长很长的内容会被替换掉。', delayMs: 10, chunkSize: 2 },
+      { text: '第二轮。' },
+    ])
     const h = await createThreadHarness({ model })
     const first = await h.thread.startTurn(userInput('一'), 'start')
     await waitForEvent(h.emitter.on, 'text.delta')
@@ -375,7 +501,9 @@ describe('turn loop', () => {
   })
 
   it('emits an error event with actions and aborts when the model fails', async () => {
-    const model = createMockModelClient([{ error: { code: 'auth', message: 'bad key', status: 401, retryable: false } }])
+    const model = createMockModelClient([
+      { error: { code: 'auth', message: 'bad key', status: 401, retryable: false } },
+    ])
     const h = await createThreadHarness({ model })
     const result = await (await h.thread.startTurn(userInput('x'), 'start')).promise
     expect(result).toMatchObject({ status: 'aborted', reason: 'error' })
@@ -387,7 +515,9 @@ describe('turn loop', () => {
     const model = createMockModelClient([{ text: '好的。' }])
     const aux = createMockModelClient({ steps: [{ text: '“打招呼测试”' }], loopLast: true })
     const h = await createThreadHarness({ model, auxiliary: aux })
-    await (await h.thread.startTurn(userInput('你好'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('你好'), 'start')
+    ).promise
     const title = await waitForEvent(h.emitter.on, 'thread.title')
     expect(title.title).toBe('打招呼测试')
     expect(h.thread.settings.title).toBe('打招呼测试')

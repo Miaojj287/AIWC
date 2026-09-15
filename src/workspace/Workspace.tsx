@@ -1,10 +1,12 @@
-import { Bot, MessageSquare, Reply, TriangleAlert } from 'lucide-react'
+import { Bot, CalendarClock, MessageSquare, Reply, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { installTabCommands } from '@/app/tabCommands'
 import { detectMac } from '@/app/shortcuts'
-import { ConfirmDialog, EmptyState, Kbd, type IconComponent } from '@/kit'
+import { Trans, useT, type MessageKey } from '@/i18n'
+import { ConfirmDialog, EmptyState, ErrorBoundary, Kbd, type IconComponent } from '@/kit'
+import { getObjectList } from '@/shell/objectListRegistry'
 import { useShellStore, type RailFunction } from '@/shell/shellStore'
-import { getTabRegistration, type TabDescriptor } from './tabRegistry'
+import { getTabRegistration, tabTitle, type TabDescriptor } from './tabRegistry'
 import { TabStrip } from './TabStrip'
 import { useTabsStore } from './tabsStore'
 
@@ -21,21 +23,23 @@ export interface WorkspaceProps {
  * and the dirty-guard dialog. Handles tab.* / rail.select / agent.quoteActiveTab commands.
  */
 export function Workspace({ mac = detectMac() }: WorkspaceProps) {
+  const t = useT()
   const tabs = useTabsStore((s) => s.tabs)
   const activeId = useTabsStore((s) => s.activeId)
   const rail = useShellStore((s) => s.railFunction)
   const guard = useCloseGuard()
+  const { requestClose } = guard
 
-  useEffect(() => installTabCommands({ requestClose: (id) => void guard.requestClose(id) }), [guard.requestClose])
+  useEffect(() => installTabCommands({ requestClose: (id) => void requestClose(id) }), [requestClose])
 
   const mounted = useRecentTabs(tabs, activeId)
   const active = activeId ? tabs.find((t) => t.id === activeId) : undefined
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-shell" aria-label="工作区">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-shell" aria-label={t('workspace.ariaLabel')}>
       <TabStrip onRequestClose={guard.requestClose} mac={mac} />
       <div className="relative min-h-0 flex-1 bg-content">
-        {!active ? <WorkspaceEmpty fn={rail} mac={mac} /> : null}
+        {!active ? <FunctionEmpty fn={rail} mac={mac} /> : null}
         {mounted.map((tab) => (
           <TabHost key={tab.id} tab={tab} active={tab.id === activeId} requestClose={guard.requestClose} />
         ))}
@@ -47,16 +51,42 @@ export function Workspace({ mac = detectMac() }: WorkspaceProps) {
 
 /* ---------------------------------------------------------------- host */
 
-function TabHost({ tab, active, requestClose }: { tab: TabDescriptor; active: boolean; requestClose(id: string): void }) {
+function TabHost({
+  tab,
+  active,
+  requestClose,
+}: {
+  tab: TabDescriptor
+  active: boolean
+  requestClose(id: string): void
+}) {
+  const t = useT()
   const reg = getTabRegistration(tab.kind)
-  const update = useCallback((patch: Partial<Pick<TabDescriptor, 'title' | 'dirty' | 'state'>>) => useTabsStore.getState().update(tab.id, patch), [tab.id])
+  const update = useCallback(
+    (patch: Partial<Pick<TabDescriptor, 'title' | 'dirty' | 'state'>>) => useTabsStore.getState().update(tab.id, patch),
+    [tab.id],
+  )
   const close = useCallback(() => requestClose(tab.id), [requestClose, tab.id])
   return (
-    <div hidden={!active} role="tabpanel" aria-label={tab.title} data-tab-id={tab.id} className="absolute inset-0 flex min-h-0 flex-col">
+    <div
+      hidden={!active}
+      role="tabpanel"
+      aria-label={tabTitle(tab)}
+      data-tab-id={tab.id}
+      className="absolute inset-0 flex min-h-0 flex-col"
+    >
       {reg ? (
-        <reg.component tab={tab} active={active} update={update} requestClose={close} />
+        // One boundary per host: a tab that throws while rendering shows the error state in its own panel only.
+        <ErrorBoundary>
+          <reg.component tab={tab} active={active} update={update} requestClose={close} />
+        </ErrorBoundary>
       ) : (
-        <EmptyState variant="error" title="无法显示此标签" description={`没有为「${tab.kind}」类型注册渲染器。`} action={{ label: '关闭标签', onClick: close }} className="h-full" />
+        <EmptyState
+          variant="error"
+          title={t('workspace.tabError')}
+          action={{ label: t('workspace.closeTab'), onClick: close }}
+          className="h-full"
+        />
       )}
     </div>
   )
@@ -64,23 +94,42 @@ function TabHost({ tab, active, requestClose }: { tab: TabDescriptor; active: bo
 
 /* ---------------------------------------------------------- empty state */
 
-const EMPTY_COPY: Record<RailFunction, { icon: IconComponent; title: string; description: string }> = {
-  chat: { icon: MessageSquare, title: '从左侧选择一个会话', description: '打开后可以浏览、搜索和导出聊天记录，或把它引用给 Agent。' },
-  autoreply: { icon: Reply, title: '选择一个会话来设置自动回复', description: '每个会话至多一条规则；开启后由本地 Agent 按你的设置回复。' },
-  clone: { icon: Bot, title: '选择一位联系人开始克隆', description: '克隆基于本地聊天记录提炼说话风格，全过程在本机完成。' },
+const EMPTY_COPY: Record<RailFunction, { icon: IconComponent; title: MessageKey; description: MessageKey }> = {
+  chat: { icon: MessageSquare, title: 'workspace.empty.chat.title', description: 'workspace.empty.chat.description' },
+  autoreply: {
+    icon: Reply,
+    title: 'workspace.empty.autoreply.title',
+    description: 'workspace.empty.autoreply.description',
+  },
+  clone: { icon: Bot, title: 'workspace.empty.clone.title', description: 'workspace.empty.clone.description' },
+  tasks: {
+    icon: CalendarClock,
+    title: 'workspace.empty.tasks.title',
+    description: 'workspace.empty.tasks.description',
+  },
+}
+
+/** A function may bring its own empty state (定时任务 offers templates); the rest share the generic copy. */
+function FunctionEmpty({ fn, mac }: { fn: RailFunction; mac: boolean }) {
+  const Custom = getObjectList(fn)?.workspaceEmpty
+  return Custom ? <Custom mac={mac} /> : <WorkspaceEmpty fn={fn} mac={mac} />
 }
 
 function WorkspaceEmpty({ fn, mac }: { fn: RailFunction; mac: boolean }) {
+  const t = useT()
   const copy = EMPTY_COPY[fn]
   return (
     <EmptyState
       icon={copy.icon}
-      title={copy.title}
+      title={t(copy.title)}
       description={
-        <span className="inline-flex flex-wrap items-center justify-center gap-1">
-          {copy.description}
+        <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
+          <span>{t(copy.description)}</span>
+          <span aria-hidden className="text-fg-3/60">
+            ·
+          </span>
           <span className="inline-flex items-center gap-1">
-            按 <Kbd keys={mac ? '⌘K' : 'Ctrl+K'} /> 搜索
+            <Trans k="workspace.empty.search" params={{ kbd: <Kbd keys={mac ? '⌘K' : 'Ctrl+K'} /> }} />
           </span>
         </span>
       }
@@ -117,6 +166,7 @@ export interface CloseGuard {
 }
 
 export function useCloseGuard(): CloseGuard {
+  const t = useT()
   const [pending, setPending] = useState<PendingClose | null>(null)
 
   const requestClose = useCallback(async (id: string): Promise<boolean> => {
@@ -128,7 +178,9 @@ export function useCloseGuard(): CloseGuard {
       return true
     }
     const reg = getTabRegistration(tab.kind)
-    const ok = reg?.canClose ? await reg.canClose(tab) : await new Promise<boolean>((resolve) => setPending({ tab, resolve }))
+    const ok = reg?.canClose
+      ? await reg.canClose(tab)
+      : await new Promise<boolean>((resolve) => setPending({ tab, resolve }))
     if (ok) useTabsStore.getState().close(id)
     return ok
   }, [])
@@ -144,10 +196,10 @@ export function useCloseGuard(): CloseGuard {
       onOpenChange={(open) => !open && settle(false)}
       icon={TriangleAlert}
       tone="warn"
-      title="放弃修改？"
-      description={pending ? `「${pending.tab.title}」有未保存的修改，关闭后这些修改会丢失。` : undefined}
-      confirmLabel="放弃修改"
-      cancelLabel="取消"
+      title={t('workspace.discard.title')}
+      description={pending ? t('workspace.discard.description', { title: tabTitle(pending.tab) }) : undefined}
+      confirmLabel={t('workspace.discard.confirm')}
+      cancelLabel={t('common.cancel')}
       onConfirm={() => settle(true)}
     />
   )

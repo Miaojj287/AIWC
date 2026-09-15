@@ -68,7 +68,12 @@ export function fitToDisplays(state: WindowState, displays: readonly DisplayBoun
     const minVisible = 100
     const right = out.x! + out.width
     const bottom = out.y! + out.height
-    return right - minVisible > d.x && out.x! + minVisible < d.x + d.width && bottom - minVisible > d.y && out.y! + minVisible < d.y + d.height
+    return (
+      right - minVisible > d.x &&
+      out.x! + minVisible < d.x + d.width &&
+      bottom - minVisible > d.y &&
+      out.y! + minVisible < d.y + d.height
+    )
   })
   if (!visibleOn) {
     delete out.x
@@ -80,7 +85,10 @@ export function fitToDisplays(state: WindowState, displays: readonly DisplayBoun
 }
 
 /** Coalesce rapid resize/move events into one write. */
-export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): ((...args: A) => void) & { flush(): void } {
+export function debounce<A extends unknown[]>(
+  fn: (...args: A) => void,
+  ms: number,
+): ((...args: A) => void) & { flush(): void } {
   let timer: ReturnType<typeof setTimeout> | undefined
   let pending: A | undefined
   const wrapped = ((...args: A) => {

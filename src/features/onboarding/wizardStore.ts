@@ -5,10 +5,22 @@
  */
 import { create } from 'zustand'
 import type { AppConfig, KeyAcquireStep, WxAccount } from '@aiwc/protocol'
+import { t } from '@/i18n'
 import { getBridge } from '@/platform/bridge'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
-import { DEFAULT_KEY_STEPS, EMPTY_KEYS, applyKeySteps, hasKey, mergeKeyStep, needsPermission, validateKeyHex, type KeyKind, type KeyStates, type WizardPage } from './gating'
+import {
+  DEFAULT_KEY_STEPS,
+  EMPTY_KEYS,
+  applyKeySteps,
+  hasKey,
+  mergeKeyStep,
+  needsPermission,
+  validateKeyHex,
+  type KeyKind,
+  type KeyStates,
+  type WizardPage,
+} from './gating'
 
 export type DbRootSource = 'none' | 'cached' | 'auto' | 'manual'
 export type VerifyState = 'idle' | 'verifying' | 'verified' | 'failed'
@@ -68,7 +80,11 @@ export interface WizardState {
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
-const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = { db_key: 'dbKeyRef', image_xor: 'imageXorKeyRef', image_aes: 'imageAesKeyRef' }
+const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = {
+  db_key: 'dbKeyRef',
+  image_xor: 'imageXorKeyRef',
+  image_aes: 'imageAesKeyRef',
+}
 
 let acquireEpoch = 0
 
@@ -97,7 +113,11 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     const keys: KeyStates = { ...EMPTY_KEYS }
     await Promise.all(
       (Object.keys(KEY_REFS) as KeyKind[]).map(async (kind) => {
-        const ref = acc[KEY_REFS[kind]] || ({ db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' } as const)[kind]
+        const ref =
+          acc[KEY_REFS[kind]] ||
+          ({ db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' } as const)[
+            kind
+          ]
         if (typeof ref !== 'string' || !ref) return
         try {
           if (await invoke('secret:has', { ref })) keys[kind] = { status: 'acquired', source: 'cached' }
@@ -140,19 +160,32 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     try {
       const res = await invoke('substrate:detectWeChat', undefined)
       if (!res.dbRoot) {
-        set({ detecting: false, dbRootError: res.running ? '已检测到微信，但没有找到数据目录，请点击「浏览」手动选择' : '未检测到运行中的微信。请先打开并登录微信，或点击「浏览」手动选择目录' })
+        set({
+          detecting: false,
+          dbRootError: res.running ? t('onboarding.account.notFoundRunning') : t('onboarding.account.notDetected'),
+        })
         return
       }
-      set({ detecting: false, dbRoot: res.dbRoot, dbRootSource: 'auto', detectedVersion: res.version, verifyState: 'idle', verifyError: undefined })
+      set({
+        detecting: false,
+        dbRoot: res.dbRoot,
+        dbRootSource: 'auto',
+        detectedVersion: res.version,
+        verifyState: 'idle',
+        verifyError: undefined,
+      })
       await get().loadAccounts()
     } catch (e) {
-      set({ detecting: false, dbRootError: `检测失败：${errText(e)}` })
+      set({ detecting: false, dbRootError: t('onboarding.account.detectFailed', { detail: errText(e) }) })
     }
   },
 
   async browse() {
     try {
-      const dir = await invoke('app:pickDirectory', { title: '选择微信数据目录', defaultPath: get().dbRoot || undefined })
+      const dir = await invoke('app:pickDirectory', {
+        title: t('onboarding.account.pickDataFolder'),
+        defaultPath: get().dbRoot || undefined,
+      })
       if (!dir) return
       set({ dbRoot: dir, dbRootSource: 'manual', dbRootError: undefined, verifyState: 'idle', verifyError: undefined })
       await get().loadAccounts()
@@ -162,14 +195,23 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 
   setDbRoot(path) {
-    set({ dbRoot: path, dbRootSource: path ? 'manual' : 'none', dbRootError: undefined, verifyState: 'idle', verifyError: undefined })
+    set({
+      dbRoot: path,
+      dbRootSource: path ? 'manual' : 'none',
+      dbRootError: undefined,
+      verifyState: 'idle',
+      verifyError: undefined,
+    })
   },
 
   setCacheDir(path) {
     set({ cacheDir: path })
   },
   async browseCache() {
-    const dir = await invoke('app:pickDirectory', { title: '选择缓存目录', defaultPath: get().cacheDir || undefined }).catch(() => null)
+    const dir = await invoke('app:pickDirectory', {
+      title: t('onboarding.account.pickCacheFolder'),
+      defaultPath: get().cacheDir || undefined,
+    }).catch(() => null)
     if (dir) set({ cacheDir: dir })
   },
   resetCacheDir() {
@@ -193,11 +235,19 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         accounts,
         accountsLoading: false,
         wxid: pick?.wxid ?? (accounts.some((a) => a.wxid === current) ? current : ''),
-        verifyState: pick?.verified ? 'verified' : pick && get().verifyState === 'verified' && pick.wxid === current ? 'verified' : 'idle',
-        accountsError: accounts.length === 0 ? '这个目录下没有检测到微信账号，请确认路径是否正确' : undefined,
+        verifyState: pick?.verified
+          ? 'verified'
+          : pick && get().verifyState === 'verified' && pick.wxid === current
+            ? 'verified'
+            : 'idle',
+        accountsError: accounts.length === 0 ? t('onboarding.account.noAccounts') : undefined,
       })
     } catch (e) {
-      set({ accountsLoading: false, accounts: [], accountsError: `读取账号失败：${errText(e)}` })
+      set({
+        accountsLoading: false,
+        accounts: [],
+        accountsError: t('onboarding.account.loadAccountsFailed', { detail: errText(e) }),
+      })
     }
   },
 
@@ -213,10 +263,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     try {
       const res = await invoke('substrate:verifyAccount', { wxid, dbRoot })
       if (res.ok) {
-        set((s) => ({ verifyState: 'verified', accounts: s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a)) }))
+        set((s) => ({
+          verifyState: 'verified',
+          accounts: s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a)),
+        }))
         return true
       }
-      set({ verifyState: 'failed', verifyError: res.error ?? '该 wxid 与所选数据库目录不匹配，请重新选择或验证' })
+      set({ verifyState: 'failed', verifyError: res.error ?? t('onboarding.account.verifyMismatch') })
       return false
     } catch (e) {
       set({ verifyState: 'failed', verifyError: errText(e) })
@@ -228,7 +281,12 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     const { wxid, dbRoot } = get()
     if (!wxid || !dbRoot) return
     const my = ++acquireEpoch
-    set({ acquiring: true, acquireStrategy: strategy, acquireSteps: DEFAULT_KEY_STEPS.map((s) => ({ ...s })), permissionDialog: false })
+    set({
+      acquiring: true,
+      acquireStrategy: strategy,
+      acquireSteps: DEFAULT_KEY_STEPS.map((s) => ({ ...s })),
+      permissionDialog: false,
+    })
     const bridge = await getBridge()
     const off = bridge.on('substrate:keyStep', (step) => {
       if (my !== acquireEpoch) return
@@ -246,16 +304,27 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         keys,
         permissionDialog: needsPermission(finalSteps),
         verifyState: verifyStep?.status === 'done' ? 'verified' : s.verifyState,
-        accounts: verifyStep?.status === 'done' ? s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a)) : s.accounts,
+        accounts:
+          verifyStep?.status === 'done'
+            ? s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a))
+            : s.accounts,
       }))
     } catch (e) {
       if (my !== acquireEpoch) return
       const msg = errText(e)
       set((s) => ({
         acquiring: false,
-        acquireSteps: s.acquireSteps.map((st) => (st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st)),
-        keys: applyKeySteps(s.keys, s.acquireSteps.map((st) => (st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st))),
-        permissionDialog: /权限|permission|full disk|完全磁盘/i.test(msg),
+        acquireSteps: s.acquireSteps.map((st) =>
+          st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st,
+        ),
+        keys: applyKeySteps(
+          s.keys,
+          s.acquireSteps.map((st) =>
+            st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st,
+          ),
+        ),
+        // Matches the thrown error text (OS / main process, either language) — detection, not UI copy.
+        permissionDialog: /权限|permission|full disk|完全磁盘|administrator rights/i.test(msg),
       }))
     } finally {
       off()
@@ -264,7 +333,12 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   cancelAcquire() {
     acquireEpoch++
-    set((s) => ({ acquiring: false, acquireSteps: s.acquireSteps.map((st) => (st.status === 'doing' ? { ...st, status: 'todo', detail: undefined } : st)) }))
+    set((s) => ({
+      acquiring: false,
+      acquireSteps: s.acquireSteps.map((st) =>
+        st.status === 'doing' ? { ...st, status: 'todo', detail: undefined } : st,
+      ),
+    }))
   },
 
   dismissPermissionDialog() {
@@ -276,8 +350,18 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     if (!v.ok) return { ok: false, error: v.error }
     try {
       const res = await invoke('substrate:setManualKey', { kind, hex: v.hex })
-      if (!res.ok) return { ok: false, error: res.error ?? '密钥无效' }
-      set((s) => ({ keys: { ...s.keys, [kind]: { status: 'manual', hex: v.hex } }, testError: undefined, ...(kind === 'db_key' ? { verifyState: 'idle' as const, verifyError: undefined, accounts: s.accounts.map((a) => ({ ...a, verified: false })) } : {}) }))
+      if (!res.ok) return { ok: false, error: res.error ?? t('onboarding.keys.invalidKey') }
+      set((s) => ({
+        keys: { ...s.keys, [kind]: { status: 'manual', hex: v.hex } },
+        testError: undefined,
+        ...(kind === 'db_key'
+          ? {
+              verifyState: 'idle' as const,
+              verifyError: undefined,
+              accounts: s.accounts.map((a) => ({ ...a, verified: false })),
+            }
+          : {}),
+      }))
       return { ok: true }
     } catch (e) {
       return { ok: false, error: errText(e) }
@@ -294,7 +378,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     try {
       const res = await invoke('substrate:testConnection', { wxid, dbRoot })
       if (!res.ok) {
-        set({ testing: false, testError: res.error ?? '无法打开数据库' })
+        set({ testing: false, testError: res.error ?? t('onboarding.connectFail.openFailed') })
         return false
       }
       await useConfigStore.getState().set({
@@ -302,7 +386,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       })
       const connected = await invoke('substrate:connect', undefined)
       if (!connected.ok) {
-        set({ testing: false, testError: connected.error ?? '密钥验证通过，但数据库连接失败' })
+        set({ testing: false, testError: connected.error ?? t('onboarding.connectFail.connectFailed') })
         return false
       }
       await useConfigStore.getState().set({ onboarding: { completed: true } })
@@ -321,7 +405,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   async persistDraft() {
     const { wxid, dbRoot, cacheDir } = get()
     try {
-      await useConfigStore.getState().set({ account: { wxid: wxid || undefined, dbRoot: dbRoot || undefined, cacheDir: cacheDir || undefined } })
+      await useConfigStore
+        .getState()
+        .set({ account: { wxid: wxid || undefined, dbRoot: dbRoot || undefined, cacheDir: cacheDir || undefined } })
     } catch {
       /* best effort */
     }

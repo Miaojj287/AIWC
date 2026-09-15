@@ -36,13 +36,19 @@ export function botOriginChatId(ctx: ScopeContext): string | undefined {
  * call is refused (never silently narrowed, so the model cannot mistake origin-only results for
  * another session's).
  */
-export function scopeBotSessions(ctx: ScopeContext, requested: readonly string[] | undefined): BotScope<string[] | undefined> {
+export function scopeBotSessions(
+  ctx: ScopeContext,
+  requested: readonly string[] | undefined,
+): BotScope<string[] | undefined> {
   if (!isBotContext(ctx)) return { ok: true, value: requested ? [...requested] : undefined }
   const origin = botOriginChatId(ctx)
   if (!origin) return { ok: false, result: fail(BOT_NO_ORIGIN_MESSAGE) }
   const refused = [...new Set((requested ?? []).map((s) => s.trim()).filter((s) => s && s !== origin))]
   if (refused.length > 0) {
-    return { ok: false, result: fail(`机器人只能读取当前会话（${origin}）的聊天数据，不能访问其它会话。`, { origin, refused }) }
+    return {
+      ok: false,
+      result: fail(`机器人只能读取当前会话（${origin}）的聊天数据，不能访问其它会话。`, { origin, refused }),
+    }
   }
   return { ok: true, value: [origin] }
 }

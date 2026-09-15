@@ -28,7 +28,6 @@ export const asCallId = (s: string): CallId => s as CallId
 
 /** Millisecond epoch. */
 export type Millis = number
-export const now = (): Millis => Date.now()
 
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [k: string]: JsonValue }

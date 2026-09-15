@@ -6,12 +6,21 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { ApprovalDecision, ApprovalId, ErrorAction, Mention } from '@aiwc/protocol'
 import { runCommand } from '@/app/commands'
+import { useT } from '@/i18n'
 import { cn, EmptyState, ScrollArea } from '@/kit'
 import type { ApprovalRequest, ThreadItem } from './model'
 import { ArtifactCard, type ArtifactItem } from './messages/ArtifactCard'
 import { AssistantMessage, type AssistantItem, type FeedbackVerdict } from './messages/AssistantMessage'
 import { ErrorCard, type ErrorItem } from './messages/ErrorCard'
-import { AbortedNotice, CompactionNotice, EmptyThread, PlanCard, StreamingIndicator, Suggestions, type CompactionItem } from './messages/Notices'
+import {
+  AbortedNotice,
+  CompactionNotice,
+  EmptyThread,
+  PlanCard,
+  StreamingIndicator,
+  Suggestions,
+  type CompactionItem,
+} from './messages/Notices'
 import { ToolCallGroup } from './messages/ToolCallGroup'
 import { UserMessage } from './messages/UserMessage'
 
@@ -31,11 +40,10 @@ export interface MessageListProps {
   modelLabel?: string
   /** Badge rendered above assistant messages (clone page: 分身). */
   assistantBadge?: ReactNode
-  /** Extra hover actions on assistant messages. */
+  /** Extra actions on the final response in a completed turn. */
   assistantExtraActions?: (item: AssistantItem) => ReactNode
   onSuggestion?: (text: string) => void
   onResolveApproval?: (approvalId: ApprovalId, decision: ApprovalDecision) => void
-  onStop?: () => void
   /** 编辑 a user message: parent puts it into the composer. */
   onEdit?: (text: string, mentions: Mention[]) => void
   /** 重新发送 / 重新生成 / 重试 all resubmit user input. */
@@ -52,7 +60,11 @@ export interface MessageListProps {
   emptyTitle?: string
   /** Replace the default empty state entirely. */
   emptyState?: ReactNode
+  /** Extra space kept free under the last item (the Agent pet perches over the list's bottom edge). */
+  bottomInset?: number
   className?: string
+  /** Extra classes on the inner column (the Agent window centres it at a reading width). */
+  contentClassName?: string
 }
 
 export function MessageList({
@@ -69,7 +81,6 @@ export function MessageList({
   assistantExtraActions,
   onSuggestion,
   onResolveApproval,
-  onStop,
   onEdit,
   onResend,
   onRegenerate,
@@ -80,8 +91,11 @@ export function MessageList({
   onRetry,
   emptyTitle,
   emptyState,
+  bottomInset,
   className,
+  contentClassName,
 }: MessageListProps) {
+  const t = useT()
   const viewportRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
@@ -94,7 +108,9 @@ export function MessageList({
 
   // Follow the stream while the user is at the bottom; leave them alone when they scrolled up.
   const last = items[items.length - 1]
-  const lastKey = last ? `${last.id}:${last.kind === 'assistant' ? last.text.length : last.kind === 'tools' ? last.calls.map((c) => c.status).join(',') : ''}` : ''
+  const lastKey = last
+    ? `${last.id}:${last.kind === 'assistant' ? last.text.length : last.kind === 'tools' ? last.calls.map((c) => c.status).join(',') : ''}`
+    : ''
   useLayoutEffect(() => {
     const el = viewportRef.current
     if (!el || !atBottomRef.current) return
@@ -115,8 +131,11 @@ export function MessageList({
       case 'retry':
         if (onRetry) onRetry(item)
         else {
-          const user = [...items].reverse().find((it) => it.kind === 'user' && (item.turnId === undefined || it.turnId === item.turnId))
-          if (user?.kind === 'user') onResend?.(user.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'), user.mentions)
+          const user = [...items]
+            .reverse()
+            .find((it) => it.kind === 'user' && (item.turnId === undefined || it.turnId === item.turnId))
+          if (user?.kind === 'user')
+            onResend?.(user.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'), user.mentions)
         }
         return
       case 'dismiss':
@@ -125,53 +144,87 @@ export function MessageList({
     }
   }
 
-  const regenerate = onRegenerate ?? (onResend ? (item: AssistantItem) => {
-    const user = [...items].reverse().find((it) => it.kind === 'user' && it.turnId === item.turnId)
-    if (user?.kind === 'user') onResend(user.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'), user.mentions)
-  } : undefined)
+  const regenerate =
+    onRegenerate ??
+    (onResend
+      ? (item: AssistantItem) => {
+          const user = [...items].reverse().find((it) => it.kind === 'user' && it.turnId === item.turnId)
+          if (user?.kind === 'user')
+            onResend(user.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n'), user.mentions)
+        }
+      : undefined)
 
   if (loadError) {
     return (
       <div className={cn('flex h-full items-center justify-center', className)}>
-        <EmptyState variant="error" title="会话加载失败" description={loadError} compact action={onRetryLoad ? { label: '重试', onClick: onRetryLoad } : undefined} />
+        <EmptyState
+          variant="error"
+          title={t('agent.thread.loadFailed')}
+          description={loadError}
+          compact
+          action={onRetryLoad ? { label: t('common.retry'), onClick: onRetryLoad } : undefined}
+        />
       </div>
     )
   }
   if (loading && items.length === 0) {
     return (
       <div className={cn('flex h-full items-center justify-center', className)}>
-        <EmptyState variant="loading" title="正在加载会话" compact />
+        <EmptyState variant="loading" title={t('agent.thread.loading')} compact />
       </div>
     )
   }
   if (items.length === 0 && !streaming) {
-    return <div className={cn('h-full', className)}>{emptyState ?? <EmptyThread suggestions={suggestions} onPick={(t) => onSuggestion?.(t)} title={emptyTitle} />}</div>
+    return (
+      <div className={cn('h-full', className)}>
+        {emptyState ?? (
+          <EmptyThread suggestions={suggestions} onPick={(text) => onSuggestion?.(text)} title={emptyTitle} />
+        )}
+      </div>
+    )
   }
 
-  const visible = items.filter((it) => !dismissed.has(it.id))
+  const visible = items.filter((it) => !dismissed.has(it.id) && (it.kind !== 'assistant' || it.text.trim()))
+  const lastAssistantByTurn = new Map<string, string>()
+  for (const item of visible) {
+    if (item.kind === 'assistant') lastAssistantByTurn.set(item.turnId, item.id)
+  }
+  const latestTurnItem = [...items].reverse().find((item) => 'turnId' in item && item.turnId !== undefined)
+  const activeTurnId = streaming && latestTurnItem && 'turnId' in latestTurnItem ? latestTurnItem.turnId : undefined
   return (
     <ScrollArea className={cn('h-full w-full', className)} viewportRef={viewportRef} onScrollCapture={onScroll}>
-      <div className="flex min-h-full flex-col gap-4 px-4 pb-2 pt-4" data-testid="message-list">
+      <div
+        className={cn('flex min-h-full flex-col gap-4 px-4 pb-2 pt-4', contentClassName)}
+        data-testid="message-list"
+        style={bottomInset ? { paddingBottom: bottomInset } : undefined}
+      >
         {visible.map((item) => (
           <ItemView
             key={item.id}
             item={item}
+            showAssistantActions={
+              item.kind === 'assistant' &&
+              item.turnId !== activeTurnId &&
+              lastAssistantByTurn.get(item.turnId) === item.id
+            }
             pendingApprovals={pendingApprovals}
             modelLabel={modelLabel}
             assistantBadge={assistantBadge}
             assistantExtraActions={assistantExtraActions}
             onResolveApproval={onResolveApproval}
             onEdit={onEdit}
-            onResend={onResend}
-            onRegenerate={regenerate}
+            onResend={streaming ? undefined : onResend}
+            onRegenerate={streaming ? undefined : regenerate}
             onFeedback={onFeedback}
             onOpenArtifact={onOpenArtifact}
             onViewSummary={onViewSummary}
             onErrorAction={handleErrorAction}
           />
         ))}
-        {streaming ? <StreamingIndicator since={turnStartedAt} onStop={onStop} awaitingApproval={pendingApprovals.length > 0} /> : null}
-        {!streaming && suggestions.length > 0 && onSuggestion ? <Suggestions items={suggestions} onPick={onSuggestion} className="justify-start" /> : null}
+        {streaming ? <StreamingIndicator since={turnStartedAt} awaitingApproval={pendingApprovals.length > 0} /> : null}
+        {!streaming && suggestions.length > 0 && onSuggestion ? (
+          <Suggestions items={suggestions} onPick={onSuggestion} className="justify-start" />
+        ) : null}
       </div>
     </ScrollArea>
   )
@@ -179,6 +232,7 @@ export function MessageList({
 
 interface ItemViewProps {
   item: ThreadItem
+  showAssistantActions: boolean
   pendingApprovals: ApprovalRequest[]
   modelLabel?: string
   assistantBadge?: ReactNode
@@ -193,12 +247,38 @@ interface ItemViewProps {
   onErrorAction: (action: ErrorAction, item: ErrorItem) => void
 }
 
-function ItemView({ item, pendingApprovals, modelLabel, assistantBadge, assistantExtraActions, onResolveApproval, onEdit, onResend, onRegenerate, onFeedback, onOpenArtifact, onViewSummary, onErrorAction }: ItemViewProps) {
+function ItemView({
+  item,
+  showAssistantActions,
+  pendingApprovals,
+  modelLabel,
+  assistantBadge,
+  assistantExtraActions,
+  onResolveApproval,
+  onEdit,
+  onResend,
+  onRegenerate,
+  onFeedback,
+  onOpenArtifact,
+  onViewSummary,
+  onErrorAction,
+}: ItemViewProps) {
+  const t = useT()
   switch (item.kind) {
     case 'user':
       return <UserMessage item={item} onEdit={onEdit} onResend={onResend} />
     case 'assistant':
-      return <AssistantMessage item={item} modelLabel={modelLabel} badge={assistantBadge} onRegenerate={onRegenerate} onFeedback={onFeedback} extraActions={assistantExtraActions?.(item)} />
+      return (
+        <AssistantMessage
+          item={item}
+          showActions={showAssistantActions}
+          modelLabel={modelLabel}
+          badge={assistantBadge}
+          onRegenerate={onRegenerate}
+          onFeedback={onFeedback}
+          extraActions={assistantExtraActions?.(item)}
+        />
+      )
     case 'tools':
       return <ToolCallGroup item={item} pendingApprovals={pendingApprovals} onResolveApproval={onResolveApproval} />
     case 'artifact':
@@ -208,7 +288,13 @@ function ItemView({ item, pendingApprovals, modelLabel, assistantBadge, assistan
     case 'compaction':
       return <CompactionNotice item={item} onViewSummary={onViewSummary} />
     case 'error':
-      return <ErrorCard item={item} onAction={onErrorAction} onDismiss={(it) => onErrorAction({ label: '关闭', action: 'dismiss' }, it)} />
+      return (
+        <ErrorCard
+          item={item}
+          onAction={onErrorAction}
+          onDismiss={(it) => onErrorAction({ label: t('common.close'), action: 'dismiss' }, it)}
+        />
+      )
     case 'aborted':
       return <AbortedNotice item={item} />
   }

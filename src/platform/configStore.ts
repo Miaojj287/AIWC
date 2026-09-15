@@ -1,11 +1,13 @@
 /**
  * App config store (zustand). Hydrated once from config:get; `set(patch)` applies the patch
  * optimistically, pushes it through config:set and reconciles with the returned config. The theme
- * is applied to <html data-theme> immediately so toggles feel instant (DESIGN-SPEC §2 常规).
+ * is applied to <html data-theme> immediately so toggles feel instant (DESIGN-SPEC §2 常规); the UI language
+ * (`general.language`) is pushed into src/i18n the same way, including rollback on a failed save.
  */
 import { create } from 'zustand'
 import type { AppConfig, ConfigPatch } from '@aiwc/protocol'
-import { applyPalette } from './appearance'
+import { setLanguage } from '@/i18n'
+import { applyPalette, applyTransparency } from './appearance'
 import { getBridge } from './bridge'
 
 export type ResolvedTheme = 'dark' | 'light'
@@ -44,12 +46,17 @@ export function resolveTheme(theme: AppConfig['general']['theme']): ResolvedThem
 
 let systemListener: (() => void) | undefined
 
-/** Stamp the resolved theme on <html>; follows the OS when theme === 'system'. */
-export function applyTheme(theme: AppConfig['general']['theme'], appearance?: AppConfig['general']['appearance']): ResolvedTheme {
+/** Stamp the resolved theme (and the 透明效果 flag) on <html>; follows the OS when theme === 'system'. */
+export function applyTheme(
+  theme: AppConfig['general']['theme'],
+  appearance?: AppConfig['general']['appearance'],
+  transparency?: boolean,
+): ResolvedTheme {
   if (typeof document === 'undefined') return resolveTheme(theme)
   const resolved = resolveTheme(theme)
   document.documentElement.dataset.theme = resolved
   applyPalette(resolved, appearance)
+  if (transparency !== undefined) applyTransparency(transparency)
   systemListener?.()
   systemListener = undefined
   if (theme === 'system' && typeof matchMedia === 'function') {
@@ -82,7 +89,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     hydrating = getBridge()
       .then((b) => b.invoke('config:get', undefined))
       .then((config) => {
-        applyTheme(config.general.theme, config.general.appearance)
+        applyTheme(config.general.theme, config.general.appearance, config.general.transparency)
+        setLanguage(config.general.language)
         set({ config, hydrated: true, error: undefined })
         return config
       })
@@ -100,18 +108,23 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const previous = get().config
     if (previous) {
       const optimistic = mergePatch(previous, patch)
-      if (patch.general) applyTheme(optimistic.general.theme, optimistic.general.appearance)
+      if (patch.general) {
+        applyTheme(optimistic.general.theme, optimistic.general.appearance, optimistic.general.transparency)
+        setLanguage(optimistic.general.language)
+      }
       set({ config: optimistic })
     }
     try {
       const bridge = await getBridge()
       const confirmed = await bridge.invoke('config:set', patch)
-      applyTheme(confirmed.general.theme, confirmed.general.appearance)
+      applyTheme(confirmed.general.theme, confirmed.general.appearance, confirmed.general.transparency)
+      setLanguage(confirmed.general.language)
       set({ config: confirmed, hydrated: true, error: undefined })
       return confirmed
     } catch (e) {
       if (previous) {
-        applyTheme(previous.general.theme, previous.general.appearance)
+        applyTheme(previous.general.theme, previous.general.appearance, previous.general.transparency)
+        setLanguage(previous.general.language)
         set({ config: previous })
       }
       throw e

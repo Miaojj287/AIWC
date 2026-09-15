@@ -20,7 +20,8 @@ export const DEFAULT_TOOL_OUTPUT_CHARS = 16_000
  * Usage breakdown (ARCHITECTURE §5.6): fragments whose kind starts with 'memory' or 'relationship' are memory
  * tokens; every other fragment (mentions, observed context, environment…) is a reference.
  */
-export const isMemoryFragmentKind = (kind: string): boolean => kind.startsWith('memory') || kind.startsWith('relationship')
+export const isMemoryFragmentKind = (kind: string): boolean =>
+  kind.startsWith('memory') || kind.startsWith('relationship')
 
 /**
  * Bounded stand-in for an image tool output. Raw base64 never reaches history (ARCHITECTURE §5.4): the
@@ -56,7 +57,9 @@ export function isImagePlaceholder(value: JsonValue | undefined): value is Image
 }
 
 /** A tool that returned `{ type: 'image', mediaType, data }` as JSON is treated like a native image output. */
-const isRawImageJson = (value: JsonValue): value is JsonValue & { type: 'image'; mediaType: string; data: string; ref?: string } => {
+const isRawImageJson = (
+  value: JsonValue,
+): value is JsonValue & { type: 'image'; mediaType: string; data: string; ref?: string } => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const v = value as Record<string, unknown>
   return v.type === 'image' && typeof v.mediaType === 'string' && typeof v.data === 'string'
@@ -66,12 +69,20 @@ const isRawImageJson = (value: JsonValue): value is JsonValue & { type: 'image';
 export function boundToolOutput(output: ToolOutputContent): ToolOutputContent {
   if (output.type === 'image') return { type: 'json', value: imagePlaceholder(output.mediaType, output.data) }
   if (output.type === 'json' && isRawImageJson(output.value)) {
-    return { type: 'json', value: imagePlaceholder(output.value.mediaType, output.value.data, typeof output.value.ref === 'string' ? output.value.ref : undefined) }
+    return {
+      type: 'json',
+      value: imagePlaceholder(
+        output.value.mediaType,
+        output.value.data,
+        typeof output.value.ref === 'string' ? output.value.ref : undefined,
+      ),
+    }
   }
   return output
 }
 
-export const renderImagePlaceholder = (p: ImagePlaceholder): string => `[图片结果 ${p.mediaType}，${p.bytes} 字节${p.ref ? `，${p.ref}` : ''}]`
+export const renderImagePlaceholder = (p: ImagePlaceholder): string =>
+  `[图片结果 ${p.mediaType}，${p.bytes} 字节${p.ref ? `，${p.ref}` : ''}]`
 
 export interface ContextManagerOptions {
   maxToolOutputChars?: number

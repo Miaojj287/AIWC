@@ -2,13 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, promises as fsp, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { asItemId, asThreadId, asTurnId, newStepId, type HistoryItem, type ThreadSettings } from '@aiwc/protocol'
+import { ContextManager } from '../runtime/context/manager'
 import { createRolloutStore, type RolloutStoreExt } from './rollout'
 
 const settings: ThreadSettings = { permissionMode: 'ask', profile: 'desktop-chat', allowAlways: [] }
 const origin = { channel: 'desktop' as const }
 let root: string
 let store: RolloutStoreExt
+let warnings: Array<{ message: string; meta: unknown }>
 let t = 1000
 
 const user = (id: string, text: string): HistoryItem => ({
@@ -39,8 +42,23 @@ const summary = (id: string, through: string): HistoryItem => ({
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'aiwc-rollout-'))
-  store = createRolloutStore({ dir: join(root, 'rollouts'), indexDbPath: join(root, 'index.db') })
+  warnings = []
+  store = createRolloutStore({
+    dir: join(root, 'rollouts'),
+    indexDbPath: join(root, 'index.db'),
+    logger: (_level, message, meta) => warnings.push({ message, meta }),
+  })
 })
+
+/** Writes straight into a thread's index row, the way a damaged or hand-edited index.db would look. */
+function corruptIndexColumn(threadId: string, column: 'origin_json' | 'settings_json', value: string): void {
+  const db = new DatabaseSync(join(root, 'index.db'))
+  try {
+    db.prepare(`UPDATE threads SET ${column} = ? WHERE thread_id = ?`).run(value, threadId)
+  } finally {
+    db.close()
+  }
+}
 afterEach(async () => {
   await store.close()
   rmSync(root, { recursive: true, force: true })
@@ -61,7 +79,8 @@ describe('createRolloutStore', () => {
     const id = asThreadId('thr_b')
     await store.create({ threadId: id, origin, settings })
     const writes = []
-    for (let i = 0; i < 20; i++) writes.push(store.append(id, [{ ts: i, type: 'item', item: user(`u${i}`, `消息 ${i}`) }]))
+    for (let i = 0; i < 20; i++)
+      writes.push(store.append(id, [{ ts: i, type: 'item', item: user(`u${i}`, `消息 ${i}`) }]))
     void store.append(id, [{ ts: 99, type: 'settings', settings: { ...settings, permissionMode: 'bypass' } }])
     await store.flush(id)
     await Promise.all(writes)
@@ -158,6 +177,80 @@ describe('createRolloutStore', () => {
     await fsp.appendFile(store.pathFor(id), '{"ts":2,"type":"item","item":{"type":"user_mess')
     const state = await store.resume(id)
     expect(state?.items.map((i) => i.id)).toEqual(['u1'])
+    expect(state?.skippedLines).toBe(1)
+  })
+
+  it('starts the next append on a fresh line when a crash left the last line without its newline', async () => {
+    const id = asThreadId('thr_torn_tail')
+    await store.create({ threadId: id, origin, settings })
+    await store.append(id, [{ ts: 1, type: 'item', item: user('u1', 'ok') }])
+    await store.close()
+    // The previous process died mid-write: a half line with no trailing newline.
+    await fsp.appendFile(join(root, 'rollouts', `${id}.jsonl`), '{"ts":2,"type":"item","item":{"type":"user_mess')
+    store = createRolloutStore({ dir: join(root, 'rollouts'), indexDbPath: join(root, 'index.db') })
+    await store.append(id, [{ ts: 3, type: 'item', item: user('u2', 'after the crash') }])
+    const state = await store.resume(id)
+    expect(state?.items.map((i) => i.id)).toEqual(['u1', 'u2'])
+    expect(state?.skippedLines).toBe(1)
+  })
+
+  it('skips JSON lines of the wrong shape and torn lines, counts them, and warns without their content', async () => {
+    const id = asThreadId('thr_skew')
+    const chatText = '只在对话里出现的原文'
+    await store.create({ threadId: id, origin, settings })
+    await store.append(id, [{ ts: 1, type: 'item', item: user('u1', '第一条') }])
+    const damaged = [
+      { ts: 2, type: 'item' },
+      { ts: 3, type: 'item', item: { type: 'user_message', id: 'u_old', text: chatText } },
+      { ts: 4, type: 'settings', settings: { profile: 'root', note: chatText } },
+      { ts: 5, type: 'line_from_a_newer_build', text: chatText },
+    ].map((line) => JSON.stringify(line))
+    const torn = `{"ts":6,"type":"item","item":{"type":"user_message","content":[{"type":"text","text":"${chatText}`
+    await fsp.appendFile(store.pathFor(id), `${[...damaged, torn].join('\n')}\n`)
+    await store.append(id, [{ ts: 7, type: 'item', item: user('u2', '第二条') }])
+
+    const state = await store.resume(id)
+    expect(state?.items.map((i) => i.id)).toEqual(['u1', 'u2'])
+    expect(state?.settings).toEqual(settings)
+    expect(state?.skippedLines).toBe(5)
+    expect(() => new ContextManager(state?.items).forPrompt()).not.toThrow()
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.meta).toMatchObject({ threadId: id, skippedLines: 5 })
+    expect(JSON.stringify(warnings)).not.toContain(chatText)
+  })
+
+  it('an index row whose JSON columns no longer fit is listed with fallbacks and never overrides the rollout file', async () => {
+    const id = asThreadId('thr_bot')
+    const botOrigin = { channel: 'wechat-ilink' as const, chatId: 'wxid_peer' }
+    const botSettings: ThreadSettings = { permissionMode: 'bypass', profile: 'wechat-bot', allowAlways: [] }
+    await store.create({ threadId: id, origin: botOrigin, settings: botSettings, title: '机器人' })
+    await store.append(id, [{ ts: 1, type: 'item', item: user('u1', '你好') }])
+    await store.list()
+    corruptIndexColumn(id, 'settings_json', JSON.stringify({ profile: 'root' }))
+    corruptIndexColumn(id, 'origin_json', '{"channel":')
+
+    // listing survives both the wrong shape and malformed JSON, with or without a channel filter
+    expect((await store.list()).map((r) => [r.threadId, r.settings.profile, r.origin.channel])).toEqual([
+      [id, 'desktop-chat', 'desktop'],
+    ])
+    expect(await store.list({ channel: 'wechat-ilink' })).toEqual([])
+    expect(await store.list({ excludeProfiles: ['subagent'] })).toHaveLength(1)
+
+    // the rollout file stays the source of truth: a damaged row cannot widen the bot's profile
+    const state = await store.resume(id)
+    expect(state?.settings).toEqual(botSettings)
+    expect(state?.origin).toEqual(botOrigin)
+    expect(warnings.map((w) => w.meta)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ threadId: id, column: 'settings_json' }),
+        expect.objectContaining({ threadId: id, column: 'origin_json' }),
+      ]),
+    )
+
+    // a rewrite heals the row from the file instead of persisting the fallback origin
+    await store.rewrite(id, { items: [], settings: botSettings })
+    expect((await store.resume(id))?.origin).toEqual(botOrigin)
+    expect((await store.list({ channel: 'wechat-ilink' })).map((r) => r.threadId)).toEqual([id])
   })
 
   it('resume of unknown thread → undefined', async () => {
@@ -166,7 +259,12 @@ describe('createRolloutStore', () => {
 
   it('list: ordering, query (title / fts), channel filter, archived, limit', async () => {
     await store.create({ threadId: asThreadId('thr_1'), origin, settings, title: '周报' })
-    await store.create({ threadId: asThreadId('thr_2'), origin: { channel: 'wechat-ilink', chatId: 'x' }, settings, title: '机器人' })
+    await store.create({
+      threadId: asThreadId('thr_2'),
+      origin: { channel: 'wechat-ilink', chatId: 'x' },
+      settings,
+      title: '机器人',
+    })
     await store.create({ threadId: asThreadId('thr_3'), origin, settings, title: '旧的' })
     await store.append(asThreadId('thr_1'), [{ ts: 1, type: 'item', item: user('u1', '帮我总结一下项目进度') }])
     await store.updateMeta(asThreadId('thr_3'), { pinned: true })
@@ -180,6 +278,18 @@ describe('createRolloutStore', () => {
     expect(list.map((r) => r.threadId)).toEqual(['thr_3', 'thr_1'])
     expect((await store.list({ includeArchived: true })).find((r) => r.threadId === 'thr_2')?.title).toBe('归档了')
     expect(await store.list({ limit: 1 })).toHaveLength(1)
+  })
+
+  it('list: excludeProfiles leaves those threads out before the limit applies', async () => {
+    const child: ThreadSettings = { ...settings, profile: 'subagent' }
+    await store.create({ threadId: asThreadId('thr_conv'), origin, settings, title: '对话' })
+    await store.create({ threadId: asThreadId('thr_child'), origin, settings: child, title: '子任务' })
+    await store.updateMeta(asThreadId('thr_child'), { pinned: true })
+    expect((await store.list({ limit: 1 })).map((r) => r.threadId)).toEqual(['thr_child'])
+    expect((await store.list({ limit: 1, excludeProfiles: ['subagent'] })).map((r) => r.threadId)).toEqual(['thr_conv'])
+    expect(
+      (await store.list({ channel: 'desktop', excludeProfiles: ['subagent', 'persona'] })).map((r) => r.threadId),
+    ).toEqual(['thr_conv'])
   })
 
   it('updateMeta(settings) appends a settings line so resume sees it', async () => {
@@ -227,7 +337,9 @@ describe('createRolloutStore', () => {
   })
 
   it('rejects unsafe thread ids', async () => {
-    await expect(store.create({ threadId: asThreadId('../evil'), origin, settings })).rejects.toThrow(/invalid thread id/)
+    await expect(store.create({ threadId: asThreadId('../evil'), origin, settings })).rejects.toThrow(
+      /invalid thread id/,
+    )
   })
 })
 
@@ -251,10 +363,18 @@ describe('rewrite', () => {
     // rollback: drop u3, change settings, keep the compaction checkpoint, add world state
     const live = [summary('s1', 'a1'), user('u2', '第二条消息'), assistant('a2', '第二条回复')]
     const newSettings: ThreadSettings = { ...settings, permissionMode: 'bypass' }
-    await store.rewrite(id, { items: live, settings: newSettings, lastCompactedThroughId: asItemId('a1'), worldState: { permissionMode: 'bypass' } })
+    await store.rewrite(id, {
+      items: live,
+      settings: newSettings,
+      lastCompactedThroughId: asItemId('a1'),
+      worldState: { permissionMode: 'bypass' },
+    })
 
     const raw = await fsp.readFile(store.pathFor(id), 'utf8')
-    const lines = raw.trim().split('\n').map((l) => JSON.parse(l) as { type: string; ts: number; title?: string })
+    const lines = raw
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { type: string; ts: number; title?: string })
     expect(lines.map((l) => l.type)).toEqual(['thread_meta', 'compacted', 'item', 'item', 'item', 'world_state'])
     expect(lines[0]).toMatchObject({ ts: createdAt, title: '原标题', threadId: 'thr_rw', settings: newSettings })
     expect((await fsp.readdir(join(root, 'rollouts'))).filter((f) => f.endsWith('.tmp'))).toEqual([])
@@ -267,7 +387,15 @@ describe('rewrite', () => {
     expect(state?.worldState).toEqual({ permissionMode: 'bypass' })
 
     const [rec] = await store.list()
-    expect(rec).toMatchObject({ threadId: 'thr_rw', title: '原标题', pinned: true, archived: false, createdAt, itemCount: 3, settings: newSettings })
+    expect(rec).toMatchObject({
+      threadId: 'thr_rw',
+      title: '原标题',
+      pinned: true,
+      archived: false,
+      createdAt,
+      itemCount: 3,
+      settings: newSettings,
+    })
     expect((await store.search('将被回滚')).length).toBe(0)
     expect((await store.search('旧的第一条')).length).toBe(0)
     expect((await store.search('第二条回复')).map((h) => h.itemId)).toEqual(['a2'])

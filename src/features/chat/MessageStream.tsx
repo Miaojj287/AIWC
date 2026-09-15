@@ -3,10 +3,20 @@
  * load when the top comes into view, newer pages after a jump when the bottom does; `shift` keeps the
  * viewport anchored while pages are prepended. Short conversations sit at the bottom (mt-auto).
  */
-import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import type { WxMessage } from '@aiwc/protocol'
 import { EmptyState, Spinner, cn } from '@/kit'
+import { useT } from '@/i18n'
 import { DayPill, MessageRow, type MessageActions } from './MessageRow'
 import { rowIndexOfMessage, type StreamRow } from './streamModel'
 import type { StreamChange } from './useMessages'
@@ -44,7 +54,10 @@ export interface MessageStreamProps extends MessageActions {
   filtered: boolean
 }
 
-const BottomAligned = forwardRef<HTMLDivElement, { style: CSSProperties; children: ReactNode }>(function BottomAligned({ style, children }, ref) {
+const BottomAligned = forwardRef<HTMLDivElement, { style: CSSProperties; children: ReactNode }>(function BottomAligned(
+  { style, children },
+  ref,
+) {
   return (
     <div ref={ref} style={style} className="mt-auto w-full shrink-0">
       {children}
@@ -53,7 +66,34 @@ const BottomAligned = forwardRef<HTMLDivElement, { style: CSSProperties; childre
 })
 
 export function MessageStream(props: MessageStreamProps) {
-  const { rows, loading, error, hasOlder, loadingOlder, hasNewer, loadingNewer, lastChange, windowKey, focusId, focusNonce, onFocused, onLoadOlder, onLoadNewer, onRetry, isGroup, selectMode, selectedIds, highlight, selfAvatar, senderAvatars, peerAvatar, mac, filtered, ...actions } = props
+  const {
+    rows,
+    loading,
+    error,
+    hasOlder,
+    loadingOlder,
+    hasNewer,
+    loadingNewer,
+    lastChange,
+    windowKey,
+    focusId,
+    focusNonce,
+    onFocused,
+    onLoadOlder,
+    onLoadNewer,
+    onRetry,
+    isGroup,
+    selectMode,
+    selectedIds,
+    highlight,
+    selfAvatar,
+    senderAvatars,
+    peerAvatar,
+    mac,
+    filtered,
+    ...actions
+  } = props
+  const t = useT()
   const handle = useRef<VirtualizerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -118,14 +158,19 @@ export function MessageStream(props: MessageStreamProps) {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <EmptyState variant="loading" title="正在读取消息…" description="从本地索引加载最近的聊天记录" />
+        <EmptyState variant="loading" title={t('chat.stream.loading')} />
       </div>
     )
   }
   if (error) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <EmptyState variant="error" title="消息加载失败" description={error} action={{ label: '重试', onClick: onRetry }} />
+        <EmptyState
+          variant="error"
+          title={t('chat.stream.loadFailed')}
+          description={error}
+          action={{ label: t('common.retry'), onClick: onRetry }}
+        />
       </div>
     )
   }
@@ -133,17 +178,34 @@ export function MessageStream(props: MessageStreamProps) {
     return (
       <div className="flex flex-1 items-center justify-center">
         {filtered ? (
-          <EmptyState variant="no-results" title="没有符合筛选条件的消息" description="换一个日期范围或发送者试试" />
+          <EmptyState
+            variant="no-results"
+            title={t('chat.stream.noMatches')}
+            description={t('chat.stream.noMatchesHint')}
+          />
         ) : (
-          <EmptyState title="还没有索引到消息" description="同步完成后，这里会显示这个会话的聊天记录" />
+          <EmptyState title={t('chat.stream.empty')} description={t('chat.stream.emptyHint')} />
         )}
       </div>
     )
   }
 
   return (
-    <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain py-2" role="log" aria-label="消息流">
-      <Virtualizer ref={handle} data={rows} shift={lastChange === 'prepend'} onScroll={onScroll} as={BottomAligned} bufferSize={400} scrollRef={scrollRef}>
+    <div
+      ref={scrollRef}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain py-2"
+      role="log"
+      aria-label={t('chat.stream.label')}
+    >
+      <Virtualizer
+        ref={handle}
+        data={rows}
+        shift={lastChange === 'prepend'}
+        onScroll={onScroll}
+        as={BottomAligned}
+        bufferSize={400}
+        scrollRef={scrollRef}
+      >
         {(row, index) => {
           if (row.kind === 'day') {
             return (
@@ -181,14 +243,22 @@ export function MessageStream(props: MessageStreamProps) {
 }
 
 function continues(prev: WxMessage, next: WxMessage): boolean {
-  return prev.senderId === next.senderId && prev.kind !== 'system' && prev.kind !== 'revoke' && next.kind !== 'system' && next.kind !== 'revoke' && next.createdAt - prev.createdAt < CONTINUE_GAP_MS
+  return (
+    prev.senderId === next.senderId &&
+    prev.kind !== 'system' &&
+    prev.kind !== 'revoke' &&
+    next.kind !== 'system' &&
+    next.kind !== 'revoke' &&
+    next.createdAt - prev.createdAt < CONTINUE_GAP_MS
+  )
 }
 
 function PagingEdge({ visible, loading, bottom = false }: { visible: boolean; loading: boolean; bottom?: boolean }) {
+  const t = useT()
   if (!visible) return null
   return (
     <div className={cn('flex h-8 items-center justify-center text-micro text-fg-3', bottom ? 'mt-1' : 'mb-1')}>
-      {loading ? <Spinner size={13} /> : bottom ? '向下滚动加载更新的消息' : '向上滚动加载更早的消息'}
+      {loading ? <Spinner size={13} /> : bottom ? t('chat.stream.loadNewer') : t('chat.stream.loadOlder')}
     </div>
   )
 }

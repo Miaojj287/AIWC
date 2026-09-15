@@ -51,7 +51,8 @@ export interface ThreadInit {
   worldState?: ResumeState['worldState']
 }
 
-const TITLE_PROMPT = '根据下面这段对话，给出一个不超过 12 个字的中文标题，概括用户的主要意图。只输出标题本身，不要标点、引号或解释。'
+const TITLE_PROMPT =
+  '根据下面这段对话，给出一个不超过 12 个字的中文标题，概括用户的主要意图。只输出标题本身，不要标点、引号或解释。'
 
 export class Thread {
   readonly id: ThreadId
@@ -179,7 +180,11 @@ export class Thread {
   }
 
   private emitRolloutError(err: unknown): void {
-    const error = { code: 'rollout_write_failed', message: `对话记录写入失败：${err instanceof Error ? err.message : String(err)}`, retryable: true }
+    const error = {
+      code: 'rollout_write_failed',
+      message: `对话记录写入失败：${err instanceof Error ? err.message : String(err)}`,
+      retryable: true,
+    }
     this.deps.emit({ type: 'error', threadId: this.id, error, actions: errorActions(error) })
   }
 
@@ -200,13 +205,24 @@ export class Thread {
     const task = rewrite
       ? () => rewrite(this.id, { items, settings, lastCompactedThroughId, worldState })
       : async (): Promise<void> => {
-          const existing = (await rollout.list({ includeArchived: true, limit: 1000 })).find((r) => r.threadId === this.id)
+          const existing = (await rollout.list({ includeArchived: true, limit: 1000 })).find(
+            (r) => r.threadId === this.id,
+          )
           await rollout.remove(this.id)
-          await rollout.create({ threadId: this.id, origin: this.origin, settings, title: existing?.title || settings.title })
+          await rollout.create({
+            threadId: this.id,
+            origin: this.origin,
+            settings,
+            title: existing?.title || settings.title,
+          })
           if (existing && (existing.pinned || existing.archived)) {
             await rollout.updateMeta(this.id, { pinned: existing.pinned, archived: existing.archived })
           }
-          if (items.length > 0) await rollout.append(this.id, items.map((item): RolloutLine => ({ ts: item.createdAt, type: 'item', item })))
+          if (items.length > 0)
+            await rollout.append(
+              this.id,
+              items.map((item): RolloutLine => ({ ts: item.createdAt, type: 'item', item })),
+            )
         }
     const run = this.writeQueue.then(task)
     this.writeQueue = run.then(
@@ -239,7 +255,13 @@ export class Thread {
       case 'approval.resolve': {
         // The router persists "总是允许" through onAllowAlways (it knows the tool name); here only the event.
         const ok = this.deps.services.approvals.resolve(op.approvalId, op.decision, this.id)
-        if (ok) this.deps.emit({ type: 'approval.resolved', threadId: this.id, approvalId: op.approvalId, decision: op.decision })
+        if (ok)
+          this.deps.emit({
+            type: 'approval.resolved',
+            threadId: this.id,
+            approvalId: op.approvalId,
+            decision: op.decision,
+          })
         return
       }
       case 'thread.settings':
@@ -264,7 +286,9 @@ export class Thread {
     this._settings = { ...this._settings, ...patch }
     this.persist({ ts: this.clock(), type: 'settings', settings: this._settings })
     if (!this.closed) {
-      void this.deps.services.rollout.updateMeta(this.id, { settings: this._settings }).catch((err) => this.deps.logger?.('warn', 'updateMeta failed', err))
+      void this.deps.services.rollout
+        .updateMeta(this.id, { settings: this._settings })
+        .catch((err) => this.deps.logger?.('warn', 'updateMeta failed', err))
     }
     this.deps.emit({ type: 'thread.settings', threadId: this.id, settings: this._settings })
   }
@@ -286,7 +310,15 @@ export class Thread {
       this.assertOpen()
     }
     if (!this._settings.title && !this.context.all().some((item) => item.type === 'user_message')) {
-      const title = input.content.map((part) => part.type === 'text' ? part.text : '').join(' ').trim().replace(/\s+/g, ' ').slice(0, 24) || input.mentions[0]?.label || '附件会话'
+      const title =
+        input.content
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join(' ')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 24) ||
+        input.mentions[0]?.label ||
+        '附件会话'
       await this.deps.services.rollout.updateMeta(this.id, { title })
       this.deps.emit({ type: 'thread.title', threadId: this.id, title })
     }
@@ -341,24 +373,45 @@ export class Thread {
 
   private async generateTitle(signal: AbortSignal): Promise<void> {
     try {
-      const model = await this.deps.services.models.resolveAuxiliary()
+      const model = await this.deps.services.models.resolveAuxiliary(this._settings.model)
       if (signal.aborted || this.closed) return
       const transcript = this.context
         .all()
         .filter((it) => it.type === 'user_message' || it.type === 'assistant_message')
         .slice(0, 6)
-        .map((it) => (it.type === 'user_message' ? `用户：${it.content.map((p) => (p.type === 'text' ? p.text : '')).join(' ')}` : `AI：${it.text}`))
+        .map((it) =>
+          it.type === 'user_message'
+            ? `用户：${it.content.map((p) => (p.type === 'text' ? p.text : '')).join(' ')}`
+            : `AI：${it.text}`,
+        )
         .join('\n')
         .slice(0, 4000)
       if (!transcript.trim()) return
-      const prompt: UserMessageItem = { type: 'user_message', id: newItemId(), turnId: newTurnId(), createdAt: this.clock(), content: [{ type: 'text', text: transcript }], mentions: [] }
+      const prompt: UserMessageItem = {
+        type: 'user_message',
+        id: newItemId(),
+        turnId: newTurnId(),
+        createdAt: this.clock(),
+        content: [{ type: 'text', text: transcript }],
+        mentions: [],
+      }
       let title = ''
-      for await (const part of model.sample({ system: TITLE_PROMPT, history: [prompt], tools: [], toolChoice: 'none', signal, maxOutputTokens: 40 })) {
+      for await (const part of model.sample({
+        system: TITLE_PROMPT,
+        history: [prompt],
+        tools: [],
+        toolChoice: 'none',
+        signal,
+        maxOutputTokens: 40,
+      })) {
         if (part.type === 'text.delta') title += part.delta
         if (part.type === 'error') return
         if (part.type === 'finish' && part.reason === 'aborted') return
       }
-      title = title.trim().replace(/^["'“”‘’「」]+|["'“”‘’「」。]+$/g, '').slice(0, 24)
+      title = title
+        .trim()
+        .replace(/^["'“”‘’「」]+|["'“”‘’「」。]+$/g, '')
+        .slice(0, 24)
       if (!title || this._settings.title || signal.aborted || this.closed) return
       this._settings = { ...this._settings, title }
       this.deps.emit({ type: 'thread.title', threadId: this.id, title })
@@ -377,19 +430,40 @@ export class Thread {
     return this.serialize(async () => {
       this.assertOpen()
       if (this.active) {
-        const error = { code: 'compaction_refused', message: '当前有正在运行的回合，等它结束后再手动压缩上下文', retryable: true }
+        const error = {
+          code: 'compaction_refused',
+          message: '当前有正在运行的回合，等它结束后再手动压缩上下文',
+          retryable: true,
+        }
         this.deps.emit({ type: 'error', threadId: this.id, error, actions: errorActions(error) })
         return
       }
       try {
         const model = await this.deps.services.models.resolve(this._settings.model)
         const summary = await compactContext(
-          { threadId: this.id, context: this.context, contextWindow: model.ref.contextWindow, record: this.record, persist: this.persist, emit: this.deps.emit },
-          { models: this.deps.services.models, hooks: this.deps.services.hooks, clock: this.clock, logger: this.deps.logger },
+          {
+            threadId: this.id,
+            context: this.context,
+            contextWindow: model.ref.contextWindow,
+            record: this.record,
+            persist: this.persist,
+            emit: this.deps.emit,
+            primaryModel: this._settings.model,
+          },
+          {
+            models: this.deps.services.models,
+            hooks: this.deps.services.hooks,
+            clock: this.clock,
+            logger: this.deps.logger,
+          },
         )
         if (summary) this.worldState.reset()
       } catch (err) {
-        const error = { code: 'compaction_failed', message: err instanceof Error ? err.message : String(err), retryable: true }
+        const error = {
+          code: 'compaction_failed',
+          message: err instanceof Error ? err.message : String(err),
+          retryable: true,
+        }
         this.deps.emit({ type: 'error', threadId: this.id, error, actions: errorActions(error) })
         return
       }

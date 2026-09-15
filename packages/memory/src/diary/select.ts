@@ -94,7 +94,11 @@ function inWindow(m: WxMessage, w: DiaryWindow): boolean {
   return m.createdAt >= w.start && m.createdAt < w.end
 }
 
-async function listCandidateSessions(substrate: SubstrateService, w: DiaryWindow, signal?: AbortSignal): Promise<WxSession[]> {
+async function listCandidateSessions(
+  substrate: SubstrateService,
+  w: DiaryWindow,
+  signal?: AbortSignal,
+): Promise<WxSession[]> {
   const out: WxSession[] = []
   for (let page = 0; page < MAX_SESSION_PAGES; page++) {
     if (signal?.aborted) break
@@ -112,7 +116,12 @@ async function listCandidateSessions(substrate: SubstrateService, w: DiaryWindow
 export async function collectSessionMaterials(
   substrate: SubstrateService,
   w: DiaryWindow,
-  opts: { maxSessions?: number; perSession?: number; signal?: AbortSignal; onProgress?: (done: number, total: number) => void } = {},
+  opts: {
+    maxSessions?: number
+    perSession?: number
+    signal?: AbortSignal
+    onProgress?: (done: number, total: number) => void
+  } = {},
 ): Promise<{ materials: SessionMaterial[]; totalMessages: number }> {
   const maxSessions = opts.maxSessions ?? DIARY_MAX_SESSIONS
   const perSession = opts.perSession ?? DIARY_MESSAGES_PER_SESSION
@@ -122,7 +131,12 @@ export async function collectSessionMaterials(
     4,
     async (session) => {
       if (opts.signal?.aborted) return undefined
-      const res = await substrate.listMessages({ sessionId: session.id, from: w.start, to: w.end - 1, limit: COUNT_PROBE_LIMIT })
+      const res = await substrate.listMessages({
+        sessionId: session.id,
+        from: w.start,
+        to: w.end - 1,
+        limit: COUNT_PROBE_LIMIT,
+      })
       const msgs = res.items.filter((m) => inWindow(m, w) && messageText(m) !== '').sort((a, b) => a.seq - b.seq)
       if (msgs.length === 0) return undefined
       return { session, all: msgs, count: msgs.length + (res.hasMore ? 1 : 0) }
@@ -133,7 +147,9 @@ export async function collectSessionMaterials(
     .filter((p): p is NonNullable<typeof p> => p !== undefined)
     .sort((a, b) => b.count - a.count || (b.session.lastMessageAt ?? 0) - (a.session.lastMessageAt ?? 0))
   const totalMessages = ranked.reduce((n, p) => n + p.count, 0)
-  const materials = ranked.slice(0, maxSessions).map((p) => ({ session: p.session, messages: sampleEvenly(p.all, perSession), count: p.count }))
+  const materials = ranked
+    .slice(0, maxSessions)
+    .map((p) => ({ session: p.session, messages: sampleEvenly(p.all, perSession), count: p.count }))
   return { materials, totalMessages }
 }
 
@@ -146,7 +162,10 @@ export function senderLabel(m: WxMessage, session: WxSession): string {
 /** Bounded transcript lines for one session. */
 export function renderMaterial(mat: SessionMaterial, textCap = DIARY_TEXT_CAP): string {
   return mat.messages
-    .map((m) => `${formatClock(m.createdAt)} ${senderLabel(m, mat.session)}: ${truncateChars(messageText(m).replace(/\s+/g, ' '), textCap)}`)
+    .map(
+      (m) =>
+        `${formatClock(m.createdAt)} ${senderLabel(m, mat.session)}: ${truncateChars(messageText(m).replace(/\s+/g, ' '), textCap)}`,
+    )
     .join('\n')
 }
 

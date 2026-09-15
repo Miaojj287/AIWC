@@ -22,7 +22,3 @@ export function register(): void {
     if (active?.kind === 'chat') useChatUiStore.getState().openSearch(active.id)
   })
 }
-
-export { ChatTab } from './ChatTab'
-export { useChatUiStore } from './chatStore'
-export { DEFAULT_FILTERS, parseFilters, resolveRange, computeExportRange, type ChatFilters, type DateRange, type ExportRange } from './filters'

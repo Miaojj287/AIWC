@@ -28,7 +28,11 @@ import { createReplyGate, type ReplyGate } from '../gate/replyGate'
 import { createObservedBuffer, type ObservedBuffer } from '../observed/observedBuffer'
 import { createEmitter, errorMessage } from './emitter'
 
-export type InboundHandler = (event: MessageEvent, decision: ReplyDecision, sessionKey: SessionKey) => void | Promise<void>
+export type InboundHandler = (
+  event: MessageEvent,
+  decision: ReplyDecision,
+  sessionKey: SessionKey,
+) => void | Promise<void>
 
 export interface Gateway {
   registerAdapter(adapter: PlatformAdapter): void
@@ -85,7 +89,10 @@ export function createGateway(deps: GatewayDeps): Gateway {
   const now = deps.now ?? (() => Date.now())
   const events = createEmitter<GatewayEvent>((err) => log('warn', 'gateway listener threw', errorMessage(err)))
   const inbound = new Set<InboundHandler>()
-  const adapters = new Map<ChannelKind, { adapter: PlatformAdapter & AdapterExtras; detail?: string; unsubscribe: () => void }>()
+  const adapters = new Map<
+    ChannelKind,
+    { adapter: PlatformAdapter & AdapterExtras; detail?: string; unsubscribe: () => void }
+  >()
   const observed: ObservedBuffer = createObservedBuffer({ ...deps.observed, now })
   const gate = createReplyGate({})
   const isAllowed = deps.isAllowed ?? defaultIsAllowed
@@ -148,7 +155,8 @@ export function createGateway(deps: GatewayDeps): Gateway {
         events.emit({ type: 'adapter.state', channel: adapter.channel, state, detail })
       }),
     )
-    if (adapter.onQr) offs.push(adapter.onQr((qrDataUrl) => events.emit({ type: 'login.qr', channel: adapter.channel, qrDataUrl })))
+    if (adapter.onQr)
+      offs.push(adapter.onQr((qrDataUrl) => events.emit({ type: 'login.qr', channel: adapter.channel, qrDataUrl })))
     return () => offs.forEach((off) => off())
   }
 
@@ -196,7 +204,11 @@ export function createGateway(deps: GatewayDeps): Gateway {
       await requireAdapter(channel).disconnect()
     },
     status() {
-      return [...adapters.values()].map(({ adapter, detail }) => ({ channel: adapter.channel, state: adapter.state, detail }))
+      return [...adapters.values()].map(({ adapter, detail }) => ({
+        channel: adapter.channel,
+        state: adapter.state,
+        detail,
+      }))
     },
     onInbound(handler) {
       inbound.add(handler)

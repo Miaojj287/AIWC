@@ -8,8 +8,14 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { shell } from 'electron'
 import type { AppContext } from '../contracts'
-import { isTextMediaType, mediaTypeFor, resolveAllowedExisting, resolveAllowedWriteTarget } from '../security/pathAllowList'
+import {
+  isTextMediaType,
+  mediaTypeFor,
+  resolveAllowedExisting,
+  resolveAllowedWriteTarget,
+} from '../security/pathAllowList'
 import type { Handle, HostBridge } from './register'
+import { t } from '../i18n'
 
 const MAX_READ_BYTES = 32 * 1024 * 1024
 
@@ -17,8 +23,8 @@ export function registerFileIpc(ctx: AppContext, _host: HostBridge, handle: Hand
   handle('file:read', async ({ path }) => {
     const real = await resolveAllowedExisting(ctx.allowList, path)
     const st = await stat(real)
-    if (!st.isFile()) throw new Error('不是文件')
-    if (st.size > MAX_READ_BYTES) throw new Error('文件过大（超过 32 MB）')
+    if (!st.isFile()) throw new Error(t('main.files.notAFile'))
+    if (st.size > MAX_READ_BYTES) throw new Error(t('main.files.tooLarge', { mb: 32 }))
     const mediaType = mediaTypeFor(real)
     const buf = await readFile(real)
     return { content: isTextMediaType(mediaType) ? buf.toString('utf8') : buf.toString('base64'), mediaType }

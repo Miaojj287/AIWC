@@ -11,8 +11,10 @@ import type { LanguageModel } from 'ai'
 export const OLLAMA_DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1'
 
 export function providerBaseUrl(provider: ProviderConfig): string | undefined {
-  if (provider.kind === 'ollama') return `${(provider.baseUrl ?? OLLAMA_DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/v1$/, '')}/v1`
-  if (provider.kind === 'anthropic') return `${(provider.baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/, '')}/v1`
+  if (provider.kind === 'ollama')
+    return `${(provider.baseUrl ?? OLLAMA_DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/v1$/, '')}/v1`
+  if (provider.kind === 'anthropic')
+    return `${(provider.baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '').replace(/\/v1$/, '')}/v1`
   return provider.baseUrl?.replace(/\/+$/, '')
 }
 
@@ -30,9 +32,11 @@ export function createLanguageModel(provider: ProviderConfig, modelId: string, a
     case 'openai-compatible':
     case 'ollama': {
       if (!baseURL) throw new Error(`provider ${provider.id}: baseUrl is required for ${provider.kind}`)
-      return createOpenAICompatible({ name: provider.id, baseURL, apiKey: apiKey ?? (provider.kind === 'ollama' ? 'ollama' : undefined) }).chatModel(
-        modelId,
-      )
+      return createOpenAICompatible({
+        name: provider.id,
+        baseURL,
+        apiKey: apiKey ?? (provider.kind === 'ollama' ? 'ollama' : undefined),
+      }).chatModel(modelId)
     }
   }
 }

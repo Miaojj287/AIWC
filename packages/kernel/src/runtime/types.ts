@@ -58,7 +58,11 @@ export interface Kernel {
   listThreads(opts?: { query?: string; limit?: number; channel?: ChannelKind }): Promise<ThreadRecord[]>
   getThread(threadId: ThreadId): Promise<{ record: ThreadRecord; items: HistoryItem[] } | undefined>
   ensureThread(origin: ThreadOrigin, settings?: Partial<ThreadSettings>, threadId?: ThreadId): Promise<ThreadId>
-  runOnce(threadId: ThreadId, input: UserInput, opts?: { signal?: AbortSignal }): Promise<{ text: string; artifacts: ToolArtifact[] }>
+  runOnce(
+    threadId: ThreadId,
+    input: UserInput,
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ text: string; artifacts: ToolArtifact[] }>
   updateMeta(threadId: ThreadId, patch: { title?: string; pinned?: boolean; archived?: boolean }): Promise<void>
   removeThread(threadId: ThreadId): Promise<void>
   shutdown(): Promise<void>

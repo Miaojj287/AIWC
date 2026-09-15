@@ -7,7 +7,14 @@
  *   context  — thread origin / channel, @mentions of the current turn.
  *   volatile — date (to the day) and the context-usage line.
  */
-import { estimateTokens, type ContextFragment, type Mention, type ThreadId, type ThreadOrigin, type ThreadSettings } from '@aiwc/protocol'
+import {
+  estimateTokens,
+  type ContextFragment,
+  type Mention,
+  type ThreadId,
+  type ThreadOrigin,
+  type ThreadSettings,
+} from '@aiwc/protocol'
 import type { FragmentProvider, SkillIndex } from '../ports'
 import { renderFragment } from './context/fragments/base'
 import { dayString } from './context/fragments/environment'
@@ -56,7 +63,12 @@ const CHANNEL_LABEL: Record<string, string> = {
   observed: '观察流',
 }
 
-const MENTION_LABEL: Record<Mention['kind'], string> = { session: '会话', file: '文件', contact: '联系人', memory: '记忆' }
+const MENTION_LABEL: Record<Mention['kind'], string> = {
+  session: '会话',
+  file: '文件',
+  contact: '联系人',
+  memory: '记忆',
+}
 
 function renderMany(fragments: readonly ContextFragment[], onError?: (e: unknown) => void): string[] {
   const out: string[] = []
@@ -94,9 +106,13 @@ export class PromptBuilder {
       const job = this.computeStable(ctx).then(({ prompt, failed }) => {
         if (failed && attempt < STABLE_BUILD_MAX_ATTEMPTS) {
           if (this.stableCache === job) this.stableCache = undefined
-          this.deps.onError?.(new Error(`stable prompt degraded (attempt ${attempt}/${STABLE_BUILD_MAX_ATTEMPTS}); retrying next turn`))
+          this.deps.onError?.(
+            new Error(`stable prompt degraded (attempt ${attempt}/${STABLE_BUILD_MAX_ATTEMPTS}); retrying next turn`),
+          )
         } else if (failed) {
-          this.deps.onError?.(new Error(`stable prompt degraded after ${attempt} attempts; frozen without the failing provider`))
+          this.deps.onError?.(
+            new Error(`stable prompt degraded after ${attempt} attempts; frozen without the failing provider`),
+          )
         }
         return prompt
       })
@@ -105,7 +121,9 @@ export class PromptBuilder {
     return this.stableCache
   }
 
-  private async computeStable(ctx: Pick<BuildPromptInput, 'threadId' | 'origin' | 'settings'>): Promise<{ prompt: StablePrompt; failed: boolean }> {
+  private async computeStable(
+    ctx: Pick<BuildPromptInput, 'threadId' | 'origin' | 'settings'>,
+  ): Promise<{ prompt: StablePrompt; failed: boolean }> {
     const parts: string[] = [this.deps.stable.trim()]
     let failed = false
     if (this.deps.includeSkills !== false) {
@@ -119,7 +137,12 @@ export class PromptBuilder {
     for (const provider of this.deps.fragmentProviders) {
       if (provider.tier !== 'stable') continue
       try {
-        const fragments = await provider.provide({ threadId: ctx.threadId, origin: ctx.origin, settings: ctx.settings, userText: '' })
+        const fragments = await provider.provide({
+          threadId: ctx.threadId,
+          origin: ctx.origin,
+          settings: ctx.settings,
+          userText: '',
+        })
         parts.push(...renderMany(fragments, this.deps.onError))
       } catch (err) {
         failed = true
@@ -155,7 +178,9 @@ export class PromptBuilder {
     const lines: string[] = ['<volatile>', `日期：${dayString(input.date)}`]
     if (input.usage && input.usage.maxTokens > 0) {
       const pct = Math.min(100, Math.round((input.usage.usedTokens / input.usage.maxTokens) * 100))
-      lines.push(`上下文占用：${input.usage.usedTokens.toLocaleString('en-US')} / ${input.usage.maxTokens.toLocaleString('en-US')} tokens（${pct}%）`)
+      lines.push(
+        `上下文占用：${input.usage.usedTokens.toLocaleString('en-US')} / ${input.usage.maxTokens.toLocaleString('en-US')} tokens（${pct}%）`,
+      )
     }
     return lines.join('\n')
   }

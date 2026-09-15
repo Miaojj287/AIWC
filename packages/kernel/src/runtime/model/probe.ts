@@ -15,7 +15,11 @@ export interface TestModelInput {
 
 const PROBE_TOOL = tool({
   description: 'Connectivity probe. Call with ok=true.',
-  inputSchema: jsonSchema<{ ok: boolean }>({ type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }),
+  inputSchema: jsonSchema<{ ok: boolean }>({
+    type: 'object',
+    properties: { ok: { type: 'boolean' } },
+    required: ['ok'],
+  }),
 })
 
 export async function testModel(input: TestModelInput): Promise<ModelTestResult> {
@@ -87,8 +91,12 @@ export function modelsEndpoint(provider: ProviderConfig, apiKey?: string): ListE
 }
 
 type Row = Record<string, unknown>
-function record(value: unknown): Row { return value && typeof value === 'object' && !Array.isArray(value) ? value as Row : {} }
-function positive(value: unknown): number | undefined { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined }
+function record(value: unknown): Row {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Row) : {}
+}
+function positive(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
+}
 
 async function listRows(input: ListRemoteModelsInput): Promise<Row[]> {
   const endpoint = modelsEndpoint(input.provider, input.apiKey)
@@ -135,36 +143,65 @@ export async function listRemoteModels(input: ListRemoteModelsInput): Promise<st
 export async function discoverModels(input: ListRemoteModelsInput): Promise<ModelEntry[]> {
   const rows = await listRows(input)
   const result = new Map<string, ModelEntry>()
-  const created = (r: Row) => typeof r.created === 'number' ? r.created * 1000 : typeof r.created_at === 'string' ? Date.parse(r.created_at) || 0 : 0
+  const created = (r: Row) =>
+    typeof r.created === 'number'
+      ? r.created * 1000
+      : typeof r.created_at === 'string'
+        ? Date.parse(r.created_at) || 0
+        : 0
   rows.sort((a, b) => created(b) - created(a))
   for (const row of rows) {
     const modelId = rowId(row)
     if (!modelId) continue
-    if (Array.isArray(row.supportedGenerationMethods) && !row.supportedGenerationMethods.includes('generateContent')) continue
-    if (/(?:embedding|rerank|moderation|whisper|tts|transcrib|realtime|dall-e|sora|imagen|veo|image|audio|deep-research)/i.test(modelId)) continue
+    if (Array.isArray(row.supportedGenerationMethods) && !row.supportedGenerationMethods.includes('generateContent'))
+      continue
+    if (
+      /(?:embedding|rerank|moderation|whisper|tts|transcrib|realtime|dall-e|sora|imagen|veo|image|audio|deep-research)/i.test(
+        modelId,
+      )
+    )
+      continue
     if (input.provider.kind === 'openai' && !/^(?:gpt-|chatgpt-|o[134](?:-|$)|codex-|ft:)/.test(modelId)) continue
     const c = modelCapabilities(input.provider, { modelId })
     const api = input.provider.kind === 'anthropic' ? record(row.capabilities) : {}
     const effort = record(api.effort)
     const thinking = record(api.thinking)
     if (typeof effort.supported === 'boolean') {
-      c.reasoning = effort.supported ? (['low', 'medium', 'high', 'xhigh', 'max'] as const).filter(level => record(effort[level]).supported === true) : []
-      c.thinking = c.reasoning.length ? (record(record(thinking.types).adaptive).supported === true ? 'adaptive' : 'effort') : 'none'
+      c.reasoning = effort.supported
+        ? (['low', 'medium', 'high', 'xhigh', 'max'] as const).filter(
+            (level) => record(effort[level]).supported === true,
+          )
+        : []
+      c.thinking = c.reasoning.length
+        ? record(record(thinking.types).adaptive).supported === true
+          ? 'adaptive'
+          : 'effort'
+        : 'none'
       if (c.thinking === 'adaptive') c.temperature = false
       c.source = 'api'
     }
     if (record(record(thinking.types).enabled).supported === true && !c.reasoning.length) {
-      c.thinking = 'budget'; c.thinkingBudgetMin = 1024; c.thinkingBudgetMax = 32_000; c.source = 'api'
+      c.thinking = 'budget'
+      c.thinkingBudgetMin = 1024
+      c.thinkingBudgetMax = 32_000
+      c.source = 'api'
     }
     c.contextLimit = positive(row.inputTokenLimit ?? row.max_input_tokens ?? row.context_length) ?? c.contextLimit
-    c.outputLimit = positive(row.outputTokenLimit ?? row.max_tokens ?? record(row.top_provider).max_completion_tokens) ?? c.outputLimit
+    c.outputLimit =
+      positive(row.outputTokenLimit ?? row.max_tokens ?? record(row.top_provider).max_completion_tokens) ??
+      c.outputLimit
     if (positive(row.inputTokenLimit ?? row.max_input_tokens ?? row.context_length)) c.source = 'api'
     const label = row.display_name ?? row.displayName
     result.set(modelId, {
-      modelId, label: typeof label === 'string' && label ? label : modelId,
+      modelId,
+      label: typeof label === 'string' && label ? label : modelId,
       contextWindow: Math.min(c.contextLimit ?? 128_000, 128_000),
-      supportsTools: true, supportsVision: record(api.image_input).supported === true,
-      enabled: true, source: 'remote', available: true, capabilities: c,
+      supportsTools: true,
+      supportsVision: record(api.image_input).supported === true,
+      enabled: true,
+      source: 'remote',
+      available: true,
+      capabilities: c,
     })
   }
   return [...result.values()]

@@ -46,6 +46,10 @@ import type { RwLock } from './util/rwlock'
 
 export type AbortReason = TurnAbortedItem['reason']
 
+/** Extra steps a blocking Stop hook may add to one turn (e.g. to correct a citation that does not match its message). */
+export const MAX_STOP_CONTINUATIONS = 1
+export const STOP_HOOK_TOKEN_CAP = 2000
+
 export interface TurnDeps {
   threadId: ThreadId
   origin: ThreadOrigin
@@ -90,7 +94,8 @@ const sumUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
   reasoningTokens: (a.reasoningTokens ?? 0) + (b.reasoningTokens ?? 0) || undefined,
 })
 
-export const inputText = (input: UserInput): string => input.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
+export const inputText = (input: UserInput): string =>
+  input.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
 
 /** Ops arrive over IPC unvalidated; a malformed UserInput must not crash the turn. */
 const normalizeInput = (input: UserInput): UserInput => ({
@@ -141,7 +146,11 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     }
     await deps.flush().catch((flushErr) => {
       deps.logger?.('error', 'flush after crash failed', flushErr)
-      const error = { code: 'rollout_write_failed', message: `对话记录写入失败：${flushErr instanceof Error ? flushErr.message : String(flushErr)}`, retryable: true }
+      const error = {
+        code: 'rollout_write_failed',
+        message: `对话记录写入失败：${flushErr instanceof Error ? flushErr.message : String(flushErr)}`,
+        retryable: true,
+      }
       safeEmit({ type: 'error', threadId: deps.threadId, turnId, error, actions: errorActions(error) })
     })
     if (!terminal) {
@@ -194,7 +203,11 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         return true
       } catch (err) {
         deps.logger?.('error', 'rollout flush failed', err)
-        emitError({ code: 'rollout_write_failed', message: `对话记录写入失败：${err instanceof Error ? err.message : String(err)}`, retryable: true })
+        emitError({
+          code: 'rollout_write_failed',
+          message: `对话记录写入失败：${err instanceof Error ? err.message : String(err)}`,
+          retryable: true,
+        })
         return false
       }
     }
@@ -213,7 +226,14 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     const drainMailbox = (): void => {
       while (mailbox.length > 0) {
         const next = mailbox.shift()!
-        const item: UserMessageItem = { type: 'user_message', id: newItemId(), turnId, createdAt: clock(), content: next.content, mentions: next.mentions }
+        const item: UserMessageItem = {
+          type: 'user_message',
+          id: newItemId(),
+          turnId,
+          createdAt: clock(),
+          content: next.content,
+          mentions: next.mentions,
+        }
         deps.record([item])
         mentions.push(...next.mentions)
         emit({ type: 'item.user', threadId, turnId, itemId: item.id, content: item.content, mentions: item.mentions })
@@ -245,12 +265,25 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         onAllowAlways: deps.onAllowAlways,
       })
     const computeUsage = (systemTokens: number, router: ToolRouter, model: ModelClient): ContextUsage =>
-      deps.context.usage({ systemTokens, toolSpecTokens: estimateTokens(JSON.stringify(router.specs)), maxTokens: model.ref.contextWindow })
+      deps.context.usage({
+        systemTokens,
+        toolSpecTokens: estimateTokens(JSON.stringify(router.specs)),
+        maxTokens: model.ref.contextWindow,
+      })
     const maybeCompact = async (usage: ContextUsage, model: ModelClient): Promise<void> => {
       if (!shouldCompact(usage, deps.config.compactionThreshold)) return
       try {
         const summary = await compactContext(
-          { threadId, context: deps.context, contextWindow: model.ref.contextWindow, record: deps.record, persist: deps.persist, emit, signal: controller.signal },
+          {
+            threadId,
+            context: deps.context,
+            contextWindow: model.ref.contextWindow,
+            record: deps.record,
+            persist: deps.persist,
+            emit,
+            signal: controller.signal,
+            primaryModel: deps.settings().model,
+          },
           { models: services.models, hooks: services.hooks, clock, logger: deps.logger },
         )
         if (summary) deps.worldState.reset()
@@ -261,22 +294,29 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
           return
         }
         deps.logger?.('warn', 'compaction failed', err)
-        emitError({ code: 'compaction_failed', message: err instanceof Error ? err.message : String(err), retryable: true })
+        emitError({
+          code: 'compaction_failed',
+          message: err instanceof Error ? err.message : String(err),
+          retryable: true,
+        })
       }
     }
 
     // 1. UserPromptSubmit hook
     const firstText = inputText(mailbox[0]!)
     let hookContext: string | undefined
+    let blockedReason: string | undefined
     try {
       const hook = await services.hooks.run('UserPromptSubmit', { threadId, turnId, text: firstText })
-      if (hook.block) {
-        emitError({ code: 'hook_blocked', message: hook.block.reason, retryable: false })
-        return finishAborted('error')
-      }
+      blockedReason = hook.block?.reason
       hookContext = hook.additionalContext
     } catch (err) {
+      // Only a failing hook is tolerated here; aborting the turn happens outside the try so its errors are not mistaken for hook errors.
       deps.logger?.('warn', 'UserPromptSubmit hook failed', err)
+    }
+    if (blockedReason !== undefined) {
+      emitError({ code: 'hook_blocked', message: blockedReason, retryable: false })
+      return finishAborted('error')
     }
 
     // 2. pre-turn compaction check
@@ -284,7 +324,14 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     let model = await resolveModel()
     if (!model) return finishAborted('error')
     let router = buildRouter(settings)
-    deps.persist({ ts: clock(), type: 'turn_context', turnId, modelId: model.ref.modelId, profile: settings.profile, permissionMode: settings.permissionMode })
+    deps.persist({
+      ts: clock(),
+      type: 'turn_context',
+      turnId,
+      modelId: model.ref.modelId,
+      profile: settings.profile,
+      permissionMode: settings.permissionMode,
+    })
     {
       const stable = await deps.prompt.stablePrompt({ threadId, origin: deps.origin, settings })
       await maybeCompact(computeUsage(stable.tokens, router, model), model)
@@ -293,7 +340,7 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     // 3. record user message(s) + turn-tier fragments
     drainMailbox()
     inputRecorded = true
-    if (hookContext) recordFragment(createFragment('hook_context', '<hook_context>', 2000, () => hookContext!))
+    if (hookContext) recordFragment(createFragment('hook_context', '<hook_context>', 2000, () => hookContext))
     // AGENTS rules are re-provided every turn for freshness but recorded only when the model has not seen this
     // exact text: the world-state baseline remembers a digest of the last recorded text (see step loop).
     let userInstructions: ContextFragment | undefined
@@ -308,7 +355,8 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
             userInstructionsDigest = digestFragment(f)
             continue
           }
-          const wrapped = f.kind === 'observed_context' && f.marker !== '<observed_context>' ? observedContextFragment(f) : f
+          const wrapped =
+            f.kind === 'observed_context' && f.marker !== '<observed_context>' ? observedContextFragment(f) : f
           recordFragment(wrapped)
         }
       } catch (err) {
@@ -316,80 +364,118 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
       }
     }
 
-    // 4. step loop
-    while (true) {
+    // 4. step loop (re-entered at most MAX_STOP_CONTINUATIONS times when the Stop hook blocks)
+    let stopContinuations = 0
+    let continuing = false
+    turnLoop: for (;;) {
+      while (true) {
+        if (controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
+        drainMailbox()
+        if (steps >= deps.maxSteps) return finishAborted('step_cap')
+        settings = deps.settings()
+        const resolved = await resolveModel()
+        if (!resolved) return finishAborted('error')
+        model = resolved
+        router = buildRouter(settings)
+
+        // (re-)inject the rules only when the digest the model last saw differs (also after compaction resets).
+        if (userInstructions && deps.worldState.current()?.userInstructions !== userInstructionsDigest)
+          recordFragment(userInstructions)
+        const diff = deps.worldState.diff(
+          snapshotWorldState({
+            permissionMode: settings.permissionMode,
+            modelId: model.ref.modelId,
+            toolNames: router.specs.map((s) => s.name),
+            userInstructions: userInstructionsDigest,
+            profile: settings.profile,
+          }),
+        )
+        if (diff) {
+          recordFragment(diff.fragment)
+          deps.persist({ ts: clock(), type: 'world_state', snapshot: worldStateToJson(deps.worldState.current()!) })
+        }
+
+        // usageBefore (the 上下文占用 line inside the prompt) and usageAfter (context.usage event) share the same
+        // system-token base — the frozen stable tier — so the two numbers never disagree within one step.
+        const stable = await deps.prompt.stablePrompt({ threadId, origin: deps.origin, settings })
+        const usageBefore = computeUsage(stable.tokens, router, model)
+        const prompt = await deps.prompt.build({
+          threadId,
+          origin: deps.origin,
+          settings,
+          userText: firstText,
+          mentions,
+          date: new Date(clock()),
+          usage: usageBefore,
+        })
+        const stepCtx = freezeStepContext({
+          stepId: newStepId(),
+          index: steps,
+          model,
+          router,
+          settings,
+          systemPrompt: prompt.system,
+          cacheKey: prompt.cacheKey,
+        })
+        const outcome = await runStep(stepCtx, {
+          threadId,
+          turnId,
+          origin: deps.origin,
+          depth: deps.depth,
+          emit,
+          context: deps.context,
+          record: deps.record,
+          signal: controller.signal,
+          clock,
+          lock: deps.lock,
+          // loop guard runs BEFORE dispatch: a repeated batch is refused, never executed
+          beforeDispatch: (calls) => guard.push(calls.map((c) => ({ toolName: c.toolName, input: c.input }))),
+          logger: deps.logger,
+        })
+        steps++
+        totalUsage = sumUsage(totalUsage, outcome.usage)
+        // A Stop-hook continuation adds to the answer the user already saw; it never replaces it.
+        if (outcome.text) finalText = continuing && finalText ? `${finalText}\n\n${outcome.text}` : outcome.text
+
+        if (outcome.error) {
+          emitError(outcome.error)
+          return finishAborted('error')
+        }
+        if (outcome.aborted || controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
+
+        const usageAfter = computeUsage(prompt.stableTokens, router, model)
+        emit({ type: 'context.usage', threadId, usage: usageAfter })
+
+        if (outcome.loopGuard) return finishAborted('loop_guard')
+        if (outcome.toolCalls.length === 0) {
+          if (mailbox.length > 0) continue
+          break
+        }
+        await maybeCompact(usageAfter, model)
+        if (controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
+      }
+
+      // 5. the step loop is over — from here on steer() refuses input (the Thread starts a new turn instead)
+      loopDone = true
+      const stop = await services.hooks
+        .run('Stop', { threadId, turnId, text: finalText, origin: deps.origin, profile: deps.settings().profile })
+        .catch((err) => {
+          deps.logger?.('warn', 'Stop hook failed', err)
+          return undefined
+        })
       if (controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
-      drainMailbox()
-      if (steps >= deps.maxSteps) return finishAborted('step_cap')
-      settings = deps.settings()
-      const resolved = await resolveModel()
-      if (!resolved) return finishAborted('error')
-      model = resolved
-      router = buildRouter(settings)
-
-      // (re-)inject the rules only when the digest the model last saw differs (also after compaction resets).
-      if (userInstructions && deps.worldState.current()?.userInstructions !== userInstructionsDigest) recordFragment(userInstructions)
-      const diff = deps.worldState.diff(
-        snapshotWorldState({
-          permissionMode: settings.permissionMode,
-          modelId: model.ref.modelId,
-          toolNames: router.specs.map((s) => s.name),
-          userInstructions: userInstructionsDigest,
-          profile: settings.profile,
-        }),
-      )
-      if (diff) {
-        recordFragment(diff.fragment)
-        deps.persist({ ts: clock(), type: 'world_state', snapshot: worldStateToJson(deps.worldState.current()!) })
+      if (stop?.block && stopContinuations < MAX_STOP_CONTINUATIONS && steps < deps.maxSteps) {
+        stopContinuations++
+        continuing = true
+        const reason = stop.block.reason
+        recordFragment(createFragment('stop_hook', '<stop_hook>', STOP_HOOK_TOKEN_CAP, () => reason))
+        continue turnLoop
       }
-
-      // usageBefore (the 上下文占用 line inside the prompt) and usageAfter (context.usage event) share the same
-      // system-token base — the frozen stable tier — so the two numbers never disagree within one step.
-      const stable = await deps.prompt.stablePrompt({ threadId, origin: deps.origin, settings })
-      const usageBefore = computeUsage(stable.tokens, router, model)
-      const prompt = await deps.prompt.build({ threadId, origin: deps.origin, settings, userText: firstText, mentions, date: new Date(clock()), usage: usageBefore })
-      const stepCtx = freezeStepContext({ stepId: newStepId(), index: steps, model, router, settings, systemPrompt: prompt.system, cacheKey: prompt.cacheKey })
-      const outcome = await runStep(stepCtx, {
-        threadId,
-        turnId,
-        origin: deps.origin,
-        depth: deps.depth,
-        emit,
-        context: deps.context,
-        record: deps.record,
-        signal: controller.signal,
-        clock,
-        lock: deps.lock,
-        // loop guard runs BEFORE dispatch: a repeated batch is refused, never executed
-        beforeDispatch: (calls) => guard.push(calls.map((c) => ({ toolName: c.toolName, input: c.input }))),
-        logger: deps.logger,
-      })
-      steps++
-      totalUsage = sumUsage(totalUsage, outcome.usage)
-      if (outcome.text) finalText = outcome.text
-
-      if (outcome.error) {
-        emitError(outcome.error)
-        return finishAborted('error')
-      }
-      if (outcome.aborted || controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
-
-      const usageAfter = computeUsage(prompt.stableTokens, router, model)
-      emit({ type: 'context.usage', threadId, usage: usageAfter })
-
-      if (outcome.loopGuard) return finishAborted('loop_guard')
-      if (outcome.toolCalls.length === 0) {
-        if (mailbox.length > 0) continue
-        break
-      }
-      await maybeCompact(usageAfter, model)
-      if (controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
+      break
     }
 
-    // 5. completed — from here on steer() refuses input (the Thread starts a new turn instead)
-    loopDone = true
+    // 6. completed
     clearTimer()
-    await services.hooks.run('Stop', { threadId, turnId, text: finalText }).catch((err) => deps.logger?.('warn', 'Stop hook failed', err))
     if (!(await flushDurable())) {
       // the model finished but the history is not durable: never claim completion
       terminal = true

@@ -49,7 +49,13 @@ export function diffWorldState(prev: WorldStateSnapshot | undefined, next: World
 }
 
 export function worldStateToJson(s: WorldStateSnapshot): Record<string, JsonValue> {
-  return { permissions: s.permissions, model: s.model, tools: s.tools, userInstructions: s.userInstructions, profile: s.profile }
+  return {
+    permissions: s.permissions,
+    model: s.model,
+    tools: s.tools,
+    userInstructions: s.userInstructions,
+    profile: s.profile,
+  }
 }
 
 export function worldStateFromJson(v: Record<string, JsonValue> | undefined): WorldStateSnapshot | undefined {

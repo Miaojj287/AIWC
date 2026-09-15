@@ -55,9 +55,12 @@ export const useChatUiStore = create<ChatUiState>((set) => ({
   },
 }))
 
-export const selectChatUi = (tabId: string) => (s: ChatUiState): ChatTabUi => s.byTab[tabId] ?? EMPTY
+export const selectChatUi =
+  (tabId: string) =>
+  (s: ChatUiState): ChatTabUi =>
+    s.byTab[tabId] ?? EMPTY
 
 /** Reset for tests. */
-export function __resetChatUiStoreForTests(): void {
+function __resetChatUiStoreForTests(): void {
   useChatUiStore.setState({ byTab: {} })
 }

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { PersonaCard, PersonaSample } from '@aiwc/protocol'
-import { addTag, appendSample, cardWithTags, deleteImpactText, profileMeta, removeAt, removeHabit, replaceSample, setHabit } from './profileModel'
+import {
+  addTag,
+  appendSample,
+  cardWithTags,
+  deleteImpactText,
+  profileMeta,
+  removeAt,
+  removeHabit,
+  replaceSample,
+  setHabit,
+} from './profileModel'
 
 describe('profileModel', () => {
   it('adds tags with validation and removes by index', () => {
@@ -20,12 +30,31 @@ describe('profileModel', () => {
     const samples: PersonaSample[] = [{ prompt: 'p', reply: 'r' }]
     expect(replaceSample(samples, 0, ' 新回复 ', 9)).toEqual([{ prompt: 'p', reply: '新回复', at: 9, corrected: true }])
     expect(replaceSample(samples, 0, '  ', 9)).toEqual(samples)
-    expect(appendSample(samples, '', '安啦～', 5)[1]).toEqual({ prompt: '（手动补充）', reply: '安啦～', at: 5, corrected: true })
+    expect(appendSample(samples, '', '安啦～', 5)[1]).toEqual({
+      prompt: '（手动补充）',
+      reply: '安啦～',
+      at: 5,
+      corrected: true,
+    })
   })
   it('builds card patches and header meta', () => {
-    const card: PersonaCard = { tone: ['直接'], traits: [], catchphrases: [], punctuation: '', addressing: {}, topics: [], replyHabits: {} }
+    const card: PersonaCard = {
+      tone: ['直接'],
+      traits: [],
+      catchphrases: [],
+      punctuation: '',
+      addressing: {},
+      topics: [],
+      replyHabits: {},
+    }
     expect(cardWithTags(card, 'catchphrases', ['行']).catchphrases).toEqual(['行'])
-    expect(profileMeta({ samples: [{ prompt: 'a', reply: 'b' }], version: 3 }, { state: 'ready', version: 2, sampleCount: 1, builtAt: 0 }, 'hy3')).toBe('v2 · 1 个样本 · 模型 hy3')
+    expect(
+      profileMeta(
+        { samples: [{ prompt: 'a', reply: 'b' }], version: 3 },
+        { state: 'ready', version: 2, sampleCount: 1, builtAt: 0 },
+        'hy3',
+      ),
+    ).toBe('v2 · 1 个样本 · 模型 hy3')
     expect(profileMeta({ samples: [], version: 1 }, undefined)).toBe('v1 · 0 个样本')
     expect(deleteImpactText()).toMatch(/不可恢复/)
   })

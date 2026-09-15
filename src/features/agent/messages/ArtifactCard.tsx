@@ -1,5 +1,6 @@
 import { ChevronRight, FileText, Image } from 'lucide-react'
 import { runCommand } from '@/app/commands'
+import { useT } from '@/i18n'
 import { cn, ICON_STROKE } from '@/kit'
 import type { ThreadItem } from '../model'
 
@@ -21,10 +22,15 @@ export function openArtifact(item: ArtifactItem): void {
  * Click opens the workspace tab (Figma 120:483 / 150:1005 ResultCard).
  */
 export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
+  const t = useT()
   const { artifact } = item
   const openable = Boolean(artifact.path) || Boolean(onOpen)
   const Icon = artifact.kind === 'image' ? Image : FileText
-  const subtitle = artifact.path ? '已在中间标签页打开 · 可直接编辑' : artifact.kind === 'markdown' ? '内容已生成 · 未保存为文件' : '已生成'
+  const subtitle = artifact.path
+    ? t('agent.artifact.openedInTab')
+    : artifact.kind === 'markdown'
+      ? t('agent.artifact.notSaved')
+      : t('agent.artifact.generated')
   const open = () => (onOpen ? onOpen(item) : openArtifact(item))
   return (
     <div
@@ -41,7 +47,8 @@ export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
       data-item="artifact"
       className={cn(
         'flex w-full items-center gap-2.5 rounded-item border border-line-8 bg-content py-2 pl-2 pr-2.5 outline-none transition-colors',
-        openable && 'cursor-pointer hover:border-(--line-16) hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-accent/70',
+        openable &&
+          'cursor-pointer hover:border-(--line-16) hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-accent/70',
       )}
     >
       <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-accent-15 text-accent">
@@ -53,7 +60,9 @@ export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
         </span>
         <span className="truncate text-micro text-fg-3">{subtitle}</span>
       </span>
-      {openable ? <ChevronRight size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" /> : null}
+      {openable ? (
+        <ChevronRight size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" />
+      ) : null}
     </div>
   )
 }

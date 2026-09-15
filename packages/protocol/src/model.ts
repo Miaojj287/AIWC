@@ -19,16 +19,6 @@ export interface ModelRef {
   local: boolean
 }
 
-export interface ModelProviderConfig {
-  id: string
-  kind: ProviderKind
-  label: string
-  baseUrl?: string
-  /** Reference into the secret store, never the key itself. */
-  apiKeyRef?: string
-  models: Array<Pick<ModelRef, 'modelId' | 'label' | 'contextWindow' | 'supportsTools' | 'supportsVision'> & { maxOutputTokens?: number }>
-}
-
 export interface SamplingRequest {
   /** Three-tier system prompt already assembled (stable → context → volatile). */
   system: string

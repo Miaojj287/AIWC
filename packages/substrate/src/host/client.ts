@@ -33,7 +33,18 @@ interface Pending {
 }
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<SubstrateErrorCode>([
-  'not_open', 'locked', 'invalid_key', 'not_found', 'unsupported', 'sql_rejected', 'timeout', 'rpc', 'fixture_invalid', 'io', 'cancelled', 'unknown',
+  'not_open',
+  'locked',
+  'invalid_key',
+  'not_found',
+  'unsupported',
+  'sql_rejected',
+  'timeout',
+  'rpc',
+  'fixture_invalid',
+  'io',
+  'cancelled',
+  'unknown',
 ])
 
 /**
@@ -86,19 +97,21 @@ export function createSubstrateClient(
   })
 
   /** Explicit defaultTimeoutMs (tests) applies to every method; otherwise long-running methods get their own budget. */
-  const timeoutFor = (method: RpcMethod): number => (options.defaultTimeoutMs !== undefined ? baseTimeout : METHOD_TIMEOUTS[method] ?? baseTimeout)
+  const timeoutFor = (method: RpcMethod): number =>
+    options.defaultTimeoutMs !== undefined ? baseTimeout : (METHOD_TIMEOUTS[method] ?? baseTimeout)
 
   const call = <T>(method: RpcMethod, args: unknown[], timeoutMs = timeoutFor(method)): Promise<T> => {
     if (disposed) return Promise.reject(new SubstrateError('rpc', '数据基座连接已关闭'))
     const id = nextId++
     return new Promise<T>((resolve, reject) => {
-      const timer = timeoutMs > 0
-        ? setTimeout(() => {
-            pending.delete(id)
-            reject(new SubstrateError('timeout', `${method} 超时（${Math.round(timeoutMs / 1000)} 秒）`))
-          }, timeoutMs)
-        : undefined
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, method })
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              pending.delete(id)
+              reject(new SubstrateError('timeout', `${method} 超时（${Math.round(timeoutMs / 1000)} 秒）`))
+            }, timeoutMs)
+          : undefined
+      pending.set(id, { resolve, reject, timer, method })
       try {
         post({ id, method, args })
       } catch (err) {
@@ -132,7 +145,8 @@ export function createSubstrateClient(
     listGroupMembers: (groupId, q) => call('listGroupMembers', q ? [groupId, q] : [groupId]),
     stats: (q) => call('stats', [q]),
     resolveMedia: (sessionId, messageId) => call('resolveMedia', [sessionId, messageId]),
-    transcribeVoice: (sessionId, messageId, opts) => call('transcribeVoice', opts ? [sessionId, messageId, opts] : [sessionId, messageId]),
+    transcribeVoice: (sessionId, messageId, opts) =>
+      call('transcribeVoice', opts ? [sessionId, messageId, opts] : [sessionId, messageId]),
     sync: (opts) => call('sync', opts ? [opts] : []),
     querySql: (req) => call('querySql', [req]),
     openWith: (opts) => call('openWith', [opts]),

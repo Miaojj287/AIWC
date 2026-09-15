@@ -5,6 +5,7 @@
 import { ChevronDown, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import {
+  cn,
   Avatar,
   Button,
   DropdownMenu,
@@ -17,6 +18,7 @@ import {
   SearchBox,
   Spinner,
 } from '@/kit'
+import { useT } from '@/i18n'
 
 export interface SenderOption {
   id: string
@@ -37,14 +39,24 @@ const SEARCH_THRESHOLD = 12
 const MAX_VISIBLE = 200
 
 export function SenderFilter({ options, value, onChange, loading = false }: SenderFilterProps) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const selected = useMemo(() => new Set(value), [value])
   const all = value.length === 0
-  const label = all ? '所有人' : value.length === 1 ? options.find((o) => o.id === value[0])?.name ?? '1 人' : `${value.length} 人`
+  const label = all
+    ? t('chat.senders.everyone')
+    : value.length === 1
+      ? (options.find((o) => o.id === value[0])?.name ?? t('chat.senders.count', { n: 1 }))
+      : t('chat.senders.count', { n: value.length })
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = q ? options.filter((o) => o.name.toLowerCase().includes(q) || o.detail?.toLowerCase().includes(q) || o.id.toLowerCase().includes(q)) : options
+    const list = q
+      ? options.filter(
+          (o) =>
+            o.name.toLowerCase().includes(q) || o.detail?.toLowerCase().includes(q) || o.id.toLowerCase().includes(q),
+        )
+      : options
     return list.slice(0, MAX_VISIBLE)
   }, [options, query])
 
@@ -59,48 +71,80 @@ export function SenderFilter({ options, value, onChange, loading = false }: Send
   return (
     <DropdownMenu onOpenChange={(o) => !o && setQuery('')}>
       <DropdownMenuTrigger asChild>
-        <Button variant="link" size="sm" icon={Users} trailingIcon={ChevronDown} className={all ? 'text-fg-2 hover:text-fg' : undefined} aria-label="发送者筛选">
-          {label}
+        <Button
+          variant="link"
+          size="sm"
+          icon={Users}
+          trailingIcon={ChevronDown}
+          className={cn('min-w-0 max-w-[200px]', all && 'text-fg-2 hover:text-fg')}
+          aria-label={t('chat.senders.label')}
+        >
+          <span className="min-w-0 truncate">{label}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[260px] max-w-[280px]" onCloseAutoFocus={(e) => e.preventDefault()}>
         {options.length > SEARCH_THRESHOLD ? (
           <div className="px-0.5 pb-1" onKeyDown={(e) => e.stopPropagation()}>
-            <SearchBox size="sm" value={query} onValueChange={setQuery} placeholder="搜索成员" aria-label="搜索成员" />
+            <SearchBox
+              size="sm"
+              value={query}
+              onValueChange={setQuery}
+              placeholder={t('chat.senders.search')}
+              aria-label={t('chat.senders.search')}
+            />
           </div>
         ) : null}
         <DropdownMenuLabel className="flex items-center justify-between">
-          <span>{all ? `所有人 · ${options.length}` : `已选 ${value.length} / ${options.length}`}</span>
+          <span>
+            {all
+              ? t('chat.senders.everyoneCount', { n: options.length })
+              : t('chat.senders.selectedOf', { n: value.length, total: options.length })}
+          </span>
           {all ? null : (
             <Button variant="link" size="sm" onClick={() => onChange([])} className="h-auto px-1 py-0 text-micro">
-              清空
+              {t('common.clear')}
             </Button>
           )}
         </DropdownMenuLabel>
         <div className="flex max-h-[320px] flex-col gap-px overflow-y-auto">
-          <DropdownMenuCheckboxItem checked={all} onCheckedChange={() => onChange([])} onSelect={(e) => e.preventDefault()} icon={Users}>
-            所有人
+          <DropdownMenuCheckboxItem
+            checked={all}
+            onCheckedChange={() => onChange([])}
+            onSelect={(e) => e.preventDefault()}
+            icon={Users}
+          >
+            {t('chat.senders.everyone')}
           </DropdownMenuCheckboxItem>
           {loading ? (
             <div className="flex h-[30px] items-center gap-2 px-2 text-caption text-fg-3">
-              <Spinner size={12} /> 正在读取成员…
+              <Spinner size={12} /> {t('chat.senders.loading')}
             </div>
           ) : null}
           {visible.map((o) => (
-            <DropdownMenuCheckboxItem key={o.id} checked={selected.has(o.id)} onCheckedChange={(c) => toggle(o.id, c === true)} onSelect={(e) => e.preventDefault()} description={o.detail}>
-              <span className="flex items-center gap-2">
+            <DropdownMenuCheckboxItem
+              key={o.id}
+              checked={selected.has(o.id)}
+              onCheckedChange={(c) => toggle(o.id, c === true)}
+              onSelect={(e) => e.preventDefault()}
+              description={o.detail}
+            >
+              <span className="flex min-w-0 items-center gap-2">
                 <Avatar id={o.id} name={o.name} src={o.avatar} size={20} />
-                <span className="truncate">{o.name}</span>
+                <span className="min-w-0 truncate">{o.name}</span>
               </span>
             </DropdownMenuCheckboxItem>
           ))}
-          {!loading && visible.length === 0 ? <div className="px-2 py-2 text-caption text-fg-3">没有匹配的成员</div> : null}
-          {options.length > MAX_VISIBLE && visible.length === MAX_VISIBLE ? <div className="px-2 py-1 text-micro text-fg-3">仅显示前 {MAX_VISIBLE} 人，请搜索</div> : null}
+          {!loading && visible.length === 0 ? (
+            <div className="px-2 py-2 text-caption text-fg-3">{t('chat.senders.noMatches')}</div>
+          ) : null}
+          {options.length > MAX_VISIBLE && visible.length === MAX_VISIBLE ? (
+            <div className="px-2 py-1 text-micro text-fg-3">{t('chat.senders.truncated', { n: MAX_VISIBLE })}</div>
+          ) : null}
         </div>
         {all ? null : (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => onChange([])}>显示所有人</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onChange([])}>{t('chat.senders.showEveryone')}</DropdownMenuItem>
           </>
         )}
       </DropdownMenuContent>

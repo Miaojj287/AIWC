@@ -21,16 +21,19 @@ class FakePointerEvent extends MouseEvent {
     this.pointerId = init.pointerId ?? 0
   }
 }
-if (typeof window.PointerEvent === 'undefined') (window as unknown as { PointerEvent: typeof FakePointerEvent }).PointerEvent = FakePointerEvent
+if (typeof window.PointerEvent === 'undefined')
+  (window as unknown as { PointerEvent: typeof FakePointerEvent }).PointerEvent = FakePointerEvent
 
-const labels = (spec: MenuSpec) => spec.map((it) => (it.type === 'separator' ? '—' : it.type === 'label' ? `#${String(it.label)}` : String(it.label)))
+const labels = (spec: MenuSpec) =>
+  spec.map((it) => (it.type === 'separator' ? '—' : it.type === 'label' ? `#${String(it.label)}` : String(it.label)))
 
 beforeEach(() => {
   useTabsStore.setState({ tabs: [], activeId: null, recentlyClosed: [], lastActiveByFunction: {} })
 })
 afterEach(cleanup)
 
-const middleClick = (el: HTMLElement) => fireEvent(el, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+const middleClick = (el: HTMLElement) =>
+  fireEvent(el, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
 
 function closeDirectly(id: string) {
   tabs().close(id)
@@ -72,7 +75,8 @@ describe('TabStrip', () => {
     render(<TabStrip onRequestClose={closeDirectly} />)
     const [a, b, c] = screen.getAllByRole('tab') as HTMLElement[]
     // lay the tabs out: 100px each
-    const rect = (x: number) => ({ left: x, right: x + 100, width: 100, top: 0, bottom: 40, height: 40, x, y: 0, toJSON: () => ({}) }) as DOMRect
+    const rect = (x: number) =>
+      ({ left: x, right: x + 100, width: 100, top: 0, bottom: 40, height: 40, x, y: 0, toJSON: () => ({}) }) as DOMRect
     vi.spyOn(a!, 'getBoundingClientRect').mockReturnValue(rect(0))
     vi.spyOn(b!, 'getBoundingClientRect').mockReturnValue(rect(100))
     vi.spyOn(c!, 'getBoundingClientRect').mockReturnValue(rect(200))
@@ -101,7 +105,17 @@ describe('TabStrip', () => {
 
 describe('menu specs', () => {
   const tab: TabDescriptor = { id: 'chat:s1', kind: 'chat', objectId: 's1', title: 'A' }
-  const ctx = { mac: true, canReopen: false, hasOthers: true, hasRight: false, close: vi.fn(), closeOthers: vi.fn(), closeRight: vi.fn(), togglePin: vi.fn(), reopen: vi.fn() }
+  const ctx = {
+    mac: true,
+    canReopen: false,
+    hasOthers: true,
+    hasRight: false,
+    close: vi.fn(),
+    closeOthers: vi.fn(),
+    closeRight: vi.fn(),
+    togglePin: vi.fn(),
+    reopen: vi.fn(),
+  }
 
   it('orders the tab menu 关闭 → 关闭其他 → 关闭右侧 — 固定 — 恢复 and disables what does not apply', () => {
     const spec = tabMenuSpec(tab, ctx)
@@ -116,8 +130,18 @@ describe('menu specs', () => {
   })
 
   it('lists every tab in the overflow menu with the active one checked', () => {
-    const all: TabDescriptor[] = [tab, { id: 'settings:settings', kind: 'settings', objectId: 'settings', title: '设置' }]
-    const spec = overflowMenuSpec(all, 'settings:settings', { mac: true, canReopen: true, activate: vi.fn(), reopen: vi.fn(), closeOthers: vi.fn(), closeRight: vi.fn() })
+    const all: TabDescriptor[] = [
+      tab,
+      { id: 'settings:settings', kind: 'settings', objectId: 'settings', title: '设置' },
+    ]
+    const spec = overflowMenuSpec(all, 'settings:settings', {
+      mac: true,
+      canReopen: true,
+      activate: vi.fn(),
+      reopen: vi.fn(),
+      closeOthers: vi.fn(),
+      closeRight: vi.fn(),
+    })
     expect(labels(spec)).toEqual(['#标签页 · 2', 'A', '设置', '—', '恢复已关闭的标签', '关闭其他', '关闭右侧'])
     const settingsItem = spec.find((it) => 'id' in it && it.id === 'tab:settings:settings')
     expect(settingsItem && 'badge' in settingsItem && settingsItem.badge).toBeTruthy()

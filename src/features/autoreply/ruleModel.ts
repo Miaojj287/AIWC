@@ -2,20 +2,49 @@
  * Auto-reply rule model helpers: defaults, validation, dirty check and the list status line.
  * Pure — tested in ruleModel.test.ts.
  *
- * A rule has one switch and one decision (固定文案 / AI 生成). Anything that could make an enabled
- * rule stay silent — trigger conditions, time windows, a per-rule "confirm first" — is gone on
- * purpose: an enabled rule replies, and that is the whole contract.
+ * A rule has one switch and two decisions: what to reply (固定文案 / AI 生成) and how it leaves
+ * (自动回复 = parked until 确认发送, 全自动回复 = countdown then send). Both are visible in the
+ * editor and on the list row; nothing hidden can keep an enabled rule silent.
  */
-import { DEFAULT_HISTORY_COUNT, HISTORY_COUNT_OPTIONS, MAX_HISTORY_COUNT, MIN_HISTORY_COUNT, type AutoReplyRule, type ReplySource } from '@aiwc/protocol'
+import {
+  DEFAULT_HISTORY_COUNT,
+  DEFAULT_SEND_MODE,
+  HISTORY_COUNT_OPTIONS,
+  MAX_HISTORY_COUNT,
+  MIN_HISTORY_COUNT,
+  type AutoReplyRule,
+  type ReplySendMode,
+  type ReplySource,
+} from '@aiwc/protocol'
+import { t, type MessageKey, type Translator } from '@/i18n'
 
+// eslint-disable-next-line aiwc/no-hardcoded-cjk -- template tokens are stored rule syntax (gateway template.ts), inserted verbatim in every UI language
 export const RULE_VARIABLES = ['{昵称}', '{时间}', '{群名}'] as const
 
-export const SOURCE_OPTIONS: ReadonlyArray<{ value: ReplySource; label: string }> = [
-  { value: 'fixed', label: '固定文案' },
-  { value: 'ai', label: 'AI 生成' },
+/** Chip label per variable; the label only explains the token, the token itself is never translated. */
+/* eslint-disable aiwc/no-hardcoded-cjk -- keys are the template tokens above (rule syntax), not UI copy */
+export const RULE_VARIABLE_LABELS: Record<(typeof RULE_VARIABLES)[number], MessageKey> = {
+  '{昵称}': 'autoreply.reply.variables.nickname',
+  '{时间}': 'autoreply.reply.variables.time',
+  '{群名}': 'autoreply.reply.variables.groupName',
+}
+/* eslint-enable aiwc/no-hardcoded-cjk */
+
+export const SOURCE_OPTIONS: ReadonlyArray<{ value: ReplySource; labelKey: MessageKey }> = [
+  { value: 'fixed', labelKey: 'autoreply.source.fixed' },
+  { value: 'ai', labelKey: 'autoreply.source.ai' },
 ]
 
-export { DEFAULT_HISTORY_COUNT, HISTORY_COUNT_OPTIONS, MAX_HISTORY_COUNT, MIN_HISTORY_COUNT }
+export const SEND_MODE_OPTIONS: ReadonlyArray<{
+  value: ReplySendMode
+  labelKey: MessageKey
+  descriptionKey: MessageKey
+}> = [
+  { value: 'confirm', labelKey: 'autoreply.sendMode.confirm', descriptionKey: 'autoreply.sendMode.confirmDescription' },
+  { value: 'auto', labelKey: 'autoreply.sendMode.auto', descriptionKey: 'autoreply.sendMode.autoDescription' },
+]
+
+export { DEFAULT_HISTORY_COUNT, DEFAULT_SEND_MODE, HISTORY_COUNT_OPTIONS, MAX_HISTORY_COUNT, MIN_HISTORY_COUNT }
 
 export function newRule(sessionId: string): AutoReplyRule {
   return {
@@ -26,6 +55,7 @@ export function newRule(sessionId: string): AutoReplyRule {
     fixedText: '',
     prompt: '',
     historyCount: DEFAULT_HISTORY_COUNT,
+    sendMode: DEFAULT_SEND_MODE,
     updatedAt: 0,
   }
 }
@@ -35,12 +65,18 @@ export interface RuleErrors {
   historyCount?: string
 }
 
-export function validateRule(rule: AutoReplyRule): RuleErrors {
+/** `translate` defaults to the current language; the editor passes its `useT()` so messages follow a language switch. */
+export function validateRule(rule: AutoReplyRule, translate: Translator = t): RuleErrors {
   const errors: RuleErrors = {}
-  if (rule.source === 'fixed' && !(rule.fixedText ?? '').trim()) errors.fixedText = '固定文案不能为空'
+  if (rule.source === 'fixed' && !(rule.fixedText ?? '').trim())
+    errors.fixedText = translate('autoreply.validation.fixedTextEmpty')
   if (rule.source === 'ai') {
     const n = Number(rule.historyCount)
-    if (!Number.isInteger(n) || n < MIN_HISTORY_COUNT || n > MAX_HISTORY_COUNT) errors.historyCount = `请填 ${MIN_HISTORY_COUNT} – ${MAX_HISTORY_COUNT} 之间的整数`
+    if (!Number.isInteger(n) || n < MIN_HISTORY_COUNT || n > MAX_HISTORY_COUNT)
+      errors.historyCount = translate('autoreply.validation.historyCountRange', {
+        min: MIN_HISTORY_COUNT,
+        max: MAX_HISTORY_COUNT,
+      })
   }
   return errors
 }
@@ -56,6 +92,7 @@ export function rulesEqual(a: AutoReplyRule, b: AutoReplyRule): boolean {
     fixedText: r.fixedText ?? '',
     prompt: r.prompt ?? '',
     historyCount: r.historyCount ?? DEFAULT_HISTORY_COUNT,
+    sendMode: r.sendMode ?? 'auto',
   })
   return JSON.stringify(pick(a)) === JSON.stringify(pick(b))
 }
@@ -68,17 +105,29 @@ export interface RuleStatusLine {
 }
 
 export function sourceLabel(source: ReplySource): string {
-  return SOURCE_OPTIONS.find((o) => o.value === source)?.label ?? source
+  const key = SOURCE_OPTIONS.find((o) => o.value === source)?.labelKey
+  return key ? t(key) : source
 }
 
 /** Second line of a session in the auto-reply list. */
 export function ruleStatusLine(rule: AutoReplyRule | undefined): RuleStatusLine {
-  if (!rule) return { kind: 'unset', text: '未设置' }
-  if (!rule.enabled) return { kind: 'paused', text: rule.pausedReason ? `已暂停 · ${rule.pausedReason}` : '已暂停' }
-  if (rule.pausedReason) return { kind: 'paused', text: `已暂停 · ${rule.pausedReason}` }
-  const parts = ['已开启', sourceLabel(rule.source)]
-  if (rule.source === 'ai') parts.push(`参考 ${rule.historyCount ?? DEFAULT_HISTORY_COUNT} 条`)
-  if (rule.todayCount) parts.push(`今日 ${rule.todayCount} 次`)
+  if (!rule) return { kind: 'unset', text: t('autoreply.status.unset') }
+  if (!rule.enabled)
+    return {
+      kind: 'paused',
+      text: rule.pausedReason
+        ? t('autoreply.status.pausedWithReason', { reason: rule.pausedReason })
+        : t('autoreply.status.paused'),
+    }
+  if (rule.pausedReason)
+    return { kind: 'paused', text: t('autoreply.status.pausedWithReason', { reason: rule.pausedReason }) }
+  const parts = [
+    rule.sendMode === 'confirm' ? t('autoreply.status.confirmFirst') : t('autoreply.status.autoSend'),
+    sourceLabel(rule.source),
+  ]
+  if (rule.source === 'ai')
+    parts.push(t('autoreply.rule.historyCount', { n: rule.historyCount ?? DEFAULT_HISTORY_COUNT }))
+  if (rule.todayCount) parts.push(t('autoreply.status.todayCount', { n: rule.todayCount }))
   return { kind: 'on', text: parts.join(' · ') }
 }
 

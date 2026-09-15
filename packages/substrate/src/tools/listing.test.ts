@@ -12,7 +12,13 @@ describe('list_sessions', () => {
     expect(res.isError).toBeUndefined()
     const out = body(res)
     expect(out.sessions.map((s: { id: string }) => s.id)).toEqual(['grp_1@chatroom', 'user_a', 'gh_news'])
-    expect(out.sessions[0]).toMatchObject({ id: 'grp_1@chatroom', kind: 'group', title: '项目组', unread: 0, memberCount: 3 })
+    expect(out.sessions[0]).toMatchObject({
+      id: 'grp_1@chatroom',
+      kind: 'group',
+      title: '项目组',
+      unread: 0,
+      memberCount: 3,
+    })
     expect(out.sessions[0].lastMessageAt).toBeTypeOf('number')
     expect(out.sessions[0].time).toMatch(/^\d{4}-/)
     expect(out.total).toBe(3)
@@ -94,6 +100,8 @@ describe('group_members', () => {
     expect(out.members).toHaveLength(2)
     expect(out.hasMore).toBe(true)
     expect(body(await runTool(groupMembers, { groupId: 'user_a' }, sub)).note).toContain('@chatroom')
+    const imGroup = body(await runTool(groupMembers, { groupId: 'grp_9@im.chatroom' }, sub))
+    expect(imGroup.note).toContain('没有成员数据')
   })
   it('validates groupId and limit', () => {
     expect(groupMembers.inputSchema.safeParse({}).success).toBe(false)
@@ -105,7 +113,10 @@ describe('group_member_ranking', () => {
   it('forwards a ranking stats query scoped to the group and ranks rows', async () => {
     const sub = sampleWorld()
     const out = body(await runTool(groupMemberRanking, { groupId: 'grp_1@chatroom', limit: 5 }, sub))
-    expect(sub.calls[0]).toEqual({ method: 'stats', args: [{ metric: 'ranking', sessionId: 'grp_1@chatroom', limit: 5 }] })
+    expect(sub.calls[0]).toEqual({
+      method: 'stats',
+      args: [{ metric: 'ranking', sessionId: 'grp_1@chatroom', limit: 5 }],
+    })
     expect(out.rows[0]).toMatchObject({ rank: 1, id: 'user_b', name: '小红', messageCount: 3 })
     expect(out.rows[1]).toMatchObject({ rank: 2, id: 'user_a', messageCount: 1 })
     expect(out.total).toBe(2)

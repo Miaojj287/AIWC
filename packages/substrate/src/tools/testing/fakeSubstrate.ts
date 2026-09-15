@@ -30,7 +30,11 @@ export interface FakeSubstrateData {
   groupMembers?: Record<string, WxContact[]>
   sync?: Partial<SyncStatus>
   transcribe?: (sessionId: string, messageId: string, opts?: { force?: boolean }) => Promise<string>
-  querySql?: (req: { db: 'message' | 'contact' | 'session'; sql: string; limit?: number }) => Promise<{ columns: string[]; rows: unknown[][] }>
+  querySql?: (req: {
+    db: 'message' | 'contact' | 'session'
+    sql: string
+    limit?: number
+  }) => Promise<{ columns: string[]; rows: unknown[][] }>
 }
 
 export interface RecordedCall {
@@ -38,7 +42,10 @@ export interface RecordedCall {
   args: unknown[]
 }
 
-export type FakeSubstrate = SubstrateService & { calls: RecordedCall[]; data: Required<Pick<FakeSubstrateData, 'sessions' | 'contacts' | 'messages' | 'groupMembers'>> }
+export type FakeSubstrate = SubstrateService & {
+  calls: RecordedCall[]
+  data: Required<Pick<FakeSubstrateData, 'sessions' | 'contacts' | 'messages' | 'groupMembers'>>
+}
 
 const contains = (hay: string | undefined, needle: string) => (hay ?? '').toLowerCase().includes(needle.toLowerCase())
 
@@ -58,9 +65,15 @@ export function createFakeSubstrate(init: FakeSubstrateData = {}): FakeSubstrate
   }
   const calls: RecordedCall[] = []
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args })
-  const sync: SyncStatus = { phase: 'idle', lastSyncedAt: 1_700_000_000_000, totals: { sessions: data.sessions.length, messages: data.messages.length, media: 0 }, ...(init.sync ?? {}) }
+  const sync: SyncStatus = {
+    phase: 'idle',
+    lastSyncedAt: 1_700_000_000_000,
+    totals: { sessions: data.sessions.length, messages: data.messages.length, media: 0 },
+    ...(init.sync ?? {}),
+  }
 
-  const messagesOf = (sessionId: string) => data.messages.filter((m) => m.sessionId === sessionId).sort((a, b) => a.seq - b.seq)
+  const messagesOf = (sessionId: string) =>
+    data.messages.filter((m) => m.sessionId === sessionId).sort((a, b) => a.seq - b.seq)
 
   const service: SubstrateService = {
     status: () => ({ connection: 'ready', sync, ...(init.account ? { account: init.account } : {}) }),
@@ -134,7 +147,13 @@ export function createFakeSubstrate(init: FakeSubstrateData = {}): FakeSubstrate
       if (q.kind && q.kind !== 'all') items = items.filter((c) => c.kind === q.kind)
       if (q.query) {
         const needle = q.query
-        items = items.filter((c) => contains(c.nickname, needle) || contains(c.remark, needle) || contains(c.alias, needle) || contains(c.username, needle))
+        items = items.filter(
+          (c) =>
+            contains(c.nickname, needle) ||
+            contains(c.remark, needle) ||
+            contains(c.alias, needle) ||
+            contains(c.username, needle),
+        )
       }
       const { slice } = page(items, q)
       return { items: slice, total: items.length }
@@ -158,26 +177,50 @@ export function createFakeSubstrate(init: FakeSubstrateData = {}): FakeSubstrate
       if (q.metric === 'overview') {
         const byKind: Record<string, number> = {}
         for (const m of items) byKind[m.kind] = (byKind[m.kind] ?? 0) + 1
-        return { metric: 'overview', rows: [{ total: items.length, sent: items.filter((m) => m.isSelf).length, received: items.filter((m) => !m.isSelf).length, ...byKind }], total: items.length }
+        return {
+          metric: 'overview',
+          rows: [
+            {
+              total: items.length,
+              sent: items.filter((m) => m.isSelf).length,
+              received: items.filter((m) => !m.isSelf).length,
+              ...byKind,
+            },
+          ],
+          total: items.length,
+        }
       }
       if (q.metric === 'ranking') {
         const counts = new Map<string, { name: string; count: number }>()
         for (const m of items) {
           const key = q.sessionId ? m.senderId : m.sessionId
-          const cur = counts.get(key) ?? { name: q.sessionId ? m.senderName ?? m.senderId : m.sessionId, count: 0 }
+          const cur = counts.get(key) ?? { name: q.sessionId ? (m.senderName ?? m.senderId) : m.sessionId, count: 0 }
           cur.count += 1
           counts.set(key, cur)
         }
-        const rows = [...counts.entries()].sort((a, b) => b[1].count - a[1].count).map(([id, v]) => ({ id, name: v.name, messageCount: v.count }))
+        const rows = [...counts.entries()]
+          .sort((a, b) => b[1].count - a[1].count)
+          .map(([id, v]) => ({ id, name: v.name, messageCount: v.count }))
         return { metric: 'ranking', rows: rows.slice(0, q.limit ?? rows.length), total: rows.length }
       }
       const buckets = new Map<string, number>()
       for (const m of items) {
         const d = new Date(m.createdAt)
-        const key = q.groupBy === 'weekday' ? String(d.getDay()) : q.groupBy === 'day' ? d.toISOString().slice(0, 10) : q.groupBy === 'month' ? d.toISOString().slice(0, 7) : String(d.getHours())
+        const key =
+          q.groupBy === 'weekday'
+            ? String(d.getDay())
+            : q.groupBy === 'day'
+              ? d.toISOString().slice(0, 10)
+              : q.groupBy === 'month'
+                ? d.toISOString().slice(0, 7)
+                : String(d.getHours())
         buckets.set(key, (buckets.get(key) ?? 0) + 1)
       }
-      return { metric: 'time_distribution', rows: [...buckets.entries()].map(([bucket, count]) => ({ bucket, count })), total: items.length }
+      return {
+        metric: 'time_distribution',
+        rows: [...buckets.entries()].map(([bucket, count]) => ({ bucket, count })),
+        total: items.length,
+      }
     },
 
     async resolveMedia(sessionId: string, messageId: string): Promise<WxMedia | undefined> {
@@ -261,13 +304,49 @@ export function sampleWorld(extra: FakeSubstrateData = {}): FakeSubstrate {
   const messages: WxMessage[] = [
     msg({ id: 'm1', sessionId: dm, seq: 1, senderId: dm, senderName: '阿明', text: '周五一起吃饭吗' }),
     msg({ id: 'm2', sessionId: dm, seq: 2, senderId: 'me', isSelf: true, text: '好啊，吃火锅' }),
-    msg({ id: 'm3', sessionId: dm, seq: 3, senderId: dm, senderName: '阿明', kind: 'voice', text: '', media: { kind: 'voice', durationMs: 4200 } }),
-    msg({ id: 'm4', sessionId: dm, seq: 4, senderId: dm, senderName: '阿明', kind: 'image', text: '', media: { kind: 'image', fileName: 'menu.jpg', sizeBytes: 2048 } }),
-    msg({ id: 'm5', sessionId: dm, seq: 5, senderId: 'me', isSelf: true, kind: 'file', text: '', media: { kind: 'file', fileName: '预算.xlsx', sizeBytes: 40960 } }),
+    msg({
+      id: 'm3',
+      sessionId: dm,
+      seq: 3,
+      senderId: dm,
+      senderName: '阿明',
+      kind: 'voice',
+      text: '',
+      media: { kind: 'voice', durationMs: 4200 },
+    }),
+    msg({
+      id: 'm4',
+      sessionId: dm,
+      seq: 4,
+      senderId: dm,
+      senderName: '阿明',
+      kind: 'image',
+      text: '',
+      media: { kind: 'image', fileName: 'menu.jpg', sizeBytes: 2048 },
+    }),
+    msg({
+      id: 'm5',
+      sessionId: dm,
+      seq: 5,
+      senderId: 'me',
+      isSelf: true,
+      kind: 'file',
+      text: '',
+      media: { kind: 'file', fileName: '预算.xlsx', sizeBytes: 40960 },
+    }),
     msg({ id: 'm6', sessionId: dm, seq: 6, senderId: dm, senderName: '阿明', text: '火锅店订好了，周五七点' }),
     msg({ id: 'g1', sessionId: group, seq: 1, senderId: 'user_b', senderName: '小红', text: '周报今天要交' }),
     msg({ id: 'g2', sessionId: group, seq: 2, senderId: dm, senderName: '阿明', text: '收到，下午发周报' }),
-    msg({ id: 'g3', sessionId: group, seq: 3, senderId: 'user_b', senderName: '小红', kind: 'image', text: '', media: { kind: 'image', fileName: 'chart.png' } }),
+    msg({
+      id: 'g3',
+      sessionId: group,
+      seq: 3,
+      senderId: 'user_b',
+      senderName: '小红',
+      kind: 'image',
+      text: '',
+      media: { kind: 'image', fileName: 'chart.png' },
+    }),
     msg({ id: 'g4', sessionId: group, seq: 4, senderId: 'user_b', senderName: '小红', text: '预算表也顺便更新一下' }),
   ]
   return createFakeSubstrate({

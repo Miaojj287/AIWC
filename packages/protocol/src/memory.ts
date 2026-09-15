@@ -6,7 +6,15 @@
  */
 import type { Millis } from './ids'
 
-export type MemoryFile = 'MEMORY' | 'USER' | 'SOUL' | 'AGENTS'
+/** The four bounded memory files, in display order — the only names that may ever become a memory file path. */
+export const MEMORY_FILES = ['MEMORY', 'USER', 'SOUL', 'AGENTS'] as const
+
+export type MemoryFile = (typeof MEMORY_FILES)[number]
+
+/** Closed-set check for untrusted input (IPC requests, tool arguments); anything else is refused. */
+export function isMemoryFile(value: unknown): value is MemoryFile {
+  return typeof value === 'string' && (MEMORY_FILES as readonly string[]).includes(value)
+}
 
 export interface MemoryEntry {
   index: number
@@ -32,9 +40,18 @@ export interface MemoryStore {
   read(file: MemoryFile): Promise<string>
   write(file: MemoryFile, markdown: string, opts?: { source?: MemoryEntry['source'] }): Promise<void>
   entries(file: MemoryFile): Promise<MemoryEntry[]>
-  addEntry(file: MemoryFile, text: string, opts?: { source?: MemoryEntry['source'] }): Promise<{ ok: boolean; reason?: 'over_budget' | 'duplicate' | 'blocked' }>
+  addEntry(
+    file: MemoryFile,
+    text: string,
+    opts?: { source?: MemoryEntry['source'] },
+  ): Promise<{ ok: boolean; reason?: 'over_budget' | 'duplicate' | 'blocked' }>
   replaceEntry(file: MemoryFile, index: number, text: string): Promise<void>
-  removeEntry(file: MemoryFile, index: number): Promise<void>
+  /**
+   * Remove the entry at `index`. With `expectedText` the removal is refused (rejects) unless that entry
+   * still reads the same (normalised comparison): an index shown to a model or the UI can point at a
+   * different entry once the file changed in between.
+   */
+  removeEntry(file: MemoryFile, index: number, expectedText?: string): Promise<void>
   budget(file: MemoryFile): Promise<MemoryBudget>
   snapshot(): Promise<MemorySnapshot>
   /** Cheap keyword recall across MEMORY/USER (no LLM). */
@@ -213,6 +230,9 @@ export interface DiaryStore {
 
 export interface DiaryPipeline {
   /** Build (or rebuild) the entry for a day. Emits progress via the callback. */
-  run(date: string, opts?: { force?: boolean; onProgress?: (step: string, fraction: number) => void; signal?: AbortSignal }): Promise<DiaryEntry>
+  run(
+    date: string,
+    opts?: { force?: boolean; onProgress?: (step: string, fraction: number) => void; signal?: AbortSignal },
+  ): Promise<DiaryEntry>
   nextScheduledAt(): Millis | undefined
 }

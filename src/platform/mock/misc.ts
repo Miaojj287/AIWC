@@ -7,7 +7,14 @@ import type { HandlersFor, MockContext } from './core'
 const SECRETS_KEY = 'aiwc.mock.secrets'
 const MOCK_VERSION = '0.1.0-web'
 
-type SttModel = { id: string; label: string; sizeMb: number; state: 'absent' | 'downloading' | 'ready'; progress?: number; isDefault: boolean }
+type SttModel = {
+  id: string
+  label: string
+  sizeMb: number
+  state: 'absent' | 'downloading' | 'ready'
+  progress?: number
+  isDefault: boolean
+}
 
 const REMOTE_MODELS: Record<string, string[]> = {
   openai: ['gpt-4.1', 'gpt-4.1-mini', 'o4-mini'],
@@ -17,9 +24,18 @@ const REMOTE_MODELS: Record<string, string[]> = {
   ollama: ['qwen3:8b', 'llama3.1:8b', 'gemma3:12b'],
 }
 
-const MEDIA_TYPES: Record<string, string> = { md: 'text/markdown', json: 'application/json', txt: 'text/plain', html: 'text/html', csv: 'text/csv', svg: 'image/svg+xml' }
+const MEDIA_TYPES: Record<string, string> = {
+  md: 'text/markdown',
+  json: 'application/json',
+  txt: 'text/plain',
+  html: 'text/html',
+  csv: 'text/csv',
+  svg: 'image/svg+xml',
+}
 
-export function miscHandlers(ctx: MockContext): HandlersFor<'app'> & HandlersFor<'config'> & HandlersFor<'secret'> & HandlersFor<'ai'> & HandlersFor<'file'> {
+export function miscHandlers(
+  ctx: MockContext,
+): HandlersFor<'app'> & HandlersFor<'config'> & HandlersFor<'secret'> & HandlersFor<'ai'> & HandlersFor<'file'> {
   const files = new Map<string, string>()
   const downloads = new Map<string, AbortController>()
   const stt: SttModel[] = [
@@ -55,7 +71,13 @@ export function miscHandlers(ctx: MockContext): HandlersFor<'app'> & HandlersFor
 
   return {
     'app:windowControl': () => undefined,
-    'app:getInfo': () => ({ version: MOCK_VERSION, platform: ctx.platform, dataDir: '（浏览器演示模式，不写入磁盘）', isPackaged: false }),
+    'app:getInfo': () => ({
+      version: MOCK_VERSION,
+      platform: ctx.platform,
+      dataDir: '（浏览器演示模式，不写入磁盘）',
+      isPackaged: false,
+      transparency: false,
+    }),
     'app:checkUpdate': async () => {
       await ctx.delay(800)
       return { state: 'up_to_date', version: MOCK_VERSION }
@@ -93,7 +115,10 @@ export function miscHandlers(ctx: MockContext): HandlersFor<'app'> & HandlersFor
     'ai:testModel': async ({ provider, modelId }) => {
       await ctx.delay(600)
       if (provider.baseUrl?.includes('fail')) {
-        const res: ModelTestResult = { ok: false, error: { code: 'auth', message: '鉴权失败：请检查 API Key 或 Base URL', status: 401, retryable: false } }
+        const res: ModelTestResult = {
+          ok: false,
+          error: { code: 'auth', message: '鉴权失败：请检查 API Key 或 Base URL', status: 401, retryable: false },
+        }
         return res
       }
       return { ok: true, latencyMs: ctx.rng.int(320, 780), supportsTools: !/embed|whisper/i.test(modelId) }
@@ -101,7 +126,17 @@ export function miscHandlers(ctx: MockContext): HandlersFor<'app'> & HandlersFor
     'ai:discoverModels': async ({ provider }) => {
       await ctx.delay(500)
       if (provider.baseUrl?.includes('fail')) throw new Error('无法连接到模型服务')
-      return (REMOTE_MODELS[provider.kind] ?? []).map(modelId => ({ modelId, label: modelId, contextWindow: 128_000, supportsTools: true, supportsVision: false, enabled: true, source: 'remote' as const, available: true, capabilities: modelCapabilities(provider, { modelId }) }))
+      return (REMOTE_MODELS[provider.kind] ?? []).map((modelId) => ({
+        modelId,
+        label: modelId,
+        contextWindow: 128_000,
+        supportsTools: true,
+        supportsVision: false,
+        enabled: true,
+        source: 'remote' as const,
+        available: true,
+        capabilities: modelCapabilities(provider, { modelId }),
+      }))
     },
     'ai:listRemoteModels': async ({ provider }) => {
       await ctx.delay(500)

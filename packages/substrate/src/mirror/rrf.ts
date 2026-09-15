@@ -46,7 +46,9 @@ export function reciprocalRankFusion<T>(
       }
     }
   }
-  return Array.from(byKey.values()).sort((a, b) => b.rrfScore - a.rrfScore || Math.min(...a.ranks) - Math.min(...b.ranks))
+  return Array.from(byKey.values()).sort(
+    (a, b) => b.rrfScore - a.rrfScore || Math.min(...a.ranks) - Math.min(...b.ranks),
+  )
 }
 
 export const hitKey = (h: SearchHit): string => `${h.message.sessionId} ${h.message.id}`
@@ -60,7 +62,11 @@ export function alignVectorHits(vector: readonly VectorSearchHit[], keyword: rea
   const used = new Set<string>()
   return vector.map((v) => {
     const match = keyword.find(
-      (k) => !used.has(hitKey(k)) && k.message.sessionId === v.message.sessionId && k.message.seq >= v.range.startSeq && k.message.seq <= v.range.endSeq,
+      (k) =>
+        !used.has(hitKey(k)) &&
+        k.message.sessionId === v.message.sessionId &&
+        k.message.seq >= v.range.startSeq &&
+        k.message.seq <= v.range.endSeq,
     )
     if (!match) return v
     used.add(hitKey(match))

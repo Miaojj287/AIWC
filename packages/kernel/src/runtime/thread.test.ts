@@ -1,21 +1,37 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { defineTool, newItemId, type Event, type ModelClient, type ThreadOrigin, type ThreadSettings, type ToolDefinition } from '@aiwc/protocol'
+import {
+  defineTool,
+  newItemId,
+  type Event,
+  type ModelClient,
+  type ThreadOrigin,
+  type ThreadSettings,
+  type AnyToolDefinition,
+} from '@aiwc/protocol'
 import type { KernelServices, ToolRouterFactory } from '../ports'
 import { createApprovalGate, createToolRegistry, createToolRouterFactory } from '../tooling'
 import { createEmitter } from './emitter'
 import { createMockModelClient } from './model/mock'
 import { Thread } from './thread'
-import { collectEvents, createTestServices, testOrigin, testSettings, testThreadId, waitForEvent, type FakeTool } from './testing/fakes'
+import {
+  collectEvents,
+  createTestServices,
+  testOrigin,
+  testSettings,
+  testThreadId,
+  waitForEvent,
+  type FakeTool,
+  type MemoryRolloutStore,
+} from './testing/fakes'
 import { createThreadHarness, defaultTestConfig, userInput } from './testing/harness'
 import type { KernelConfig } from './types'
 import { sleep } from './util/deferred'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTool = ToolDefinition<any, any>
+type AnyTool = AnyToolDefinition
 
 /** Real registry + router + approval gate (the production funnel) over the in-memory fakes for everything else. */
-function servicesWithRealRouter(model: ModelClient, defs: AnyTool[]): KernelServices {
+function servicesWithRealRouter(model: ModelClient, defs: AnyTool[]): KernelServices & { rollout: MemoryRolloutStore } {
   const base = createTestServices({ model })
   const registry = createToolRegistry()
   for (const d of defs) registry.register(d)
@@ -24,7 +40,10 @@ function servicesWithRealRouter(model: ModelClient, defs: AnyTool[]): KernelServ
   return { ...base, tools, approvals }
 }
 
-async function makeThread(services: KernelServices, opts: { origin?: ThreadOrigin; settings?: Partial<ThreadSettings>; config?: Partial<KernelConfig> } = {}) {
+async function makeThread(
+  services: KernelServices,
+  opts: { origin?: ThreadOrigin; settings?: Partial<ThreadSettings>; config?: Partial<KernelConfig> } = {},
+) {
   const emitter = createEmitter()
   const events = collectEvents(emitter.on)
   const config = defaultTestConfig(opts.config)
@@ -32,12 +51,23 @@ async function makeThread(services: KernelServices, opts: { origin?: ThreadOrigi
   const settings = testSettings(opts.settings)
   const threadId = testThreadId()
   await services.rollout.create({ threadId, origin, settings })
-  const thread = new Thread({ services, config: () => config, systemPrompt: { stable: '你是 AIWC。' }, emit: emitter.emit }, { threadId, origin, settings })
+  const thread = new Thread(
+    { services, config: () => config, systemPrompt: { stable: '你是 AIWC。' }, emit: emitter.emit },
+    { threadId, origin, settings },
+  )
   return { thread, emitter, events }
 }
 
 const readTool = (name: string, content = 'ok'): AnyTool =>
-  defineTool({ name, description: name, inputSchema: z.object({}).passthrough(), profiles: ['desktop-chat', 'wechat-bot'], risk: 'read', parallelSafe: true, execute: async () => ({ content }) })
+  defineTool({
+    name,
+    description: name,
+    inputSchema: z.object({}).passthrough(),
+    profiles: ['desktop-chat', 'wechat-bot'],
+    risk: 'read',
+    parallelSafe: true,
+    execute: async () => ({ content }),
+  })
 
 const until = async (cond: () => boolean, timeoutMs = 3000): Promise<void> => {
   const start = Date.now()
@@ -64,7 +94,12 @@ describe('Thread — permission mode & allow-list reach the router', () => {
   })
 
   it('allow_always is persisted into ThreadSettings and the next call is not asked again', async () => {
-    const model = createMockModelClient([{ toolCalls: [{ name: 'note_write', input: { text: 'a' } }] }, { text: '记下了' }, { toolCalls: [{ name: 'note_write', input: { text: 'b' } }] }, { text: '又记下了' }])
+    const model = createMockModelClient([
+      { toolCalls: [{ name: 'note_write', input: { text: 'a' } }] },
+      { text: '记下了' },
+      { toolCalls: [{ name: 'note_write', input: { text: 'b' } }] },
+      { text: '又记下了' },
+    ])
     const writeTool: AnyTool = defineTool({
       name: 'note_write',
       description: 'write',
@@ -81,21 +116,41 @@ describe('Thread — permission mode & allow-list reach the router', () => {
     const handle = await thread.startTurn(userInput('记一下'), 'start')
     const req = await requested
     expect(req.toolName).toBe('note_write')
-    await thread.submit({ type: 'approval.resolve', threadId: thread.id, approvalId: req.approvalId, decision: 'allow_always' })
+    await thread.submit({
+      type: 'approval.resolve',
+      threadId: thread.id,
+      approvalId: req.approvalId,
+      decision: 'allow_always',
+    })
     expect(await handle.promise).toMatchObject({ status: 'completed' })
     expect(thread.settings.allowAlways).toEqual(['note_write'])
     expect(events.types()).toContain('thread.settings')
-    expect(services.rollout.linesOf(thread.id).some((l) => l.type === 'settings' && l.settings.allowAlways.includes('note_write'))).toBe(true)
+    expect(
+      services.rollout
+        .linesOf(thread.id)
+        .some((l) => l.type === 'settings' && l.settings.allowAlways.includes('note_write')),
+    ).toBe(true)
 
     const asksBefore = events.types().filter((t) => t === 'approval.requested').length
-    expect(await (await thread.startTurn(userInput('再记一下'), 'start')).promise).toMatchObject({ status: 'completed', text: '又记下了' })
+    expect(await (await thread.startTurn(userInput('再记一下'), 'start')).promise).toMatchObject({
+      status: 'completed',
+      text: '又记下了',
+    })
     expect(events.types().filter((t) => t === 'approval.requested').length).toBe(asksBefore)
   })
 })
 
 describe('Thread — tool output cap', () => {
   it('a tool with maxOutputChars 32k returning 30k chars is recorded untruncated; the default cap still applies to others', async () => {
-    const model = createMockModelClient([{ toolCalls: [{ name: 'big_read', input: {} }, { name: 'plain_read', input: {} }] }, { text: '完成' }])
+    const model = createMockModelClient([
+      {
+        toolCalls: [
+          { name: 'big_read', input: {} },
+          { name: 'plain_read', input: {} },
+        ],
+      },
+      { text: '完成' },
+    ])
     const big: AnyTool = { ...readTool('big_read', 'a'.repeat(30_000)), maxOutputChars: 32_000 }
     const plain = readTool('plain_read', 'b'.repeat(20_000))
     const services = servicesWithRealRouter(model, [big, plain])
@@ -128,18 +183,24 @@ describe('Thread — op serialisation', () => {
     const types = h.events.types()
     expect(types.filter((t) => t === 'turn.started')).toHaveLength(3)
     expect(types.filter((t) => t === 'turn.completed')).toHaveLength(1)
-    const aborted = h.events.events.filter((e): e is Extract<Event, { type: 'turn.aborted' }> => e.type === 'turn.aborted')
+    const aborted = h.events.events.filter(
+      (e): e is Extract<Event, { type: 'turn.aborted' }> => e.type === 'turn.aborted',
+    )
     expect(aborted.map((a) => a.reason)).toEqual(['replaced', 'replaced'])
     // the second replacement lands before turn B ever samples, so B produces no model request: 2 or 3 are both fine,
     // what matters is that no two turns ran side by side
     expect(model.requests.length).toBeGreaterThanOrEqual(2)
     expect(model.requests.length).toBeLessThanOrEqual(3)
-    const starts = h.events.events.filter((e) => e.type === 'turn.started').map((e) => (e.type === 'turn.started' ? e.turnId : ''))
+    const starts = h.events.events
+      .filter((e) => e.type === 'turn.started')
+      .map((e) => (e.type === 'turn.started' ? e.turnId : ''))
     const terminals = h.events.events.filter((e) => e.type === 'turn.completed' || e.type === 'turn.aborted')
     // every turn terminated before the next one started (events are in emission order)
     for (let i = 0; i < starts.length - 1; i++) {
       const startIdx = h.events.events.findIndex((e) => e.type === 'turn.started' && e.turnId === starts[i + 1])
-      const endIdx = h.events.events.findIndex((e) => (e.type === 'turn.completed' || e.type === 'turn.aborted') && e.turnId === starts[i])
+      const endIdx = h.events.events.findIndex(
+        (e) => (e.type === 'turn.completed' || e.type === 'turn.aborted') && e.turnId === starts[i],
+      )
       expect(endIdx).toBeGreaterThanOrEqual(0)
       expect(endIdx).toBeLessThan(startIdx)
     }
@@ -148,7 +209,10 @@ describe('Thread — op serialisation', () => {
   })
 
   it('a turn.start racing shutdown is rejected and nothing runs after the thread closed', async () => {
-    const model = createMockModelClient([{ text: '很长很长的一段回复内容一直在写。', delayMs: 10, chunkSize: 2 }, { text: '二' }])
+    const model = createMockModelClient([
+      { text: '很长很长的一段回复内容一直在写。', delayMs: 10, chunkSize: 2 },
+      { text: '二' },
+    ])
     const aux = createMockModelClient({ steps: [{ text: '标题' }], loopLast: true })
     const h = await createThreadHarness({ model, auxiliary: aux })
     const first = await h.thread.startTurn(userInput('一'), 'start')
@@ -192,26 +256,46 @@ describe('Thread — failure paths', () => {
   })
 
   it('an abandoned exclusive tool releases the lock so the next turn is not blocked, and its late events are dropped', async () => {
-    const model = createMockModelClient([{ toolCalls: [{ name: 'hang_write', input: {} }] }, { toolCalls: [{ name: 'read', input: {} }] }, { text: '好' }])
-    const hang: FakeTool = { name: 'hang_write', parallelSafe: false, risk: 'write', execute: () => sleep(600).then(() => ({ content: 'late' })) }
-    const read: FakeTool = { name: 'read', parallelSafe: true, risk: 'read', execute: async () => ({ content: 'fast' }) }
+    const model = createMockModelClient([
+      { toolCalls: [{ name: 'hang_write', input: {} }] },
+      { toolCalls: [{ name: 'read', input: {} }] },
+      { text: '好' },
+    ])
+    const hang: FakeTool = {
+      name: 'hang_write',
+      parallelSafe: false,
+      risk: 'write',
+      execute: () => sleep(600).then(() => ({ content: 'late' })),
+    }
+    const read: FakeTool = {
+      name: 'read',
+      parallelSafe: true,
+      risk: 'read',
+      execute: async () => ({ content: 'fast' }),
+    }
     const aux = createMockModelClient({ steps: [{ text: '标题' }], loopLast: true })
     const h = await createThreadHarness({ model, auxiliary: aux, tools: [hang, read] })
 
     const first = await h.thread.startTurn(userInput('挂住'), 'start')
-    await until(() => h.events.events.some((e) => e.type === 'tool.call' && e.toolName === 'hang_write' && e.status === 'running'))
+    await until(() =>
+      h.events.events.some((e) => e.type === 'tool.call' && e.toolName === 'hang_write' && e.status === 'running'),
+    )
     first.interrupt()
     expect(await first.promise).toMatchObject({ status: 'aborted', reason: 'interrupted' })
 
     const t0 = Date.now()
     const second = await h.thread.startTurn(userInput('再查'), 'start')
-    await until(() => h.events.events.some((e) => e.type === 'tool.call' && e.toolName === 'read' && e.status === 'running'))
+    await until(() =>
+      h.events.events.some((e) => e.type === 'tool.call' && e.toolName === 'read' && e.status === 'running'),
+    )
     expect(Date.now() - t0).toBeLessThan(300)
     expect(await second.promise).toMatchObject({ status: 'completed', text: '好' })
 
     // let the zombie finish: its 'done' event must not surface under the dead turn
     await sleep(650)
-    const hangDone = h.events.events.filter((e) => e.type === 'tool.call' && e.toolName === 'hang_write' && e.status === 'done')
+    const hangDone = h.events.events.filter(
+      (e) => e.type === 'tool.call' && e.toolName === 'hang_write' && e.status === 'done',
+    )
     expect(hangDone).toHaveLength(0)
     const hangResult = h.thread.context.all().find((i) => i.type === 'tool_result' && i.toolName === 'hang_write')
     expect(hangResult && hangResult.type === 'tool_result' && hangResult.isError).toBe(true)
@@ -220,7 +304,9 @@ describe('Thread — failure paths', () => {
 
 describe('Thread — manual compaction', () => {
   it('thread.compact during an active turn is refused with an error event and the turn still completes', async () => {
-    const model = createMockModelClient([{ text: '很长很长很长很长的一段回复内容一直在写。', delayMs: 10, chunkSize: 2 }])
+    const model = createMockModelClient([
+      { text: '很长很长很长很长的一段回复内容一直在写。', delayMs: 10, chunkSize: 2 },
+    ])
     const aux = createMockModelClient({ steps: [{ text: '摘要' }], loopLast: true })
     const h = await createThreadHarness({ model, auxiliary: aux })
     const handle = await h.thread.startTurn(userInput('一'), 'start')
@@ -238,9 +324,14 @@ describe('Thread — manual compaction', () => {
 describe('Thread — title generation', () => {
   it('shutdown aborts an in-flight title job and nothing touches the rollout index afterwards', async () => {
     const model = createMockModelClient([{ text: '好的。' }])
-    const aux = createMockModelClient({ steps: [{ text: '一个慢慢生成的标题一个慢慢生成的标题', delayMs: 20, chunkSize: 1 }], loopLast: true })
+    const aux = createMockModelClient({
+      steps: [{ text: '一个慢慢生成的标题一个慢慢生成的标题', delayMs: 20, chunkSize: 1 }],
+      loopLast: true,
+    })
     const h = await createThreadHarness({ model, auxiliary: aux })
-    await (await h.thread.startTurn(userInput('你好'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('你好'), 'start')
+    ).promise
     await until(() => aux.requests.length === 1)
     const shutdown = h.thread.shutdown()
     await shutdown
@@ -260,11 +351,27 @@ describe('Thread — rollback keeps thread metadata', () => {
     const model = createMockModelClient({ steps: [{ text: '好' }], loopLast: true })
     const h = await createThreadHarness({ model, rolloutRewrite: true })
     h.thread.updateSettings({ title: '置顶的会话' })
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
-    await (await h.thread.startTurn(userInput('二'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
+    await (
+      await h.thread.startTurn(userInput('二'), 'start')
+    ).promise
     const anchor = h.thread.context.all().find((i) => i.type === 'assistant_message')!
-    h.thread.record([{ type: 'compaction_summary', id: newItemId(), createdAt: 5, summary: '前情', foldedItemCount: 2, foldedThroughId: anchor.id, tokenEstimate: 2 }])
-    await (await h.thread.startTurn(userInput('三'), 'start')).promise
+    h.thread.record([
+      {
+        type: 'compaction_summary',
+        id: newItemId(),
+        createdAt: 5,
+        summary: '前情',
+        foldedItemCount: 2,
+        foldedThroughId: anchor.id,
+        tokenEstimate: 2,
+      },
+    ])
+    await (
+      await h.thread.startTurn(userInput('三'), 'start')
+    ).promise
     // the index title is what the store preserves (kernel.updateMeta writes both settings.title and the index)
     await h.services.rollout.updateMeta(h.thread.id, { pinned: true, title: '置顶的会话' })
     const createdAt = h.services.rollout.threads.get(h.thread.id)!.meta.createdAt
@@ -285,13 +392,19 @@ describe('Thread — rollback keeps thread metadata', () => {
     await h.thread.clear()
     expect(h.services.rollout.itemsOf(h.thread.id)).toHaveLength(0)
     expect(h.services.rollout.linesOf(h.thread.id).some((l) => l.type === 'compacted')).toBe(false)
-    expect(h.services.rollout.threads.get(h.thread.id)!.meta).toMatchObject({ pinned: true, title: '置顶的会话', createdAt })
+    expect(h.services.rollout.threads.get(h.thread.id)!.meta).toMatchObject({
+      pinned: true,
+      title: '置顶的会话',
+      createdAt,
+    })
   })
 
   it('a failing rewrite surfaces rollout_write_failed and rejects the op', async () => {
     const model = createMockModelClient({ steps: [{ text: '好' }], loopLast: true })
     const h = await createThreadHarness({ model, rolloutRewrite: true })
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
     h.services.rollout.rewrite = async () => {
       throw new Error('EROFS')
     }
@@ -304,8 +417,12 @@ describe('Thread — rollback keeps thread metadata', () => {
     const model = createMockModelClient({ steps: [{ text: '好' }], loopLast: true })
     const h = await createThreadHarness({ model })
     h.thread.updateSettings({ title: '置顶的会话' })
-    await (await h.thread.startTurn(userInput('一'), 'start')).promise
-    await (await h.thread.startTurn(userInput('二'), 'start')).promise
+    await (
+      await h.thread.startTurn(userInput('一'), 'start')
+    ).promise
+    await (
+      await h.thread.startTurn(userInput('二'), 'start')
+    ).promise
     await h.services.rollout.updateMeta(h.thread.id, { pinned: true })
 
     await h.thread.rollback(1)

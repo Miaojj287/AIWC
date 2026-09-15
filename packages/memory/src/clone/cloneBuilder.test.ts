@@ -5,7 +5,13 @@ import type { CloneStatus, ModelSelection, WxMessage } from '@aiwc/protocol'
 import { describe, expect, it } from 'vitest'
 import { extractJson } from '../internal/model'
 import { createRelationshipStore } from '../relationship/relationshipStore'
-import { createFakeSubstrate, createScriptedModel, fakeMessage, fakeSession } from '../testing/fakes'
+import {
+  createFakeSubstrate,
+  createScriptedModel,
+  fakeMessage,
+  fakeSession,
+  type ScriptedHandler,
+} from '../testing/fakes'
 import { createCloneBuilder } from './cloneBuilder'
 import { applyCorrections } from './corrections'
 import { BURST_JOINER, extractPairs, mergeTurns, pickSamples, renderChunks, selectChunks } from './corpus'
@@ -23,7 +29,15 @@ function chat(count: number): WxMessage[] {
   let t = base
   let i = 0
   while (out.length < count) {
-    out.push(fakeMessage({ sessionId: CONTACT, seq: seq++, createdAt: t, isSelf: true, text: `我问第 ${i} 件事，${'细节'.repeat(25)}` }))
+    out.push(
+      fakeMessage({
+        sessionId: CONTACT,
+        seq: seq++,
+        createdAt: t,
+        isSelf: true,
+        text: `我问第 ${i} 件事，${'细节'.repeat(25)}`,
+      }),
+    )
     t += 20_000
     out.push(fakeMessage({ sessionId: CONTACT, seq: seq++, createdAt: t, text: `哈哈哈 第 ${i} 件事这样啦~` }))
     if (i % 3 === 0) {
@@ -32,7 +46,15 @@ function chat(count: number): WxMessage[] {
     }
     if (i % 10 === 0) {
       t += 5_000
-      out.push(fakeMessage({ sessionId: CONTACT, seq: seq++, createdAt: t, kind: 'voice', media: { kind: 'voice', transcript: i % 20 === 0 ? '语音里说的' : undefined } }))
+      out.push(
+        fakeMessage({
+          sessionId: CONTACT,
+          seq: seq++,
+          createdAt: t,
+          kind: 'voice',
+          media: { kind: 'voice', transcript: i % 20 === 0 ? '语音里说的' : undefined },
+        }),
+      )
     }
     t += 4 * 60_000
     i++
@@ -56,7 +78,7 @@ const PARTIAL = (suffix: string) =>
     sharedEvents: [{ when: '2024 夏', what: '去青岛' }, '没时间的事件'],
   })
 
-function setup(messages: WxMessage[], handler?: (system: string, user: string) => string) {
+function setup(messages: WxMessage[], handler?: ScriptedHandler) {
   const substrate = createFakeSubstrate({
     sessions: [fakeSession({ id: CONTACT, title: '李娜' })],
     messages,
@@ -73,6 +95,7 @@ function setup(messages: WxMessage[], handler?: (system: string, user: string) =
   )
   const statuses: CloneStatus[] = []
   const selections: Array<ModelSelection | undefined> = []
+  const logs: Array<{ level: string; msg: string; meta?: unknown }> = []
   const builder = createCloneBuilder({
     substrate,
     relationships,
@@ -80,9 +103,10 @@ function setup(messages: WxMessage[], handler?: (system: string, user: string) =
       selections.push(selection)
       return model
     },
+    logger: (level, msg, meta) => logs.push({ level, msg, meta }),
   })
   builder.onStatus((e) => statuses.push(e.status))
-  return { substrate, relationships, model, builder, statuses, selections }
+  return { substrate, relationships, model, builder, statuses, selections, logs }
 }
 
 describe('clone corpus', () => {
@@ -121,7 +145,10 @@ describe('clone corpus', () => {
     expect(loose.tone).toEqual([])
     expect(loose.punctuation).toBe('12')
     expect(loose.replyHabits).toEqual({})
-    const merged = mergeLocally([partialSchema.parse(extractJson(PARTIAL(' 旧'))), partialSchema.parse(extractJson(PARTIAL(' 新')))])
+    const merged = mergeLocally([
+      partialSchema.parse(extractJson(PARTIAL(' 旧'))),
+      partialSchema.parse(extractJson(PARTIAL(' 新'))),
+    ])
     expect(merged.facts).toEqual(['在杭州做设计 新', '在杭州做设计 旧'])
     expect(merged.catchphrases).toEqual(['哈哈哈', '绝了'])
     const { card, deep } = toCardAndDeep({ ...merged, tone: Array.from({ length: 20 }, (_, i) => `t${i}`) })
@@ -138,7 +165,12 @@ describe('clone corpus', () => {
       { at: 4, field: 'card.replyHabits.被抱怨时', from: '', to: '先调侃再安慰' },
       { at: 5, field: 'deep.boundaries', from: '不聊前任', to: '' },
       { at: 6, field: 'nope.x', from: '', to: 'y' },
-      { at: 7, field: 'card', from: '{}', to: JSON.stringify({ tone: ['冷淡'], punctuation: '句号党', bogus: 1, topics: 'not-array' }) },
+      {
+        at: 7,
+        field: 'card',
+        from: '{}',
+        to: JSON.stringify({ tone: ['冷淡'], punctuation: '句号党', bogus: 1, topics: 'not-array' }),
+      },
       { at: 8, field: 'deep', from: '{}', to: 'not json' },
       { at: 9, field: 'samples', from: '[]', to: '[]' },
       { at: 10, field: 'feedback:itm_1', from: 'down', to: '太客气了' },
@@ -162,7 +194,9 @@ describe('createCloneBuilder', () => {
     await builder.start(CONTACT)
     const last = statuses[statuses.length - 1]
     expect(last).toEqual({ state: 'ready', version: 1, sampleCount: 40, builtAt: expect.any(Number) })
-    const steps = statuses.filter((s) => s.state === 'building').map((s) => (s.state === 'building' ? s.progress.step : ''))
+    const steps = statuses
+      .filter((s) => s.state === 'building')
+      .map((s) => (s.state === 'building' ? s.progress.step : ''))
     expect(steps[0]).toBe('读取聊天记录')
     expect(steps.some((s) => s.startsWith('提炼说话风格'))).toBe(true)
     expect(steps).toContain('合并画像')
@@ -197,13 +231,18 @@ describe('createCloneBuilder', () => {
     await relationships.appendCorrection(CONTACT, { at: 1, field: 'card.catchphrases', from: '绝了', to: '离谱' })
     const v1 = await relationships.get(CONTACT)
     if (!v1) throw new Error('profile missing')
-    await relationships.upsert({ ...v1, samples: [...v1.samples, { prompt: '', reply: '用户手改的回复', at: 5, corrected: true }] })
+    await relationships.upsert({
+      ...v1,
+      samples: [...v1.samples, { prompt: '', reply: '用户手改的回复', at: 5, corrected: true }],
+    })
     await builder.start(CONTACT, { force: true, model: { providerId: 'p', modelId: 'm' } })
     const v2 = await relationships.get(CONTACT)
     expect(v2?.version).toBe(2)
     expect(v2?.card.catchphrases).toEqual(['哈哈哈', '离谱'])
     expect(v2?.corrections).toHaveLength(1)
-    expect(v2?.samples.filter((x) => x.corrected)).toEqual([{ prompt: '', reply: '用户手改的回复', at: 5, corrected: true }])
+    expect(v2?.samples.filter((x) => x.corrected)).toEqual([
+      { prompt: '', reply: '用户手改的回复', at: 5, corrected: true },
+    ])
     // the unforced run fails on message count before a model is resolved
     expect(selections).toEqual([undefined, { providerId: 'p', modelId: 'm' }])
     await builder.start(CONTACT, { force: true, keepCorrections: false })
@@ -213,16 +252,40 @@ describe('createCloneBuilder', () => {
     expect(v3?.corrections).toEqual([])
   })
 
+  it('logs corrections a re-clone could not re-apply (field and reason only, never their text)', async () => {
+    const { relationships, builder, logs } = setup(chat(320))
+    await builder.start(CONTACT)
+    // a row written before corrections were stored untruncated: its JSON was cut mid-string
+    const cut = JSON.stringify({ facts: ['用户改过的事实'.repeat(400)] }).slice(0, 2000)
+    await relationships.appendCorrection(CONTACT, { at: 7, field: 'deep', from: '{}', to: cut })
+    await builder.start(CONTACT)
+    expect(await relationships.status(CONTACT)).toMatchObject({ state: 'ready', version: 2 })
+    const warn = logs.find((l) => l.msg.includes('corrections could not be re-applied'))
+    expect(warn).toMatchObject({
+      level: 'warn',
+      meta: { contactId: CONTACT, skipped: [{ at: 7, field: 'deep', reason: 'unparseable' }] },
+    })
+    expect(JSON.stringify(warn)).not.toContain('用户改过的事实')
+  })
+
   it('reports model failures and unparseable output as kind model', async () => {
     const bad = setup(chat(320), () => '这不是 JSON')
     await bad.builder.start(CONTACT)
     expect(bad.statuses[bad.statuses.length - 1]).toMatchObject({ state: 'failed', kind: 'model' })
     const noModel = setup(chat(320))
-    const builder = createCloneBuilder({ substrate: noModel.substrate, relationships: noModel.relationships, model: async () => Promise.reject(new Error('无 Key')) })
+    const builder = createCloneBuilder({
+      substrate: noModel.substrate,
+      relationships: noModel.relationships,
+      model: async () => Promise.reject(new Error('无 Key')),
+    })
     const seen: CloneStatus[] = []
     builder.onStatus((e) => seen.push(e.status))
     await builder.start(CONTACT)
-    expect(seen[seen.length - 1]).toMatchObject({ state: 'failed', kind: 'model', error: expect.stringContaining('无 Key') })
+    expect(seen[seen.length - 1]).toMatchObject({
+      state: 'failed',
+      kind: 'model',
+      error: expect.stringContaining('无 Key'),
+    })
   })
 
   it('cancel() aborts the build and restores the previous state; concurrent start is refused', async () => {

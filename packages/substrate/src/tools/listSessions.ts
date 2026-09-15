@@ -7,8 +7,16 @@ import { refuseForBot } from './botScope'
 import { READ_PROFILES_NO_BOT, compactSession, defineSubstrateTool, describeToolError, fail, ok } from './shared'
 
 const ListSessionsInput = z.object({
-  query: z.string().trim().max(100).optional().describe('按会话标题（备注 / 昵称 / 群名）模糊匹配；留空列出最近活跃的会话'),
-  kind: z.enum(['dm', 'group', 'official', 'system', 'all']).default('all').describe('会话类型过滤：dm 私聊、group 群聊、official 公众号、system 系统；默认 all'),
+  query: z
+    .string()
+    .trim()
+    .max(100)
+    .optional()
+    .describe('按会话标题（备注 / 昵称 / 群名）模糊匹配；留空列出最近活跃的会话'),
+  kind: z
+    .enum(['dm', 'group', 'official', 'system', 'all'])
+    .default('all')
+    .describe('会话类型过滤：dm 私聊、group 群聊、official 公众号、system 系统；默认 all'),
   limit: z.number().int().min(1).max(50).default(20).describe('返回条数上限（≤50）'),
 })
 
@@ -36,7 +44,13 @@ export const listSessions = defineSubstrateTool({
         sessions: res.items.map(compactSession),
         total: res.total,
         hasMore: res.hasMore,
-        ...(res.items.length === 0 ? { note: input.query ? `没有标题匹配「${input.query}」的会话，可换关键词或用 list_contacts 按联系人查找。` : '本地索引里还没有会话，可能尚未完成同步。' } : {}),
+        ...(res.items.length === 0
+          ? {
+              note: input.query
+                ? `没有标题匹配「${input.query}」的会话，可换关键词或用 list_contacts 按联系人查找。`
+                : '本地索引里还没有会话，可能尚未完成同步。',
+            }
+          : {}),
       })
     } catch (error) {
       return fail(describeToolError(error, 'list_sessions 执行失败'))

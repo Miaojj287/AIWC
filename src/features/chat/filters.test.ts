@@ -50,8 +50,14 @@ describe('date inputs', () => {
   })
   it('validateCustomRange enforces order and the future', () => {
     expect(validateCustomRange('2026-04-22', '2026-05-05', NOW)).toMatchObject({ ok: true })
-    expect(validateCustomRange('2026-05-05', '2026-04-22', NOW)).toMatchObject({ ok: false, error: '开始日期不能晚于结束日期' })
-    expect(validateCustomRange('2027-01-01', '2027-01-02', NOW)).toMatchObject({ ok: false, error: '开始日期不能晚于今天' })
+    expect(validateCustomRange('2026-05-05', '2026-04-22', NOW)).toMatchObject({
+      ok: false,
+      error: '开始日期不能晚于结束日期',
+    })
+    expect(validateCustomRange('2027-01-01', '2027-01-02', NOW)).toMatchObject({
+      ok: false,
+      error: '开始日期不能晚于今天',
+    })
     expect(validateCustomRange('x', '2027-01-02', NOW)).toMatchObject({ ok: false })
   })
 })
@@ -65,7 +71,9 @@ describe('rangeLabel', () => {
   it('custom ending today reads 至 今天', () => {
     const from = new Date(2026, 3, 22).getTime()
     expect(rangeLabel({ preset: 'custom', from, to: NOW }, NOW)).toBe('2026-04-22 至 今天')
-    expect(rangeLabel({ preset: 'custom', from, to: new Date(2026, 4, 5).getTime() }, NOW)).toBe('2026-04-22 至 2026-05-05')
+    expect(rangeLabel({ preset: 'custom', from, to: new Date(2026, 4, 5).getTime() }, NOW)).toBe(
+      '2026-04-22 至 2026-05-05',
+    )
   })
 })
 
@@ -100,6 +108,18 @@ describe('computeExportRange', () => {
   it('filtered mirrors the tab range, all ignores it', () => {
     expect(computeExportRange('filtered', filters, [], NOW)).toEqual({ from: startOfDay(NOW) })
     expect(computeExportRange('all', filters, [], NOW)).toEqual({})
+  })
+  it('filtered carries the sender filter so filtered-out senders are not exported', () => {
+    const bySender = { range: { preset: 'today' as const }, senderIds: ['u1', 'u2'] }
+    expect(computeExportRange('filtered', bySender, [], NOW)).toEqual({
+      from: startOfDay(NOW),
+      senderIds: ['u1', 'u2'],
+    })
+    expect(computeExportRange('filtered', { ...DEFAULT_FILTERS, senderIds: ['u1'] }, [], NOW)).toEqual({
+      senderIds: ['u1'],
+    })
+    expect(computeExportRange('all', bySender, [], NOW)).toEqual({})
+    expect(computeExportRange('selected', bySender, ['m1'], NOW)).toEqual({ messageIds: ['m1'] })
   })
   it('defaultExportMode prefers selection, then filters', () => {
     expect(defaultExportMode(2, DEFAULT_FILTERS)).toBe('selected')

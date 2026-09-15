@@ -4,19 +4,35 @@
  * the close button into the configured behaviour (quit / minimize / ask).
  */
 import { BrowserWindow, screen, shell, type WebContents } from 'electron'
+import { DEFAULT_APPEARANCE } from '@aiwc/protocol'
 import type { ConfigService } from '../config/configService'
 import type { Logger } from '../log'
 import type { AppPaths } from '../paths'
-import { debounce, fitToDisplays, loadWindowState, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, saveWindowState, type WindowState } from './windowState'
-import { describeLoadFailure, describePreloadError, describeRendererGone, type RendererFault } from './preloadDiagnostics'
+import {
+  debounce,
+  fitToDisplays,
+  loadWindowState,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  saveWindowState,
+  type WindowState,
+} from './windowState'
+import {
+  describeLoadFailure,
+  describePreloadError,
+  describeRendererGone,
+  type RendererFault,
+} from './preloadDiagnostics'
+import { applyTransparency, currentSystemVersion, transparencyOptionsFor } from './transparency'
 
-export type { RendererFault, RendererFaultKind } from './preloadDiagnostics'
+export type { RendererFault } from './preloadDiagnostics'
 
 /** Chromium's ERR_ABORTED: a navigation superseded by another one, not a real failure. */
 const ERR_ABORTED = -3
 
-export const SHELL_BACKGROUND = '#1a1b22'
-export const SHELL_FOREGROUND = '#e8e9ee'
+/** First-paint colours before the renderer applies the user's palette: the default dark appearance, never a local grey. */
+export const SHELL_BACKGROUND = DEFAULT_APPEARANCE.dark.background
+export const SHELL_FOREGROUND = DEFAULT_APPEARANCE.dark.foreground
 export const TITLE_BAR_HEIGHT = 32
 
 export interface MainWindowDeps {
@@ -51,7 +67,15 @@ export interface WindowManager {
   isTrustedSender(sender: WebContents): boolean
 }
 
-export function windowOptionsFor(platform: NodeJS.Platform, state: WindowState, preload: string, isPackaged: boolean, appIcon?: string): Electron.BrowserWindowConstructorOptions {
+export function windowOptionsFor(
+  platform: NodeJS.Platform,
+  state: WindowState,
+  preload: string,
+  isPackaged: boolean,
+  appIcon?: string,
+  transparency = false,
+  systemVersion?: string,
+): Electron.BrowserWindowConstructorOptions {
   const base: Electron.BrowserWindowConstructorOptions = {
     width: state.width,
     height: state.height,
@@ -63,8 +87,11 @@ export function windowOptionsFor(platform: NodeJS.Platform, state: WindowState, 
     title: 'AIWC',
     backgroundColor: SHELL_BACKGROUND,
     ...(appIcon ? { icon: appIcon } : {}),
+    ...transparencyOptionsFor(platform, transparency, systemVersion),
     webPreferences: {
       preload,
+      // Security baseline (AGENTS.md §3.6). `sandbox` is Electron's default too; stated so a refactor cannot drop it.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -100,8 +127,24 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
   function create(): BrowserWindow {
     const displays = screen.getAllDisplays().map((d) => d.workArea)
     const state = fitToDisplays(loadWindowState(deps.paths.windowStateFile), displays)
-    const w = new BrowserWindow(windowOptionsFor(platform, state, deps.preload, deps.isPackaged, deps.appIcon))
+    const systemVersion = currentSystemVersion()
+    const w = new BrowserWindow(
+      windowOptionsFor(
+        platform,
+        state,
+        deps.preload,
+        deps.isPackaged,
+        deps.appIcon,
+        deps.config.get().general.transparency,
+        systemVersion,
+      ),
+    )
     win = w
+    // 透明效果 toggled from the settings row: swap the native material in place.
+    const unsubscribeTransparency = deps.config.subscribe((next, prev) => {
+      if (next.general.transparency === prev.general.transparency || w.isDestroyed()) return
+      applyTransparency(w, platform, next.general.transparency, systemVersion)
+    })
     // Render fixed-size traffic lights; newer macOS versions enlarge native buttons.
     if (platform === 'darwin') {
       w.setWindowButtonVisibility(false)
@@ -149,6 +192,7 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
     })
 
     w.on('closed', () => {
+      unsubscribeTransparency()
       trusted.delete(webContentsId)
       if (win === w) win = undefined
     })
@@ -171,12 +215,16 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
     }
     // A sandboxed preload that cannot even be parsed (e.g. emitted as an ES module) leaves the page
     // without `window.aiwc`; the renderer would silently fall back to its mock bridge.
-    w.webContents.on('preload-error', (_e, preloadPath, error) => fault({ kind: 'preload', detail: describePreloadError(preloadPath, error) }))
+    w.webContents.on('preload-error', (_e, preloadPath, error) =>
+      fault({ kind: 'preload', detail: describePreloadError(preloadPath, error) }),
+    )
     w.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame || errorCode === ERR_ABORTED) return
       fault({ kind: 'load', detail: describeLoadFailure(validatedURL, errorCode, errorDescription) })
     })
-    w.webContents.on('render-process-gone', (_e, details) => fault({ kind: 'crash', detail: describeRendererGone(details) }))
+    w.webContents.on('render-process-gone', (_e, details) =>
+      fault({ kind: 'crash', detail: describeRendererGone(details) }),
+    )
 
     if (deps.devServerUrl) {
       void w.loadURL(deps.devServerUrl)

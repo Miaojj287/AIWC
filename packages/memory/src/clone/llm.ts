@@ -25,7 +25,10 @@ export const partialSchema = z.object({
   traits: strList.default([]),
   catchphrases: strList.default([]),
   punctuation: str.default(''),
-  addressing: z.object({ self: z.coerce.string().optional(), other: z.coerce.string().optional() }).catch({}).default({}),
+  addressing: z
+    .object({ self: z.coerce.string().optional(), other: z.coerce.string().optional() })
+    .catch({})
+    .default({}),
   topics: strList.default([]),
   replyHabits: z.record(z.string(), z.coerce.string()).catch({}).default({}),
   facts: strList.default([]),
@@ -89,13 +92,31 @@ export function mergeSystem(n: CloneNames): string {
   ].join('\n')
 }
 
-export async function extractChunk(model: ModelClient, chunkText: string, n: CloneNames, signal?: AbortSignal): Promise<PersonaPartial> {
-  return generateValidated(model, { system: chunkSystem(n), user: chunkText, label: '画像分块', temperature: 0.2, signal, maxOutputTokens: 1800 }, partialSchema)
+export async function extractChunk(
+  model: ModelClient,
+  chunkText: string,
+  n: CloneNames,
+  signal?: AbortSignal,
+): Promise<PersonaPartial> {
+  return generateValidated(
+    model,
+    { system: chunkSystem(n), user: chunkText, label: '画像分块', temperature: 0.2, signal, maxOutputTokens: 1800 },
+    partialSchema,
+  )
 }
 
-export async function mergeParts(model: ModelClient, parts: readonly PersonaPartial[], n: CloneNames, signal?: AbortSignal): Promise<PersonaPartial> {
+export async function mergeParts(
+  model: ModelClient,
+  parts: readonly PersonaPartial[],
+  n: CloneNames,
+  signal?: AbortSignal,
+): Promise<PersonaPartial> {
   const user = parts.map((p, i) => `【第 ${i + 1} 份】\n${JSON.stringify(p, null, 1)}`).join('\n\n')
-  return generateValidated(model, { system: mergeSystem(n), user, label: '画像合并', temperature: 0.2, signal, maxOutputTokens: 2200 }, partialSchema)
+  return generateValidated(
+    model,
+    { system: mergeSystem(n), user, label: '画像合并', temperature: 0.2, signal, maxOutputTokens: 2200 },
+    partialSchema,
+  )
 }
 
 const dedupeStrings = (items: readonly string[]) => {
@@ -116,9 +137,11 @@ export function mergeLocally(parts: readonly PersonaPartial[]): PersonaPartial {
   const latestFirst = parts.slice().reverse()
   const pick = (get: (p: PersonaPartial) => string) => latestFirst.map(get).find((s) => s.trim()) ?? ''
   const habits: Record<string, string> = {}
-  for (const p of latestFirst) for (const [k, v] of Object.entries(p.replyHabits)) if (k.trim() && v.trim() && !(k in habits)) habits[k] = v
+  for (const p of latestFirst)
+    for (const [k, v] of Object.entries(p.replyHabits)) if (k.trim() && v.trim() && !(k in habits)) habits[k] = v
   const events = new Map<string, { when?: string; what: string }>()
-  for (const p of latestFirst) for (const e of p.sharedEvents) if (e.what.trim() && !events.has(e.what)) events.set(e.what, e)
+  for (const p of latestFirst)
+    for (const e of p.sharedEvents) if (e.what.trim() && !events.has(e.what)) events.set(e.what, e)
   return {
     tone: dedupeStrings(latestFirst.flatMap((p) => p.tone)),
     traits: dedupeStrings(latestFirst.flatMap((p) => p.traits)),
@@ -139,7 +162,11 @@ export function mergeLocally(parts: readonly PersonaPartial[]): PersonaPartial {
 }
 
 export function toCardAndDeep(p: PersonaPartial): { card: PersonaCard; deep: PersonaDeep } {
-  const habits = Object.fromEntries(Object.entries(p.replyHabits).filter(([k, v]) => k.trim() && v.trim()).slice(0, CAPS.replyHabits))
+  const habits = Object.fromEntries(
+    Object.entries(p.replyHabits)
+      .filter(([k, v]) => k.trim() && v.trim())
+      .slice(0, CAPS.replyHabits),
+  )
   const addressing: PersonaCard['addressing'] = {}
   if (p.addressing.self?.trim()) addressing.self = p.addressing.self.trim()
   if (p.addressing.other?.trim()) addressing.other = p.addressing.other.trim()

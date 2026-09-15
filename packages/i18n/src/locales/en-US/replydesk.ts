@@ -1,0 +1,41 @@
+import type { Messages } from '../zh-CN'
+
+export const replydesk: Messages['replydesk'] = {
+  tab: {
+    title: 'Reply desk',
+    pendingSubtitle:
+      '{n, plural, one {# AI-drafted reply is waiting for you to confirm} other {# AI-drafted replies are waiting for you to confirm}}',
+    idleSubtitle: 'Nothing is sent until you confirm',
+    halted: 'Auto send stopped: {reason}',
+    resume: 'Resume',
+    resumeFailed: 'Resume failed',
+    generating: 'Generating reply options for "{name}"…',
+    loading: 'Loading replies to confirm…',
+    loadFailed: "Couldn't load",
+    emptyTitle: 'No replies to confirm',
+    emptyDescription: 'Replies that are waiting for confirmation or failed to send appear here',
+  },
+  mode: { suggest: 'Suggestion', confirm: 'To confirm', auto: 'Auto send' },
+  draft: {
+    ignored: 'Ignored the draft reply to "{name}"',
+    regenerated: 'Reply regenerated; pick an option, then send',
+    sentTo: 'Sent to "{name}"',
+    sendFailed: 'Send failed',
+    generateFailed: 'Generation failed',
+    group: 'Group chat',
+    originalLabel: 'Original message: ',
+    candidate: 'Option {n}',
+    holdAndEdit: 'Pause countdown and edit',
+    draftLabel: 'Draft reply',
+    countdownLabel: 'Auto send countdown',
+    sendingIn: '{n, plural, one {Sending in # second} other {Sending in # seconds}}',
+    sending: 'Sending…',
+    retrySend: 'Retry send',
+    regenerate: 'Regenerate',
+    regenerateFailed: 'Regeneration failed',
+    reject: 'Reject',
+    sendEdited: 'Send edited',
+    editToEnable: 'Edit the draft first',
+    useSendEdited: 'Draft edited; use "Send edited"',
+  },
+}

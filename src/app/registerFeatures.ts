@@ -9,9 +9,11 @@ import { register as registerClone } from '@/features/clone'
 import { register as registerDiary } from '@/features/diary'
 import { register as registerFile } from '@/features/file'
 import { register as registerKit } from '@/features/kit'
+import { register as registerOffice } from '@/features/office'
 import { register as registerOnboarding } from '@/features/onboarding'
 import { register as registerReplyDesk } from '@/features/replydesk'
 import { register as registerSettings } from '@/features/settings'
+import { register as registerTasks } from '@/features/tasks'
 import { registerShellLists } from '@/shell/registerShellLists'
 
 let done = false
@@ -29,5 +31,7 @@ export function registerFeatures(): void {
   registerAutoReply()
   registerClone()
   registerReplyDesk()
+  registerOffice()
+  registerTasks()
   registerKit()
 }

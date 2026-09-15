@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { WxMessage } from '@aiwc/protocol'
-import { buildRows, mergeMessages, plainTextOf, rowIndexOfMessage, selectAllState, selectableIds, transcriptOf } from './streamModel'
+import {
+  buildRows,
+  mergeMessages,
+  plainTextOf,
+  rowIndexOfMessage,
+  selectAllState,
+  selectableIds,
+  transcriptOf,
+} from './streamModel'
 
 const msg = (id: string, seq: number, createdAt: number, extra: Partial<WxMessage> = {}): WxMessage => ({
   id,
@@ -46,10 +54,16 @@ describe('buildRows', () => {
 
 describe('plainTextOf / transcriptOf', () => {
   it('formats quotes, voice transcripts and files', () => {
-    expect(plainTextOf(msg('q', 1, D1, { kind: 'quote', text: '收到', quote: { senderName: '李娜', text: '看下' } }))).toBe('「李娜：看下」\n收到')
-    expect(plainTextOf(msg('v', 2, D1, { kind: 'voice', text: '', media: { kind: 'voice', transcript: '明天见' } }))).toBe('明天见')
+    expect(
+      plainTextOf(msg('q', 1, D1, { kind: 'quote', text: '收到', quote: { senderName: '李娜', text: '看下' } })),
+    ).toBe('「李娜：看下」\n收到')
+    expect(
+      plainTextOf(msg('v', 2, D1, { kind: 'voice', text: '', media: { kind: 'voice', transcript: '明天见' } })),
+    ).toBe('明天见')
     expect(plainTextOf(msg('v2', 2, D1, { kind: 'voice', text: '', media: { kind: 'voice' } }))).toBe('[语音]')
-    expect(plainTextOf(msg('f', 3, D1, { kind: 'file', text: '', media: { kind: 'file', fileName: 'a.pdf' } }))).toBe('[文件] a.pdf')
+    expect(plainTextOf(msg('f', 3, D1, { kind: 'file', text: '', media: { kind: 'file', fileName: 'a.pdf' } }))).toBe(
+      '[文件] a.pdf',
+    )
     expect(plainTextOf(msg('i', 4, D1, { kind: 'image', text: '' }))).toBe('[图片]')
   })
   it('writes one line per message with time and sender', () => {

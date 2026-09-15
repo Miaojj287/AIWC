@@ -79,9 +79,25 @@ describe('resolveIsSelf', () => {
 
 describe('rowToWxMessage', () => {
   it('maps a received dm text row', () => {
-    const message = rowToWxMessage({ local_id: 12, server_id: 99, create_time: 1700, sort_seq: 0, is_send: 0, message_content: 'hello' }, dmCtx)
-    expect(message).toMatchObject({ id: 'wx:12:1700012', sessionId: 'wxid_friend', seq: 1_700_012, kind: 'text', text: 'hello', isSelf: false, senderId: 'wxid_friend' })
-    expect(message.anchor).toEqual({ sessionId: 'wxid_friend', messageId: 'wx:12:1700012', seq: 1_700_012, createdAt: 1_700_000 })
+    const message = rowToWxMessage(
+      { local_id: 12, server_id: 99, create_time: 1700, sort_seq: 0, is_send: 0, message_content: 'hello' },
+      dmCtx,
+    )
+    expect(message).toMatchObject({
+      id: 'wx:12:1700012',
+      sessionId: 'wxid_friend',
+      seq: 1_700_012,
+      kind: 'text',
+      text: 'hello',
+      isSelf: false,
+      senderId: 'wxid_friend',
+    })
+    expect(message.anchor).toEqual({
+      sessionId: 'wxid_friend',
+      messageId: 'wx:12:1700012',
+      seq: 1_700_012,
+      createdAt: 1_700_000,
+    })
   })
   it('resolves group sender name and self', () => {
     const groupCtx: MessageRowContext = {
@@ -90,7 +106,13 @@ describe('rowToWxMessage', () => {
       selfWxid: 'wxid_me_1a2b',
       resolveName: (u) => (u === 'wxid_bob' ? 'Bob' : undefined),
     }
-    const row = { local_id: 1, create_time: 1700, sort_seq: 5, sender_username: 'wxid_bob', message_content: 'wxid_bob:\nhi all' }
+    const row = {
+      local_id: 1,
+      create_time: 1700,
+      sort_seq: 5,
+      sender_username: 'wxid_bob',
+      message_content: 'wxid_bob:\nhi all',
+    }
     const message = rowToWxMessage(row, groupCtx)
     expect(message.senderId).toBe('wxid_bob')
     expect(message.senderName).toBe('Bob')
@@ -102,7 +124,8 @@ describe('rowToWxMessage', () => {
       create_time: 1700,
       sort_seq: 6,
       local_type: 244813135921,
-      message_content: '<appmsg><type>57</type><title>my reply</title><refermsg><type>1</type><displayname>Al</displayname><content>orig</content></refermsg></appmsg>',
+      message_content:
+        '<appmsg><type>57</type><title>my reply</title><refermsg><type>1</type><displayname>Al</displayname><content>orig</content></refermsg></appmsg>',
     }
     const message = rowToWxMessage(row, dmCtx)
     expect(message.kind).toBe('quote')
@@ -118,7 +141,13 @@ describe('messageIdentityKey', () => {
 })
 
 it('does not collide when two shards reuse a local message id', () => {
-  const older = rowToWxMessage({ local_id: 125, sort_seq: 1747309846000, create_time: 1747309846, message_content: 'old' }, dmCtx)
-  const latest = rowToWxMessage({ local_id: 125, sort_seq: 1788775756000, create_time: 1788775756, message_content: 'new' }, dmCtx)
+  const older = rowToWxMessage(
+    { local_id: 125, sort_seq: 1747309846000, create_time: 1747309846, message_content: 'old' },
+    dmCtx,
+  )
+  const latest = rowToWxMessage(
+    { local_id: 125, sort_seq: 1788775756000, create_time: 1788775756, message_content: 'new' },
+    dmCtx,
+  )
   expect(older.id).not.toBe(latest.id)
 })

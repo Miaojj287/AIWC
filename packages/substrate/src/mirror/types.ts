@@ -43,6 +43,8 @@ export interface SearchFilters {
   from?: number
   to?: number
   limit: number
+  /** See SearchQuery.match; default 'exact'. */
+  match?: 'exact' | 'relaxed'
 }
 
 /** Vector hit: anchored on the chunk's middle message, carrying the chunk's seq range for fusion/dedupe. */

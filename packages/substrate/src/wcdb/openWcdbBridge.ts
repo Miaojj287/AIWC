@@ -218,9 +218,21 @@ export class OpenWcdbBridge {
 
   private destroyDatabase(database: NativeRef): void {
     if (!hasRef(database)) return
-    try { this.fn.closeDatabase!(database, null, null) } catch { /* best effort */ }
-    try { this.fn.purge!(database) } catch { /* best effort */ }
-    try { this.fn.release!(database.innerValue) } catch { /* best effort */ }
+    try {
+      this.fn.closeDatabase!(database, null, null)
+    } catch {
+      /* best effort */
+    }
+    try {
+      this.fn.purge!(database)
+    } catch {
+      /* best effort */
+    }
+    try {
+      this.fn.release!(database.innerValue)
+    } catch {
+      /* best effort */
+    }
   }
 
   private bindValue(statement: NativeRef, index: number, value: SqlParam): void {

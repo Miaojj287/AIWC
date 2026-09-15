@@ -41,12 +41,16 @@ export function isMacVersionDir(name: string): boolean {
 export function isPotentialAccountName(name: string): boolean {
   const lower = name.toLowerCase()
   if (!lower || lower.startsWith('.')) return false
-  return !['all', 'applet', 'backup', 'wmpf', 'app_data', 'system', 'temp', 'cache', 'xwechat_files', 'all_users'].some((p) => lower === p || lower.startsWith(p))
+  return !['all', 'applet', 'backup', 'wmpf', 'app_data', 'system', 'temp', 'cache', 'xwechat_files', 'all_users'].some(
+    (p) => lower === p || lower.startsWith(p),
+  )
 }
 
 function safeReadDirNames(dir: string): string[] {
   try {
-    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
   } catch {
     return []
   }
@@ -54,8 +58,12 @@ function safeReadDirNames(dir: string): string[] {
 
 /** Account directory names under a root, most recently modified first. */
 export function listAccountDirs(root: string): string[] {
-  const accounts = safeReadDirNames(root).filter((name) => isPotentialAccountName(name) && isAccountDir(join(root, name)))
-  return accounts.sort((a, b) => accountModifiedTime(join(root, b)) - accountModifiedTime(join(root, a)) || a.localeCompare(b))
+  const accounts = safeReadDirNames(root).filter(
+    (name) => isPotentialAccountName(name) && isAccountDir(join(root, name)),
+  )
+  return accounts.sort(
+    (a, b) => accountModifiedTime(join(root, b)) - accountModifiedTime(join(root, a)) || a.localeCompare(b),
+  )
 }
 
 /** Static candidate roots for the platform (existence not checked). */
@@ -67,7 +75,11 @@ export function defaultRootCandidates(env: RootEnv): string[] {
     for (const entry of safeReadDirNames(appSupport)) {
       if (isMacVersionDir(entry)) roots.push(join(appSupport, entry))
     }
-    roots.push(join(container, 'Documents', 'xwechat_files'), join(env.home, 'Documents', 'xwechat_files'), join(env.home, 'Documents', 'WeChat Files'))
+    roots.push(
+      join(container, 'Documents', 'xwechat_files'),
+      join(env.home, 'Documents', 'xwechat_files'),
+      join(env.home, 'Documents', 'WeChat Files'),
+    )
     return roots
   }
   const documents = join(env.userProfile || env.home, 'Documents')
@@ -99,7 +111,8 @@ export function scoreRootCandidates(paths: string[], platform: NodeJS.Platform):
     const accounts = listAccountDirs(normalized)
     if (accounts.length === 0) continue
     let latestModified = 0
-    for (const account of accounts) latestModified = Math.max(latestModified, accountModifiedTime(join(normalized, account)))
+    for (const account of accounts)
+      latestModified = Math.max(latestModified, accountModifiedTime(join(normalized, account)))
     candidates.push({
       path: normalized,
       accountCount: accounts.length,
@@ -113,10 +126,4 @@ export function scoreRootCandidates(paths: string[], platform: NodeJS.Platform):
 /** Best-guess db root for the current machine, or undefined when nothing exists. */
 export function detectDbRoot(env: RootEnv = currentRootEnv()): DbRootCandidate | undefined {
   return scoreRootCandidates(defaultRootCandidates(env), env.platform)[0]
-}
-
-/** Default path to show in the UI when nothing was detected. */
-export function defaultDbRootHint(env: RootEnv = currentRootEnv()): string {
-  const candidates = defaultRootCandidates(env)
-  return candidates[0] ?? join(env.home, 'Documents', 'xwechat_files')
 }

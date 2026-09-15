@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MEDIA_PATH_NOT_ABSOLUTE_ERROR, MEDIA_ROOTS_MISSING_ERROR, canonicalPath, checkOutboundMedia, isWithinRoot, isWithinRoots, resolveMediaRoots } from './mediaPolicy'
+import {
+  MEDIA_PATH_NOT_ABSOLUTE_ERROR,
+  MEDIA_ROOTS_MISSING_ERROR,
+  canonicalPath,
+  checkOutboundMedia,
+  isWithinRoot,
+  isWithinRoots,
+  resolveMediaRoots,
+} from './mediaPolicy'
 
 describe('mediaPolicy', () => {
   let base: string
@@ -36,8 +44,12 @@ describe('mediaPolicy', () => {
 
   it('canonicalPath resolves symlinks for existing paths and for the existing ancestors of missing ones', () => {
     expect(canonicalPath(file)).toBe(realpathSync(file))
-    expect(canonicalPath(join(root, 'media', '..', 'media', 'nope.jpg'))).toBe(join(realpathSync(join(root, 'media')), 'nope.jpg'))
-    expect(canonicalPath(join(root, 'media', 'deep', 'er', 'nope.jpg'))).toBe(join(realpathSync(join(root, 'media')), 'deep', 'er', 'nope.jpg'))
+    expect(canonicalPath(join(root, 'media', '..', 'media', 'nope.jpg'))).toBe(
+      join(realpathSync(join(root, 'media')), 'nope.jpg'),
+    )
+    expect(canonicalPath(join(root, 'media', 'deep', 'er', 'nope.jpg'))).toBe(
+      join(realpathSync(join(root, 'media')), 'deep', 'er', 'nope.jpg'),
+    )
   })
 
   it('checkOutboundMedia: refuses relative paths and missing roots before touching the filesystem', () => {
@@ -65,7 +77,10 @@ describe('mediaPolicy', () => {
     symlinkSync(secret, join(root, 'media', 'link.jpg'))
     expect(checkOutboundMedia(join(root, 'media', 'link.jpg'), [root]).ok).toBe(false)
     // a file that does not exist yet is judged by its canonicalised parent
-    expect(checkOutboundMedia(join(root, 'media', 'later.jpg'), [root])).toEqual({ ok: true, path: join(realpathSync(join(root, 'media')), 'later.jpg') })
+    expect(checkOutboundMedia(join(root, 'media', 'later.jpg'), [root])).toEqual({
+      ok: true,
+      path: join(realpathSync(join(root, 'media')), 'later.jpg'),
+    })
     expect(checkOutboundMedia(join(root, '..', 'later.jpg'), [root]).ok).toBe(false)
   })
 })

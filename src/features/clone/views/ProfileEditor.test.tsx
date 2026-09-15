@@ -29,7 +29,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const renderEditor = (p: RelationshipProfile) => render(<ProfileEditor profile={p} messageCount={undefined} onPatch={async () => {}} onRefine={async () => {}} refining={false} notes={[]} onDeleteNote={async () => {}} />)
+const renderEditor = (p: RelationshipProfile) =>
+  render(
+    <ProfileEditor
+      profile={p}
+      messageCount={undefined}
+      onPatch={async () => {}}
+      onRefine={async () => {}}
+      refining={false}
+      notes={[]}
+      onDeleteNote={async () => {}}
+    />,
+  )
 
 describe('ProfileEditor empty states', () => {
   it('renders every empty section with the compact kit EmptyState instead of an inline span', () => {
@@ -49,7 +60,20 @@ describe('ProfileEditor empty states', () => {
   })
 
   it('hides the empty state once a section has content', () => {
-    renderEditor(profile({ card: { tone: ['温和'], traits: [], catchphrases: [], punctuation: '', addressing: {}, topics: [], replyHabits: { 表情: '常用' } }, samples: [{ prompt: '在吗', reply: '在的' }] }))
+    renderEditor(
+      profile({
+        card: {
+          tone: ['温和'],
+          traits: [],
+          catchphrases: [],
+          punctuation: '',
+          addressing: {},
+          topics: [],
+          replyHabits: { 表情: '常用' },
+        },
+        samples: [{ prompt: '在吗', reply: '在的' }],
+      }),
+    )
     expect(screen.queryByText('暂无语气')).toBeNull()
     expect(screen.queryByText('暂无回复习惯')).toBeNull()
     expect(screen.queryByText('暂无样本')).toBeNull()

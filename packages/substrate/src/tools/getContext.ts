@@ -9,6 +9,7 @@ import {
   MessageAnchorSchema,
   anchorsMeta,
   compactMessage,
+  createNameResolver,
   dedupeMessages,
   defineSubstrateTool,
   describeToolError,
@@ -19,7 +20,13 @@ import {
 
 const GetContextInput = z.object({
   anchor: MessageAnchorSchema.describe('search_messages / semantic_search 命中里的 anchor，原样填入'),
-  radius: z.number().int().min(1).max(30).default(6).describe('锚点前后各取多少条（≤30）'),
+  radius: z
+    .number()
+    .int()
+    .min(1)
+    .max(60)
+    .default(10)
+    .describe('锚点前后各取多少条（≤60）；要看清一段对话的来龙去脉就给大一点'),
 })
 
 export type GetContextInput = z.infer<typeof GetContextInput>
@@ -40,7 +47,7 @@ export const getContext = defineSubstrateTool({
     if (!scope.ok) return scope.result
     try {
       const raw = await ctx.services.substrate.getContext(input.anchor, input.radius)
-      const ordered = sortBySeq(dedupeMessages(raw))
+      const ordered = await createNameResolver(ctx.services.substrate).withSenderNames(sortBySeq(dedupeMessages(raw)))
       if (ordered.length === 0) {
         return fail('未取到上下文：会话可能尚未同步，或锚点无效。请用 search_messages 重新获取 anchor。', {
           sessionId: input.anchor.sessionId,
@@ -57,7 +64,9 @@ export const getContext = defineSubstrateTool({
           sessionId: input.anchor.sessionId,
           anchor: input.anchor,
           messages,
-          ...(anchorFound ? {} : { note: '返回的窗口里没有锚点消息本身（可能已被撤回或索引变动），以下为其附近的消息。' }),
+          ...(anchorFound
+            ? {}
+            : { note: '返回的窗口里没有锚点消息本身（可能已被撤回或索引变动），以下为其附近的消息。' }),
         },
         anchorsMeta(messages.map((m) => m.anchor)),
       )

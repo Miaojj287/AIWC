@@ -6,7 +6,10 @@
  */
 import { Check, Copy } from 'lucide-react'
 import { memo, useMemo, useState, type ReactNode } from 'react'
+import { useT } from '@/i18n'
 import { cn, IconButton } from '@/kit'
+import { parseCitation } from './citations'
+import { CitationChip } from './CitationChip'
 import { parseMarkdown, type Block, type Inline } from './markdownParser'
 import { MARKDOWN_CLASS, MARKDOWN_HEADING_CLASS } from './markdownStyles'
 
@@ -31,7 +34,7 @@ export const Markdown = memo(function Markdown({ text, className, onCopied }: Ma
 function BlockView({ block, onCopied }: { block: Block; onCopied?: () => void }) {
   switch (block.type) {
     case 'heading': {
-      const Tag = `h${block.level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+      const Tag = `h${block.level}` as const
       return (
         <Tag className={cn(MARKDOWN_CLASS.heading, MARKDOWN_HEADING_CLASS[block.level])}>
           <Inlines nodes={block.children} />
@@ -47,7 +50,10 @@ function BlockView({ block, onCopied }: { block: Block; onCopied?: () => void })
     case 'list': {
       const Tag = block.ordered ? 'ol' : 'ul'
       return (
-        <Tag start={block.ordered ? block.start : undefined} className={cn(MARKDOWN_CLASS.list, block.ordered ? 'list-decimal' : 'list-disc')}>
+        <Tag
+          start={block.ordered ? block.start : undefined}
+          className={cn(MARKDOWN_CLASS.list, block.ordered ? 'list-decimal' : 'list-disc')}
+        >
           {block.items.map((item, i) => (
             <li key={i} className={MARKDOWN_CLASS.listItem}>
               <Inlines nodes={item} />
@@ -69,8 +75,39 @@ function BlockView({ block, onCopied }: { block: Block; onCopied?: () => void })
   }
 }
 
+/** Plain text of an inline node — what a citation chip checks its quotes against. */
+function inlineText(node: Inline): string {
+  switch (node.type) {
+    case 'text':
+    case 'code':
+    case 'link':
+      return node.text
+    case 'bold':
+    case 'italic':
+      return node.children.map(inlineText).join('')
+  }
+}
+
+/**
+ * Renders the inline run; a `wx://` link becomes a CitationChip that receives the text written
+ * since the previous citation in this block, so the quote it verifies is the one it follows.
+ */
 function Inlines({ nodes }: { nodes: Inline[] }) {
-  return <>{nodes.map((n, i) => renderInline(n, i))}</>
+  const out: ReactNode[] = []
+  let context = ''
+  nodes.forEach((n, i) => {
+    const ref = n.type === 'link' ? parseCitation(n.href) : undefined
+    if (n.type === 'link' && ref) {
+      out.push(
+        <CitationChip key={i} sessionId={ref.sessionId} messageId={ref.messageId} label={n.text} context={context} />,
+      )
+      context = ''
+      return
+    }
+    out.push(renderInline(n, i))
+    context += inlineText(n)
+  })
+  return <>{out}</>
 }
 
 function renderInline(node: Inline, key: number): ReactNode {
@@ -106,6 +143,7 @@ function renderInline(node: Inline, key: number): ReactNode {
 }
 
 function CodeBlock({ lang, code, onCopied }: { lang?: string; code: string; onCopied?: () => void }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -125,9 +163,12 @@ function CodeBlock({ lang, code, onCopied }: { lang?: string; code: string; onCo
       <IconButton
         size="xs"
         icon={copied ? Check : Copy}
-        label={copied ? '已复制' : '复制代码'}
+        label={copied ? t('agent.markdown.copied') : t('agent.markdown.copyCode')}
         onClick={() => void copy()}
-        className={cn('absolute right-1 top-1 text-fg-3 opacity-0 transition-opacity group-hover/code:opacity-100 focus-visible:opacity-100', copied && 'opacity-100 text-ok')}
+        className={cn(
+          'absolute right-1 top-1 text-fg-3 opacity-0 transition-opacity group-hover/code:opacity-100 focus-visible:opacity-100',
+          copied && 'opacity-100 text-ok',
+        )}
       />
     </div>
   )

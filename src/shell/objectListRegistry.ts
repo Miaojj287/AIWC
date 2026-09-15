@@ -19,6 +19,8 @@ export interface ObjectListRegistration {
   component: ComponentType<ObjectListProps>
   /** optional segmented filter (e.g. 全部 / 已开启 / 已暂停) rendered by the shell */
   segments?: Array<{ id: string; label: string }>
+  /** What the workspace shows for this function when no tab is open; default = the generic 从左侧选择 copy. */
+  workspaceEmpty?: ComponentType<{ mac: boolean }>
 }
 
 const registry = new Map<RailFunction, ObjectListRegistration>()

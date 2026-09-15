@@ -8,6 +8,7 @@ import { dirname } from 'node:path'
 import { AppConfigSchema, type AppConfig, type ConfigPatch, defaultConfig } from '@aiwc/protocol'
 import type { Logger } from '../log'
 import { nullLogger } from '../log'
+import { t } from '../i18n'
 
 export interface ConfigService {
   get(): AppConfig
@@ -22,6 +23,11 @@ export interface ConfigService {
 export interface ConfigServiceOptions {
   file: string
   logger?: Logger
+  /**
+   * Applied only when no config file exists yet (first launch), before the first save — e.g. the UI
+   * language detected from the OS. Existing configs are never touched by it.
+   */
+  initial?: () => ConfigPatch
   /** Session-only fields can be reset after loading and omitted from the on-disk representation. */
   transformLoaded?: (config: AppConfig) => AppConfig
   transformPersisted?: (config: AppConfig) => AppConfig
@@ -64,7 +70,7 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
 
   function load(): AppConfig {
     if (!existsSync(opts.file)) {
-      const cfg = applyLoaded(defaultConfig())
+      const cfg = applyLoaded(firstRunConfig())
       persist(cfg)
       return cfg
     }
@@ -72,7 +78,7 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
     try {
       raw = JSON.parse(readFileSync(opts.file, 'utf8'))
     } catch (e) {
-      log.error('config.json 无法解析，已备份并使用默认配置', e)
+      log.error('config.json could not be parsed; backed up and using defaults', e)
       backup()
       const cfg = applyLoaded(defaultConfig())
       persist(cfg)
@@ -85,11 +91,18 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
       persist(cfg)
       return cfg
     }
-    log.error('config.json 校验失败，已备份并使用默认配置', parsed.error.issues)
+    log.error('config.json failed validation; backed up and using defaults', parsed.error.issues)
     backup()
     const cfg = applyLoaded(defaultConfig())
     persist(cfg)
     return cfg
+  }
+
+  function firstRunConfig(): AppConfig {
+    const base = defaultConfig()
+    if (!opts.initial) return base
+    const parsed = AppConfigSchema.safeParse(deepMerge<unknown>(base, opts.initial()))
+    return parsed.success ? parsed.data : base
   }
 
   function applyLoaded(cfg: AppConfig): AppConfig {
@@ -108,7 +121,7 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
     try {
       atomicWriteJson(opts.file, opts.transformPersisted ? opts.transformPersisted(cfg) : cfg)
     } catch (e) {
-      log.error('写入 config.json 失败', e)
+      log.error('writing config.json failed', e)
       throw e
     }
   }
@@ -135,7 +148,7 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
       const parsed = AppConfigSchema.safeParse(merged)
       if (!parsed.success) {
         const msg = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-        throw new Error(`配置无效：${msg}`)
+        throw new Error(t('main.config.invalid', { detail: msg }))
       }
       return commit(parsed.data)
     },
@@ -143,7 +156,7 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
       const parsed = AppConfigSchema.safeParse(next)
       if (!parsed.success) {
         const msg = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-        throw new Error(`配置无效：${msg}`)
+        throw new Error(t('main.config.invalid', { detail: msg }))
       }
       return commit(parsed.data)
     },

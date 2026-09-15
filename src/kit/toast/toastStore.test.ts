@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { TOAST_DEFAULT_DURATION, TOAST_MAX_VISIBLE, addToast, clearToasts, dismissToast, getToasts, subscribeToasts, toast, updateToast } from './toastStore'
+import {
+  TOAST_DEFAULT_DURATION,
+  TOAST_MAX_VISIBLE,
+  addToast,
+  clearToasts,
+  dismissToast,
+  getToasts,
+  subscribeToasts,
+  toast,
+  updateToast,
+} from './toastStore'
 
 beforeEach(() => {
   vi.useFakeTimers()

@@ -13,11 +13,6 @@ export function isCjkCode(c: number): boolean {
   )
 }
 
-export function hasCjk(text: string): boolean {
-  for (let i = 0; i < text.length; i++) if (isCjkCode(text.charCodeAt(i))) return true
-  return false
-}
-
 /** Canonical form used for duplicate detection: NFKC, lower-case, collapsed whitespace, no trailing punctuation. */
 export function normaliseForCompare(text: string): string {
   return text

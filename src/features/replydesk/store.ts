@@ -5,8 +5,9 @@
  */
 import { create } from 'zustand'
 import type { ReplyDraft } from '@aiwc/protocol'
+import { dismissToast } from '@/kit'
 import { getBridge } from '@/platform/bridge'
-import { initialReplyDeskState, pendingCount, replyDeskReducer, type ReplyDeskAction, type ReplyDeskState } from './reducer'
+import { initialReplyDeskState, replyDeskReducer, type ReplyDeskAction, type ReplyDeskState } from './reducer'
 
 interface ReplyDeskStore {
   state: ReplyDeskState
@@ -34,15 +35,24 @@ export const useReplyDeskStore = create<ReplyDeskStore>((set, get) => ({
 
 let started: Promise<() => void> | undefined
 
+/** Toast id the main process uses for a parked (sendMode 'confirm') reply of this chat. */
+export const confirmToastId = (chatId: string): string => `autoreply.confirm.${chatId}`
+
 /** Idempotent: subscribe to bridge pushes and load the current drafts. Returns the unsubscribe. */
 export function startReplyDesk(): Promise<() => void> {
   if (started) return started
   started = getBridge().then((bridge) => {
     const { dispatch } = useReplyDeskStore.getState()
-    const offDraft = bridge.on('autoreply:draft', (draft: ReplyDraft) => dispatch({ type: 'draft', draft }))
+    const offDraft = bridge.on('autoreply:draft', (draft: ReplyDraft) => {
+      dispatch({ type: 'draft', draft })
+      // The main process keys the 「回复已写好，等你确认」 toast per chat (it carries an action, so it never
+      // times out); once that chat's draft is sent, dropped or replaced, the toast is stale.
+      if (draft.state !== 'pending' && draft.ruleId) dismissToast(confirmToastId(draft.source.chatId))
+    })
     const offGateway = bridge.on('gateway:event', (e) => {
       if (e.type === 'autoreply.generating') dispatch({ ...e, type: 'generating' })
-      else if (e.type === 'autoreply.countdown') dispatch({ type: 'countdown', draftId: e.draftId, remainingMs: e.remainingMs })
+      else if (e.type === 'autoreply.countdown')
+        dispatch({ type: 'countdown', draftId: e.draftId, remainingMs: e.remainingMs })
       else if (e.type === 'autoreply.halted') dispatch({ type: 'halted', reason: e.reason })
     })
     void useReplyDeskStore.getState().reload()
@@ -53,11 +63,6 @@ export function startReplyDesk(): Promise<() => void> {
     }
   })
   return started
-}
-
-/** Drafts still waiting for a decision — the shell may show this as a badge. */
-export function useReplyDeskCount(): number {
-  return useReplyDeskStore((s) => pendingCount(s.state))
 }
 
 /** Reset for tests. */

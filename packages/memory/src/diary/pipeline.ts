@@ -9,9 +9,14 @@
  *
  * start()/stop(): croner job daily at schedule().hour, plus a catch-up run on start when the last diary
  * is older than the window that most recently closed.
+ *
+ * Concurrency: runs of the same date are serialised (KeyedMutex) and the stored entry is re-checked under
+ * the lock, so overlapping requests (scheduled + catch-up + 「生成」) generate a date once. Every run owns an
+ * AbortController that stop() aborts; each model call also has its own deadline (sampleText).
  */
 import type { DiaryEntry, DiaryPipeline, DiaryStore, MemoryStore, ModelClient, SubstrateService } from '@aiwc/protocol'
 import { Cron } from 'croner'
+import { KeyedMutex } from '../internal/fsx'
 import { mapConcurrent, sampleText } from '../internal/model'
 import { truncateChars } from '../internal/text'
 import { clampHour, isValidDate } from '../internal/time'
@@ -62,7 +67,9 @@ export interface DiaryPipelineDeps {
 }
 
 export interface DiaryPipelineExt extends DiaryPipeline {
+  /** Arm the daily schedule (re-arming leaves runs in progress alone) and catch up in the background. */
   start(): void
+  /** Disarm the schedule and abort every run in progress or waiting (shutdown). */
   stop(): void
   /** Run the catch-up check once (start() does this in the background). Resolves with the entry when one was produced. */
   runCatchUp(): Promise<DiaryEntry | undefined>
@@ -97,11 +104,21 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
   const log = deps.logger ?? (() => {})
   let cron: Cron | undefined
   let lastRunDate: string | undefined
-  let running: Promise<DiaryEntry> | undefined
+  const dateLock = new KeyedMutex()
+  /** date → runs of it completed in this process; a change while a request waited means its entry is fresh. */
+  const completedRuns = new Map<string, number>()
+  /** One controller per run (waiting for its date or running); stop() aborts them all. */
+  const activeRuns = new Set<AbortController>()
 
   const hourNow = () => clampHour(deps.schedule().hour)
 
-  async function summarise(model: ModelClient | undefined, materials: SessionMaterial[], w: DiaryWindow, signal: AbortSignal | undefined, progress: Progress): Promise<SectionDraft[]> {
+  async function summarise(
+    model: ModelClient | undefined,
+    materials: SessionMaterial[],
+    w: DiaryWindow,
+    signal: AbortSignal | undefined,
+    progress: Progress,
+  ): Promise<SectionDraft[]> {
     if (!model) return materials.map((material) => ({ material, text: excerptOf(material), isSummary: false }))
     const label = windowLabel(w)
     const results = await mapConcurrent(
@@ -129,7 +146,10 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
   async function agentDigest(materials: SessionMaterial[], w: DiaryWindow): Promise<{ text: string; turns: number }> {
     const search = deps.rolloutSearch
     if (!search) return { text: '', turns: 0 }
-    const queries = materials.slice(0, 5).map((m) => m.session.title).filter((t) => t.trim().length > 0)
+    const queries = materials
+      .slice(0, 5)
+      .map((m) => m.session.title)
+      .filter((t) => t.trim().length > 0)
     const seen = new Map<string, { snippet: string; ts: number }>()
     for (const q of queries) {
       try {
@@ -142,7 +162,10 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
       }
     }
     const rows = [...seen.values()].sort((a, b) => a.ts - b.ts).slice(0, AGENT_DIGEST_MAX)
-    return { text: rows.map((r) => `- ${truncateChars(r.snippet.replace(/\s+/g, ' ').trim(), 160)}`).join('\n'), turns: rows.length }
+    return {
+      text: rows.map((r) => `- ${truncateChars(r.snippet.replace(/\s+/g, ' ').trim(), 160)}`).join('\n'),
+      turns: rows.length,
+    }
   }
 
   async function feedMemory(facts: string[]): Promise<void> {
@@ -219,7 +242,12 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
           synthesisSystem(date, sched.customPrompt),
           synthesisUser({
             date,
-            summaries: sections.map((s) => ({ title: s.material.session.title, kind: s.material.session.kind, count: s.material.count, text: s.text })),
+            summaries: sections.map((s) => ({
+              title: s.material.session.title,
+              kind: s.material.session.kind,
+              count: s.material.count,
+              text: s.text,
+            })),
             ...(digest.text ? { agentDigest: digest.text } : {}),
           }),
           { signal, maxOutputTokens: SYNTHESIS_MAX_TOKENS, temperature: 0.7 },
@@ -235,6 +263,8 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
         if (parsed.facts.length) await feedMemory(parsed.facts)
         return entry
       } catch (e) {
+        // Cancelled (stop / caller) is not a model failure: write nothing, so the next run starts clean.
+        if (signal?.aborted) throw new Error('aborted')
         modelError = errMsg(e)
         log('warn', 'diary: synthesis failed, writing degraded entry', { error: modelError })
       }
@@ -245,7 +275,13 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
       markdown: renderDegraded({
         date,
         reason: modelError ? `模型调用失败（${truncateChars(modelError, 80)}）` : '模型不可用',
-        sections: sections.map((s) => ({ title: s.material.session.title, kind: s.material.session.kind, count: s.material.count, text: s.text, isSummary: s.isSummary })),
+        sections: sections.map((s) => ({
+          title: s.material.session.title,
+          kind: s.material.session.kind,
+          count: s.material.count,
+          text: s.text,
+          isSummary: s.isSummary,
+        })),
         ...(digest.text ? { agentDigest: digest.text } : {}),
       }),
       cues: padCues(titles.slice(0, 8), ['降级日记'], date),
@@ -258,14 +294,25 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
   const pipeline: DiaryPipelineExt = {
     async run(date, opts = {}) {
       if (!isValidDate(date)) throw new Error(`日期格式应为 YYYY-MM-DD：${date}`)
+      const completedBefore = completedRuns.get(date) ?? 0
       const existing = await deps.diaries.get(date)
       if (existing && !opts.force && !existing.degraded) return existing
-      if (running) await running.catch(() => undefined) // one diary at a time; the second waits
-      running = runInner(date, opts)
+      const controller = new AbortController()
+      activeRuns.add(controller)
+      const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal
       try {
-        return await running
+        return await dateLock.run(date, async () => {
+          if (signal.aborted) throw new Error('aborted')
+          // Re-check under the lock: the run this request waited for may already have answered it.
+          const current = await deps.diaries.get(date)
+          const answeredWhileWaiting = (completedRuns.get(date) ?? 0) !== completedBefore
+          if (current && (answeredWhileWaiting || (!opts.force && !current.degraded))) return current
+          const entry = await runInner(date, { ...opts, signal })
+          completedRuns.set(date, (completedRuns.get(date) ?? 0) + 1)
+          return entry
+        })
       } finally {
-        running = undefined
+        activeRuns.delete(controller)
       }
     },
 
@@ -292,25 +339,31 @@ export function createDiaryPipeline(deps: DiaryPipelineDeps): DiaryPipelineExt {
     },
 
     start() {
-      pipeline.stop()
+      cron?.stop()
+      cron = undefined
       const sched = deps.schedule()
       if (!sched.enabled) return
       const hour = clampHour(sched.hour)
-      cron = new Cron(`0 0 ${hour} * * *`, { protect: true, catch: (e) => log('error', 'diary: scheduled run threw', { error: errMsg(e) }) }, async () => {
-        if (!deps.schedule().enabled) return
-        const date = targetDateFor(now(), hourNow())
-        try {
-          await pipeline.run(date)
-        } catch (e) {
-          log('error', 'diary: scheduled run failed', { date, error: errMsg(e) })
-        }
-      })
+      cron = new Cron(
+        `0 0 ${hour} * * *`,
+        { protect: true, catch: (e) => log('error', 'diary: scheduled run threw', { error: errMsg(e) }) },
+        async () => {
+          if (!deps.schedule().enabled) return
+          const date = targetDateFor(now(), hourNow())
+          try {
+            await pipeline.run(date)
+          } catch (e) {
+            log('error', 'diary: scheduled run failed', { date, error: errMsg(e) })
+          }
+        },
+      )
       void pipeline.runCatchUp()
     },
 
     stop() {
       cron?.stop()
       cron = undefined
+      for (const controller of activeRuns) controller.abort()
     },
   }
   return pipeline

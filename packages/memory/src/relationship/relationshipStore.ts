@@ -10,9 +10,24 @@
  *
  * A `building` status left behind by a crashed process is reported as `failed` on the next launch.
  */
-import type { CloneStatus, PersonaNote, PersonaPair, PersonaSample, RelationshipProfile, RelationshipStore } from '@aiwc/protocol'
-import { join } from 'node:path'
-import { KeyedMutex, atomicWriteFile, ensureDir, listDirs, readJsonIfExists, removeTree, withFileLock } from '../internal/fsx'
+import type {
+  CloneStatus,
+  PersonaNote,
+  PersonaPair,
+  PersonaSample,
+  RelationshipProfile,
+  RelationshipStore,
+} from '@aiwc/protocol'
+import { dirname, join, resolve } from 'node:path'
+import {
+  KeyedMutex,
+  atomicWriteFile,
+  ensureDir,
+  listDirs,
+  readJsonIfExists,
+  removeTree,
+  withFileLock,
+} from '../internal/fsx'
 import { appendJsonl, readJsonl, writeJsonl } from '../internal/jsonl'
 
 export type RelationshipCorrection = RelationshipProfile['corrections'][number]
@@ -51,7 +66,13 @@ export interface RelationshipStoreExt extends RelationshipStore {
 
 /** Folder name safe on every filesystem; the real id lives inside the JSON files. */
 export function folderNameFor(contactId: string): string {
-  return contactId.replace(/[^A-Za-z0-9_.@-]/g, (c) => `%${c.codePointAt(0)?.toString(16).padStart(2, '0') ?? ''}`) || '_'
+  const encoded = contactId.replace(
+    /[^A-Za-z0-9_.@-]/g,
+    (c) => `%${c.codePointAt(0)?.toString(16).padStart(2, '0') ?? ''}`,
+  )
+  if (!encoded) return '_'
+  // '.' and '..' pass the character filter but name this directory or its parent.
+  return /^\.+$/.test(encoded) ? encoded.replace(/\./g, '%2e') : encoded
 }
 
 const correctionKey = (c: RelationshipCorrection) => `${c.at}|${c.field}|${c.from}|${c.to}`
@@ -64,7 +85,13 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
   const mutex = new KeyedMutex()
   const listeners = new Set<Listener>()
 
-  const folder = (id: string) => join(dir, folderNameFor(id))
+  const root = resolve(dir)
+  const folder = (id: string) => {
+    const path = resolve(root, folderNameFor(id))
+    // Defence in depth: contact ids arrive over IPC; a contact folder is always a direct child of the store root.
+    if (dirname(path) !== root) throw new Error(`invalid contact id: ${JSON.stringify(id)}`)
+    return path
+  }
   const profilePath = (id: string) => join(folder(id), 'profile.json')
   const samplesPath = (id: string) => join(folder(id), 'samples.jsonl')
   const correctionsPath = (id: string) => join(folder(id), 'corrections.jsonl')
@@ -110,7 +137,10 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
     }
     if (profile) {
       const samples = readJsonl<PersonaSample>(samplesPath(id))
-      return { status: { state: 'ready', version: profile.version, sampleCount: samples.length, builtAt: profile.updatedAt }, displayName }
+      return {
+        status: { state: 'ready', version: profile.version, sampleCount: samples.length, builtAt: profile.updatedAt },
+        displayName,
+      }
     }
     return { status: { state: 'none', messageCount: 0 }, displayName }
   }
@@ -166,8 +196,16 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
         const merged = new Map<string, RelationshipCorrection>()
         for (const c of readCorrections(id)) merged.set(correctionKey(c), c)
         for (const c of profile.corrections) merged.set(correctionKey(c), c)
-        writeJsonl(correctionsPath(id), [...merged.values()].sort((a, b) => a.at - b.at))
-        const st: CloneStatus = { state: 'ready', version: profile.version, sampleCount: profile.samples.length, builtAt: profile.updatedAt }
+        writeJsonl(
+          correctionsPath(id),
+          [...merged.values()].sort((a, b) => a.at - b.at),
+        )
+        const st: CloneStatus = {
+          state: 'ready',
+          version: profile.version,
+          sampleCount: profile.samples.length,
+          builtAt: profile.updatedAt,
+        }
         writeStatus(id, st, profile.displayName)
         return st
       })
@@ -182,7 +220,8 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
     async setStatus(contactId, status, displayName) {
       await locked(contactId, () => {
         ensureDir(folder(contactId))
-        const name = displayName ?? readStatusFile(contactId)?.displayName ?? readProfile(contactId)?.displayName ?? contactId
+        const name =
+          displayName ?? readStatusFile(contactId)?.displayName ?? readProfile(contactId)?.displayName ?? contactId
         writeStatus(contactId, status, name)
       })
       notify(contactId, status)
@@ -216,7 +255,9 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
 
     /** Append + cap per kind. Corrections steer every future reply, so an unbounded file would slowly eat the prompt. */
     async addNotes(contactId, notes, at) {
-      const items = notes.map((n, i) => ({ at: (at ?? now()) + i, kind: n.kind, text: n.text.trim() })).filter((n) => n.text)
+      const items = notes
+        .map((n, i) => ({ at: (at ?? now()) + i, kind: n.kind, text: n.text.trim() }))
+        .filter((n) => n.text)
       if (items.length === 0) return
       await locked(contactId, () => {
         ensureDir(folder(contactId))
@@ -226,7 +267,10 @@ export function createRelationshipStore(opts: { dir: string; now?: () => number 
           const cap = kind === 'correction' ? MAX_CORRECTION_NOTES : MAX_EPISODE_NOTES
           for (const n of all.filter((x) => x.kind === kind).slice(-cap)) keep.add(n)
         }
-        writeJsonl(notesPath(contactId), all.filter((n) => keep.has(n)))
+        writeJsonl(
+          notesPath(contactId),
+          all.filter((n) => keep.has(n)),
+        )
       })
     },
 

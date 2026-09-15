@@ -25,12 +25,30 @@ const skills: SkillSummary[] = [
   { name: '总结当前会话', description: '输出议题与结论', command: '/总结', source: 'builtin' },
 ]
 
-function Harness({ onSubmit, onStop, streaming = false }: { onSubmit?: (text: string, mentions: Mention[]) => void; onStop?: () => void; streaming?: boolean }) {
+function Harness({
+  onSubmit,
+  onStop,
+  streaming = false,
+}: {
+  onSubmit?: (text: string, mentions: Mention[]) => void
+  onStop?: () => void
+  streaming?: boolean
+}) {
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<Mention[]>([])
   return (
     <>
-      <Composer value={text} onValueChange={setText} mentions={mentions} onMentionsChange={setMentions} onSubmit={() => onSubmit?.(text, mentions)} onStop={onStop} streaming={streaming} mentionSources={sources} skills={skills} />
+      <Composer
+        value={text}
+        onValueChange={setText}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        onSubmit={() => onSubmit?.(text, mentions)}
+        onStop={onStop}
+        streaming={streaming}
+        mentionSources={sources}
+        skills={skills}
+      />
       <output data-testid="state">{JSON.stringify({ text, mentions })}</output>
     </>
   )
@@ -81,7 +99,11 @@ describe('<Composer>', () => {
     expect(screen.getByText('投研交流群')).toBeTruthy()
     fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
     fireEvent.keyDown(textarea(), { key: 'Enter' })
-    await waitFor(() => expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').mentions).toEqual([{ kind: 'session', id: 's2', label: '投研交流群' }]))
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').mentions).toEqual([
+        { kind: 'session', id: 's2', label: '投研交流群' },
+      ]),
+    )
     expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('总结 ')
     expect(screen.queryByText('引用候选')).toBeNull()
     // the chip is removable

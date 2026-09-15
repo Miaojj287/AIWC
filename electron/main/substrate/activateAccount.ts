@@ -1,4 +1,5 @@
 import type { AppContext } from '../contracts'
+import { t } from '../i18n'
 
 /** Serialize selection + reconnect so config, source and status commit as one operation. */
 export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substrate'>) {
@@ -11,13 +12,13 @@ export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substra
       const restore = active ? { ...previous, wxid: active.wxid, dbRoot: active.dbRoot } : previous
       const selected = target ?? previous
       try {
-        if (!selected.wxid || !selected.dbRoot) throw new Error('请先选择微信账号和数据库目录')
+        if (!selected.wxid || !selected.dbRoot) throw new Error(t('main.substrate.selectAccountAndDbRoot'))
         ctx.config.set({ account: { ...selected, verifiedAt: 0 } })
         const result = await ctx.substrate.reconnect()
-        if (!result.ok) throw new Error(result.error ?? '数据库连接失败')
+        if (!result.ok) throw new Error(result.error ?? t('main.substrate.connectFailed'))
         const status = await ctx.substrate.refreshStatus()
         if (status.connection !== 'ready' || status.account?.wxid !== selected.wxid) {
-          throw new Error('实际连接账号与所选账号不一致')
+          throw new Error(t('main.substrate.accountMismatch'))
         }
         ctx.config.set({ account: { verifiedAt: Date.now() } })
         return { ok: true }
@@ -27,9 +28,16 @@ export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substra
         if (active) {
           try {
             const result = await ctx.substrate.reconnect()
-            if (!result.ok) return { ok: false, error: `${error}；原账号恢复失败：${result.error ?? '连接失败'}` }
+            if (!result.ok)
+              return {
+                ok: false,
+                error: t('main.substrate.restoreFailed', {
+                  error,
+                  detail: result.error ?? t('main.substrate.connectionFailed'),
+                }),
+              }
           } catch (restoreError) {
-            return { ok: false, error: `${error}；原账号恢复失败：${String(restoreError)}` }
+            return { ok: false, error: t('main.substrate.restoreFailed', { error, detail: String(restoreError) }) }
           }
         }
         return { ok: false, error }

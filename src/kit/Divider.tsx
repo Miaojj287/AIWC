@@ -13,7 +13,14 @@ export interface DividerProps extends HTMLAttributes<HTMLDivElement> {
 export function Divider({ orientation = 'horizontal', label, strength = 6, className, ...rest }: DividerProps) {
   const line = strength === 8 ? 'bg-line-8' : 'bg-line-6'
   if (orientation === 'vertical') {
-    return <div role="separator" aria-orientation="vertical" className={cn('h-full w-px self-stretch', line, className)} {...rest} />
+    return (
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        className={cn('h-full w-px self-stretch', line, className)}
+        {...rest}
+      />
+    )
   }
   if (!label) {
     return <div role="separator" className={cn('h-px w-full', line, className)} {...rest} />

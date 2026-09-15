@@ -6,11 +6,21 @@ const NOW = new Date(2026, 8, 5, 14, 32).getTime()
 
 describe('readOverview', () => {
   it('reads the canonical single row', () => {
-    const stats: StatsResult = { metric: 'overview', rows: [{ total: 14238, textCount: 1, imageCount: 942, fileCount: 186, voiceCount: 78 }] }
+    const stats: StatsResult = {
+      metric: 'overview',
+      rows: [{ total: 14238, textCount: 1, imageCount: 942, fileCount: 186, voiceCount: 78 }],
+    }
     expect(readOverview(stats)).toEqual({ total: 14238, imageCount: 942, fileCount: 186, voiceCount: 78 })
   })
   it('accepts key/value rows and falls back to stats.total', () => {
-    const stats: StatsResult = { metric: 'overview', total: 30, rows: [{ key: 'media', label: '媒体', value: 5 }, { key: 'voice', label: '语音', value: 2 }] }
+    const stats: StatsResult = {
+      metric: 'overview',
+      total: 30,
+      rows: [
+        { key: 'media', label: '媒体', value: 5 },
+        { key: 'voice', label: '语音', value: 2 },
+      ],
+    }
     expect(readOverview(stats)).toEqual({ total: 30, imageCount: 0, fileCount: 0, voiceCount: 2 })
   })
   it('ignores other metrics', () => {
@@ -34,18 +44,32 @@ describe('syncView', () => {
     expect(v.text).toBe('正在同步… 已拉取 1,240 / 14,238 条')
   })
   it('error and never', () => {
-    expect(syncView({ phase: 'error', error: '数据库被锁定' }, undefined, NOW)).toMatchObject({ phase: 'error', detail: '数据库被锁定' })
+    expect(syncView({ phase: 'error', error: '数据库被锁定' }, undefined, NOW)).toMatchObject({
+      phase: 'error',
+      detail: '数据库被锁定',
+    })
     expect(syncView({ phase: 'idle' }, undefined, NOW)).toMatchObject({ phase: 'never', text: '尚未同步' })
     expect(syncView(undefined, undefined, NOW).phase).toBe('never')
   })
 })
 
 describe('sessionMeta', () => {
-  const base: WxSession = { id: 'g@chatroom', kind: 'group', title: '产品市场群', unread: 0, pinned: false, muted: false, memberCount: 18, indexedUntil: NOW }
+  const base: WxSession = {
+    id: 'g@chatroom',
+    kind: 'group',
+    title: '产品市场群',
+    unread: 0,
+    pinned: false,
+    muted: false,
+    memberCount: 18,
+    indexedUntil: NOW,
+  }
   it('group with members and indexed time', () => {
     expect(sessionMeta(base, NOW)).toBe('群聊 · 18 人 · 已索引到 14:32')
   })
   it('dm without index', () => {
-    expect(sessionMeta({ ...base, kind: 'dm', memberCount: undefined, indexedUntil: undefined }, NOW)).toBe('单聊 · 未索引')
+    expect(sessionMeta({ ...base, kind: 'dm', memberCount: undefined, indexedUntil: undefined }, NOW)).toBe(
+      '单聊 · 未索引',
+    )
   })
 })

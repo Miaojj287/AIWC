@@ -34,11 +34,14 @@ export interface ObservedBuffer {
   size(chatId: string): number
 }
 
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
+/** Group members' text is third-party data: it must not be able to close or forge the fragment's tags. */
+const neutraliseTags = (s: string): string => s.replace(/</g, '＜').replace(/>/g, '＞')
+
 /** One line per message: '[sender|peerId] text' — the model needs to know who said what. */
 export function formatObservedLine(event: MessageEvent): string {
-  const sender = (event.source.displayName ?? '').trim() || event.source.peerId
-  const text = event.text.replace(/\s+/g, ' ').trim()
-  return `[${sender}|${event.source.peerId}] ${text}`
+  const sender = oneLine(event.source.displayName ?? '') || event.source.peerId
+  return `[${neutraliseTags(sender)}|${neutraliseTags(event.source.peerId)}] ${neutraliseTags(oneLine(event.text))}`
 }
 
 /**
@@ -113,7 +116,9 @@ export function createObservedBuffer(opts: ObservedBufferOptions = {}): Observed
       const snapshot = [...lines]
       // renderObservedLines already fits the cap by dropping oldest lines; createFragment adds the
       // kernel-wide hard truncation as a second line of defence.
-      return createFragment(OBSERVED_FRAGMENT_KIND, OBSERVED_FRAGMENT_MARKER, OBSERVED_FRAGMENT_TOKEN_CAP, () => renderObservedLines(snapshot, OBSERVED_FRAGMENT_TOKEN_CAP))
+      return createFragment(OBSERVED_FRAGMENT_KIND, OBSERVED_FRAGMENT_MARKER, OBSERVED_FRAGMENT_TOKEN_CAP, () =>
+        renderObservedLines(snapshot, OBSERVED_FRAGMENT_TOKEN_CAP),
+      )
     },
     clear(chatId) {
       if (chatId === undefined) rings.clear()

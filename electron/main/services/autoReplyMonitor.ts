@@ -13,6 +13,7 @@
  * the peer genuinely has the last word.
  */
 import type { AutoReplyRule, MessageEvent, SubstrateService, WxMessage, WxSession } from '@aiwc/protocol'
+import { t } from '../i18n'
 
 /**
  * How stale a *newly arrived* message may be and still be answered. This guards the incremental
@@ -20,6 +21,10 @@ import type { AutoReplyRule, MessageEvent, SubstrateService, WxMessage, WxSessio
  * deliberately NOT applied to the catch-up, where answering an old unanswered message is the point.
  */
 const NEW_MESSAGE_MAX_AGE_MS = 10 * 60_000
+/** Wait this long after the last incoming message before replying, so a burst is answered once. */
+const DEFAULT_QUIET_MS = 5_000
+/** Fallback poll interval when DB change events are missed. */
+const DEFAULT_POLL_MS = 3_000
 
 export interface AutoReplyMonitorDeps {
   substrate: SubstrateService
@@ -62,8 +67,16 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
   function toEvent(session: WxSession, last: WxMessage, owner: string, nickname: string | undefined): MessageEvent {
     return {
       id: `${owner}:${session.id}:${last.id}:${last.seq}`,
-      source: { channel: 'wechat-ui', chatId: session.id, peerId: last.senderId, chatType: session.kind === 'group' ? 'group' : 'dm', displayName: session.title },
-      kind: ['image', 'voice', 'file', 'video', 'sticker'].includes(last.kind) ? last.kind as MessageEvent['kind'] : 'text',
+      source: {
+        channel: 'wechat-ui',
+        chatId: session.id,
+        peerId: last.senderId,
+        chatType: session.kind === 'group' ? 'group' : 'dm',
+        displayName: session.title,
+      },
+      kind: ['image', 'voice', 'file', 'video', 'sticker'].includes(last.kind)
+        ? (last.kind as MessageEvent['kind'])
+        : 'text',
       text: last.media?.transcript || last.text || `[${last.kind}]`,
       timestamp: last.createdAt,
       addressed: session.kind === 'dm' || Boolean(nickname && last.text.includes(`@${nickname}`)),
@@ -85,19 +98,33 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
 
   async function refresh(): Promise<void> {
     if (!running) return
-    if (checking) { again = true; return }
+    if (checking) {
+      again = true
+      return
+    }
     checking = true
     try {
       const status = deps.substrate.status()
       const nextAccount = status.account?.wxid
-      if (account && account !== nextAccount) { reset('微信账户已切换'); suppressCatchUp = true; deps.accountChanged() }
+      if (account && account !== nextAccount) {
+        reset(t('main.autoReply.accountSwitched'))
+        suppressCatchUp = true
+        deps.accountChanged()
+      }
       account = nextAccount
-      if (status.connection !== 'ready' || !account) { reset('微信数据未连接'); return }
+      if (status.connection !== 'ready' || !account) {
+        reset(t('main.autoReply.notConnected'))
+        return
+      }
       const epoch = generation
       const owner = account
       const rules = deps.rules().filter((r) => r.enabled && !r.pausedReason && (!r.accountId || r.accountId === owner))
       const ids = new Set(rules.map((r) => r.sessionId))
-      for (const id of baseline.keys()) if (!ids.has(id)) { cancel(id, '规则已暂停或删除'); baseline.delete(id) }
+      for (const id of baseline.keys())
+        if (!ids.has(id)) {
+          cancel(id, t('main.autoReply.rulePausedOrDeleted'))
+          baseline.delete(id)
+        }
       for (const rule of rules) {
         if (!rule.accountId) deps.bindRule?.(rule, owner)
         const session = await deps.substrate.getSession(rule.sessionId)
@@ -113,23 +140,31 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
         // just came back). Answer whatever is still unanswered instead of waiting for one more.
         const catchUp = previous === undefined
         if (catchUp && suppressCatchUp) continue // seed the baseline only; see suppressCatchUp
-        if (!catchUp) cancel(session.id, last?.isSelf ? '你已在微信中回复' : '对方发来了新消息')
+        if (!catchUp)
+          cancel(session.id, last?.isSelf ? t('main.autoReply.repliedInWeChat') : t('main.autoReply.newIncoming'))
         if (!replyable(last)) continue
         if (!catchUp && now() - last.createdAt > NEW_MESSAGE_MAX_AGE_MS) continue
         const event = toEvent(session, last, owner, status.account?.nickname)
-        timers.set(session.id, setTimeout(() => {
-          timers.delete(session.id)
-          if (!running || generation !== epoch || baseline.get(session.id) !== key) return
-          const current = deps.rules().find((r) => r.sessionId === session.id)
-          if (!current?.enabled || (current.accountId && current.accountId !== owner)) return
-          void deps.ingest(event).catch(deps.onError ?? (() => {}))
-        }, deps.quietMs ?? 5000))
+        timers.set(
+          session.id,
+          setTimeout(() => {
+            timers.delete(session.id)
+            if (!running || generation !== epoch || baseline.get(session.id) !== key) return
+            const current = deps.rules().find((r) => r.sessionId === session.id)
+            if (!current?.enabled || (current.accountId && current.accountId !== owner)) return
+            void deps.ingest(event).catch(deps.onError ?? (() => {}))
+          }, deps.quietMs ?? DEFAULT_QUIET_MS),
+        )
       }
       suppressCatchUp = false
-    } catch (error) { deps.onError?.(error) }
-    finally {
+    } catch (error) {
+      deps.onError?.(error)
+    } finally {
       checking = false
-      if (again) { again = false; void refresh() }
+      if (again) {
+        again = false
+        void refresh()
+      }
     }
   }
 
@@ -143,18 +178,20 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
   async function triggerNow(sessionId: string): Promise<{ triggered: boolean; reason?: string }> {
     const status = deps.substrate.status()
     const owner = status.account?.wxid
-    if (status.connection !== 'ready' || !owner) return { triggered: false, reason: '微信数据未连接' }
+    if (status.connection !== 'ready' || !owner) return { triggered: false, reason: t('main.autoReply.notConnected') }
     const rule = deps.rules().find((r) => r.sessionId === sessionId)
-    if (!rule?.enabled) return { triggered: false, reason: '这个会话的自动回复没有开启' }
-    if (rule.accountId && rule.accountId !== owner) return { triggered: false, reason: '规则属于另一个微信账户' }
+    if (!rule?.enabled) return { triggered: false, reason: t('main.autoReply.ruleOff') }
+    if (rule.accountId && rule.accountId !== owner)
+      return { triggered: false, reason: t('main.autoReply.ruleOtherAccount') }
     const session = await deps.substrate.getSession(sessionId)
-    if (!session || (session.kind !== 'dm' && session.kind !== 'group')) return { triggered: false, reason: '找不到这个会话' }
+    if (!session || (session.kind !== 'dm' && session.kind !== 'group'))
+      return { triggered: false, reason: t('main.autoReply.sessionNotFound') }
     const last = (await deps.substrate.listMessages({ sessionId, limit: 1 })).items.at(-1)
-    if (!last) return { triggered: false, reason: '这个会话还没有消息' }
-    if (last.isSelf) return { triggered: false, reason: '最后一条是你发的，没有待回复的消息' }
-    if (!replyable(last)) return { triggered: false, reason: '最后一条消息不支持自动回复' }
+    if (!last) return { triggered: false, reason: t('main.autoReply.noMessages') }
+    if (last.isSelf) return { triggered: false, reason: t('main.autoReply.lastIsSelf') }
+    if (!replyable(last)) return { triggered: false, reason: t('main.autoReply.lastUnsupported') }
 
-    cancel(sessionId, '已手动触发一次自动回复')
+    cancel(sessionId, t('main.autoReply.manualTrigger'))
     baseline.set(sessionId, keyOf(last))
     await deps.ingest(toEvent(session, last, owner, status.account?.nickname), { force: true })
     return { triggered: true }
@@ -166,8 +203,12 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
     start() {
       if (running) return
       running = true
-      off = deps.substrate.subscribe(() => { void refresh() })
-      poll = setInterval(() => { void refresh() }, deps.pollMs ?? 3000)
+      off = deps.substrate.subscribe(() => {
+        void refresh()
+      })
+      poll = setInterval(() => {
+        void refresh()
+      }, deps.pollMs ?? DEFAULT_POLL_MS)
       void refresh()
     },
     stop() {

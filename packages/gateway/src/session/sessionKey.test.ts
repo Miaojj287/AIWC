@@ -30,7 +30,9 @@ describe('buildSessionKey', () => {
 
   it('appends the thread id when present', () => {
     expect(buildSessionKey(dm({ threadId: 't9' }))).toBe('agent:wechat-ilink:dm:u_alice:t9')
-    expect(buildSessionKey({ channel: 'desktop', chatType: 'group', chatId: 'g', peerId: 'me', threadId: 't' })).toBe('agent:desktop:group:g:me:t')
+    expect(buildSessionKey({ channel: 'desktop', chatType: 'group', chatId: 'g', peerId: 'me', threadId: 't' })).toBe(
+      'agent:desktop:group:g:me:t',
+    )
   })
 
   it('never lets an identifier alias another chat through the separator', () => {
@@ -38,9 +40,27 @@ describe('buildSessionKey', () => {
   })
 
   it('round-trips through parseSessionKey', () => {
-    const key = buildSessionKey({ channel: 'wechat-ilink', chatType: 'group', chatId: 'g1@chatroom', peerId: 'u_alice', threadId: 't1' })
-    expect(parseSessionKey(key)).toEqual({ channel: 'wechat-ilink', chatType: 'group', chatId: 'g1@chatroom', peerId: 'u_alice', threadId: 't1' })
-    expect(parseSessionKey(buildSessionKey(dm()))).toEqual({ channel: 'wechat-ilink', chatType: 'dm', chatId: 'u_alice', peerId: 'u_alice', threadId: undefined })
+    const key = buildSessionKey({
+      channel: 'wechat-ilink',
+      chatType: 'group',
+      chatId: 'g1@chatroom',
+      peerId: 'u_alice',
+      threadId: 't1',
+    })
+    expect(parseSessionKey(key)).toEqual({
+      channel: 'wechat-ilink',
+      chatType: 'group',
+      chatId: 'g1@chatroom',
+      peerId: 'u_alice',
+      threadId: 't1',
+    })
+    expect(parseSessionKey(buildSessionKey(dm()))).toEqual({
+      channel: 'wechat-ilink',
+      chatType: 'dm',
+      chatId: 'u_alice',
+      peerId: 'u_alice',
+      threadId: undefined,
+    })
     expect(parseSessionKey('nope')).toBeUndefined()
   })
 })

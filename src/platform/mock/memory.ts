@@ -31,11 +31,28 @@ export function memoryHandlers(ctx: MockContext): HandlersFor<'memory'> & Handle
           .filter(Boolean)
           .join('\n')
       case 'USER':
-        return ['# USER', '', `- 微信昵称：${data.account.nickname ?? data.account.wxid}。`, `- 有 ${data.contactList.length} 个联系人，${sessions.filter((s) => s.kind === 'group').length} 个群。`].join('\n')
+        return [
+          '# USER',
+          '',
+          `- 微信昵称：${data.account.nickname ?? data.account.wxid}。`,
+          `- 有 ${data.contactList.length} 个联系人，${sessions.filter((s) => s.kind === 'group').length} 个群。`,
+        ].join('\n')
       case 'SOUL':
-        return ['# SOUL', '', '- 说话简短、直接，中文优先。', '- 引用聊天记录时给出来源（会话 · 时间）。', '- 不确定时先问一句，不猜。'].join('\n')
+        return [
+          '# SOUL',
+          '',
+          '- 说话简短、直接，中文优先。',
+          '- 引用聊天记录时给出来源（会话 · 时间）。',
+          '- 不确定时先问一句，不猜。',
+        ].join('\n')
       case 'AGENTS':
-        return ['# AGENTS', '', '- 涉及发送、推送前必须确认。', '- 不要把聊天记录发给第三方服务。', '- 生成文件时用 Markdown，标题用中文。'].join('\n')
+        return [
+          '# AGENTS',
+          '',
+          '- 涉及发送、推送前必须确认。',
+          '- 不要把聊天记录发给第三方服务。',
+          '- 生成文件时用 Markdown，标题用中文。',
+        ].join('\n')
     }
   }
 
@@ -54,7 +71,8 @@ export function memoryHandlers(ctx: MockContext): HandlersFor<'memory'> & Handle
 
   function messagesOn(date: string): WxMessage[] {
     const out: WxMessage[] = []
-    for (const list of data.messagesBySession.values()) for (const m of list) if (localDateKey(m.createdAt) === date) out.push(m)
+    for (const list of data.messagesBySession.values())
+      for (const m of list) if (localDateKey(m.createdAt) === date) out.push(m)
     return out.sort((a, b) => a.createdAt - b.createdAt)
   }
 
@@ -67,12 +85,22 @@ export function memoryHandlers(ctx: MockContext): HandlersFor<'memory'> & Handle
       bySession.set(m.sessionId, l)
     }
     if (msgs.length === 0) {
-      return { date, markdown: `# ${date} 日记\n\n今天没有可用的聊天记录。\n\n## 记忆线索\n- 今天没有新的聊天记录。`, cues: ['今天没有新的聊天记录。'], sources: { sessions: [], messageCount: 0, agentTurns: 0 }, generatedAt: ctx.now(), degraded: true }
+      return {
+        date,
+        markdown: `# ${date} 日记\n\n今天没有可用的聊天记录。\n\n## 记忆线索\n- 今天没有新的聊天记录。`,
+        cues: ['今天没有新的聊天记录。'],
+        sources: { sessions: [], messageCount: 0, agentTurns: 0 },
+        generatedAt: ctx.now(),
+        degraded: true,
+      }
     }
     const ranked = [...bySession.entries()].sort((a, b) => b[1].length - a[1].length)
     const sections = ranked.slice(0, 6).map(([sid, list]) => {
       const title = data.sessions.get(sid)?.title ?? sid
-      const lines = list.filter((m) => searchableText(m).length > 3).slice(0, 3).map((m) => `- ${m.senderName ?? '对方'}：${searchableText(m).slice(0, 50)}`)
+      const lines = list
+        .filter((m) => searchableText(m).length > 3)
+        .slice(0, 3)
+        .map((m) => `- ${m.senderName ?? '对方'}：${searchableText(m).slice(0, 50)}`)
       return `### ${title}（${list.length} 条）\n${lines.join('\n') || '- （多为图片、表情或语音）'}`
     })
     const cues = ranked.slice(0, 8).map(([sid, list]) => {
@@ -81,8 +109,24 @@ export function memoryHandlers(ctx: MockContext): HandlersFor<'memory'> & Handle
       return `${title}：${first ? searchableText(first).slice(0, 24) : `${list.length} 条消息`}`
     })
     while (cues.length < 3) cues.push(`共 ${msgs.length} 条消息，${bySession.size} 个会话有往来。`)
-    const markdown = [`# ${date} 日记`, '', `今天共 ${msgs.length} 条消息，涉及 ${bySession.size} 个会话。`, '', '## 会话', ...sections, '', '## 记忆线索', ...cues.map((c) => `- ${c}`)].join('\n')
-    return { date, markdown, cues, sources: { sessions: ranked.map(([sid]) => sid), messageCount: msgs.length, agentTurns: 0 }, generatedAt: ctx.now() }
+    const markdown = [
+      `# ${date} 日记`,
+      '',
+      `今天共 ${msgs.length} 条消息，涉及 ${bySession.size} 个会话。`,
+      '',
+      '## 会话',
+      ...sections,
+      '',
+      '## 记忆线索',
+      ...cues.map((c) => `- ${c}`),
+    ].join('\n')
+    return {
+      date,
+      markdown,
+      cues,
+      sources: { sessions: ranked.map(([sid]) => sid), messageCount: msgs.length, agentTurns: 0 },
+      generatedAt: ctx.now(),
+    }
   }
 
   return {
@@ -96,7 +140,9 @@ export function memoryHandlers(ctx: MockContext): HandlersFor<'memory'> & Handle
     'memory:clear': ({ file }) => write(file, '', 'user'),
 
     'diary:list': () =>
-      [...diaries.values()].sort((a, b) => (a.date < b.date ? 1 : -1)).map(({ date, generatedAt, degraded }) => ({ date, generatedAt, degraded })),
+      [...diaries.values()]
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .map(({ date, generatedAt, degraded }) => ({ date, generatedAt, degraded })),
     'diary:get': ({ date }) => diaries.get(date),
     'diary:generate': async ({ date, force }) => {
       const existing = diaries.get(date)

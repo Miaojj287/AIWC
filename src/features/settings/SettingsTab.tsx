@@ -7,6 +7,7 @@ import { TriangleAlert } from 'lucide-react'
 import { ConfirmDialog, ScrollArea } from '@/kit'
 import { onCommand } from '@/app/commands'
 import { detectMac, shortcutLabel } from '@/app/shortcuts'
+import { useT } from '@/i18n'
 import { useConfigStore } from '@/platform/configStore'
 import type { TabRendererProps } from '@/workspace/tabRegistry'
 import { PAGE_META, isSettingsPage, type SettingsPage, type SettingsTabState } from './model'
@@ -15,6 +16,7 @@ import { GeneralPage } from './pages/GeneralPage'
 import { AccountPage } from './pages/AccountPage'
 import { AiPage } from './pages/AiPage'
 import { MemoryPage } from './pages/MemoryPage'
+import { PetsPage } from './pages/PetsPage'
 import { AboutPage } from './pages/AboutPage'
 import { DirtyContext, HighlightContext, PageHeader } from './pageKit'
 
@@ -24,11 +26,13 @@ const PAGES: Record<SettingsPage, ComponentType> = {
   general: GeneralPage,
   account: AccountPage,
   ai: AiPage,
+  pets: PetsPage,
   memory: MemoryPage,
   about: AboutPage,
 }
 
 export function SettingsTab({ tab, active, update }: TabRendererProps) {
+  const t = useT()
   const state = (tab.state ?? {}) as SettingsTabState
   const page: SettingsPage = isSettingsPage(state.page) ? state.page : 'general'
   const highlight = state.highlight
@@ -55,7 +59,10 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
   }, [dirty, tab.dirty, update])
 
   useEffect(() => {
-    void useConfigStore.getState().hydrate().catch(() => undefined)
+    void useConfigStore
+      .getState()
+      .hydrate()
+      .catch(() => undefined)
   }, [])
 
   // Clear the highlight after 2 s (the row stops flashing; state stays clean for the next search).
@@ -71,7 +78,10 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
     return onCommand('search.inPage', () => searchRef.current?.focus())
   }, [active])
 
-  const go = useCallback((next: SettingsPage, hl?: string) => update({ state: { ...stateRef.current, page: next, highlight: hl } }), [update])
+  const go = useCallback(
+    (next: SettingsPage, hl?: string) => update({ state: { ...stateRef.current, page: next, highlight: hl } }),
+    [update],
+  )
   const navigate = (next: SettingsPage, hl?: string) => {
     if (dirty && next !== page) setPendingPage({ page: next, highlight: hl })
     else go(next, hl)
@@ -81,13 +91,21 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
   const meta = PAGE_META[page]
 
   return (
-    <div className="flex h-full min-h-0 w-full bg-content">
-      <SettingsNav page={page} onNavigate={navigate} searchRef={searchRef} shortcutLabel={shortcutLabel('search.inPage', detectMac())} />
+    <div className="@container/settings flex h-full min-h-0 w-full bg-content">
+      <SettingsNav
+        page={page}
+        onNavigate={navigate}
+        searchRef={searchRef}
+        shortcutLabel={shortcutLabel('search.inPage', detectMac())}
+      />
       <ScrollArea className="min-w-0 flex-1">
         <HighlightContext.Provider value={highlight}>
           <DirtyContext.Provider value={reportDirty}>
-            <div key={page} className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-7 pb-10 pt-6">
-              <PageHeader title={meta.title} description={meta.description} />
+            <div
+              key={page}
+              className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-7 pb-10 pt-6 @max-[720px]/settings:px-4 @max-[720px]/settings:pt-4"
+            >
+              <PageHeader title={t(meta.title)} description={t(meta.description)} />
               <Page />
             </div>
           </DirtyContext.Provider>
@@ -98,10 +116,10 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
         onOpenChange={(o) => !o && setPendingPage(null)}
         icon={TriangleAlert}
         tone="warn"
-        title="放弃未保存的修改？"
-        description={`「${meta.title}」里有还没保存的修改，离开后这些修改会丢失。`}
-        confirmLabel="放弃修改并离开"
-        cancelLabel="继续编辑"
+        title={t('settings.nav.unsaved.title')}
+        description={t('settings.nav.unsaved.description', { page: t(meta.title) })}
+        confirmLabel={t('settings.nav.unsaved.confirm')}
+        cancelLabel={t('settings.nav.unsaved.cancel')}
         onConfirm={() => {
           const next = pendingPage
           setPendingPage(null)

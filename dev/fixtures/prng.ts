@@ -76,13 +76,3 @@ export function createRng(seed: number): Rng {
   }
   return rng
 }
-
-/** Stable 32-bit hash of a string (FNV-1a) — for deriving per-entity seeds. */
-export function hashString(input: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-  }
-  return h >>> 0
-}

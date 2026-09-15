@@ -3,7 +3,8 @@
  * with search-highlight support. Every page is `PageHeader + Section* → Card variant="rows" → SRow*`.
  */
 import { createContext, useContext, useEffect, type ReactNode } from 'react'
-import { SettingRow, cn, type SettingRowProps } from '@/kit'
+import { HelpTip, SettingRow, cn, type SettingRowProps } from '@/kit'
+import { useT } from '@/i18n'
 
 /** Row id (SettingsRow.id from searchIndex) that should flash for ~2 s, or undefined. */
 export const HighlightContext = createContext<string | undefined>(undefined)
@@ -36,6 +37,8 @@ export function PageHeader({ title, description }: { title: ReactNode; descripti
 
 export interface SectionProps {
   title: ReactNode
+  /** Explanation behind a ? glyph after the label (data-flow / privacy notes live here, not as standing hints). */
+  help?: ReactNode
   /** Right-aligned helper (path, actions). */
   aside?: ReactNode
   children: ReactNode
@@ -43,12 +46,13 @@ export interface SectionProps {
 }
 
 /** Section label (12 weak) above one or more cards. */
-export function Section({ title, aside, children, className }: SectionProps) {
+export function Section({ title, help, aside, children, className }: SectionProps) {
   return (
     <section className={cn('flex flex-col gap-2', className)}>
-      <div className="flex items-center gap-3">
-        <h2 className="text-caption text-fg-3">{title}</h2>
-        {aside ? <div className="ml-auto min-w-0 truncate text-micro text-fg-3">{aside}</div> : null}
+      <div className="flex items-center gap-1.5">
+        <h2 className="shrink-0 text-caption text-fg-3">{title}</h2>
+        {help ? <HelpTip content={help} size={12} subject={typeof title === 'string' ? title : undefined} /> : null}
+        {aside ? <div className="ml-auto min-w-0 truncate pl-3 text-micro text-fg-3">{aside}</div> : null}
       </div>
       {children}
     </section>
@@ -73,7 +77,11 @@ export function SRow({ id, className, ...rest }: SRowProps) {
       id={rowDomId(id)}
       data-setting-row={id}
       data-highlighted={on || undefined}
-      className={cn('transition-colors duration-(--dur-base)', on && 'bg-accent-12 ring-1 ring-inset ring-accent/50', className)}
+      className={cn(
+        'transition-colors duration-(--dur-base)',
+        on && 'bg-accent-12 ring-1 ring-inset ring-accent/50',
+        className,
+      )}
       {...rest}
     />
   )
@@ -81,8 +89,13 @@ export function SRow({ id, className, ...rest }: SRowProps) {
 
 /** Card-shaped placeholder while a page's data loads. */
 export function PagePlaceholder({ rows = 3 }: { rows?: number }) {
+  const t = useT()
   return (
-    <div role="status" aria-label="加载中" className="flex flex-col gap-2 rounded-card border border-line-6 bg-panel p-4">
+    <div
+      role="status"
+      aria-label={t('common.loading')}
+      className="flex flex-col gap-2 rounded-card border border-line-6 bg-panel p-4"
+    >
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center justify-between gap-4 py-2">
           <div className="flex flex-col gap-1.5">

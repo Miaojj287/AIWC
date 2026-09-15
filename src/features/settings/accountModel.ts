@@ -2,26 +2,40 @@
  * Account page helpers (DESIGN-SPEC §2 账号): key hex validation, secret refs, and the mapping of
  * substrate:acquireKeys steps onto the ProgressDialog. Pure — tested in accountModel.test.ts.
  */
-import type { AppConfig, KeyAcquireStep } from '@aiwc/protocol'
+import { validateWechatKey, type AppConfig, type KeyAcquireStep } from '@aiwc/protocol'
 import type { ProgressStep } from '@/kit'
+import { localizeKnownText, t, type MessageKey } from '@/i18n'
 
 export type KeyKind = 'db_key' | 'image_xor' | 'image_aes'
 
 /** Expected hex length per key: SQLCipher raw key 32 bytes, XOR one byte, AES 16 bytes. */
 export const KEY_HEX_LENGTH: Record<KeyKind, number> = { db_key: 64, image_xor: 2, image_aes: 32 }
 
-export const KEY_LABEL: Record<KeyKind, string> = { db_key: '数据库密钥', image_xor: '图片 XOR 密钥', image_aes: '图片 AES 密钥' }
+export const KEY_LABEL: Record<KeyKind, MessageKey> = {
+  db_key: 'settings.account.keyLabel.dbKey',
+  image_xor: 'settings.account.keyLabel.imageXor',
+  image_aes: 'settings.account.keyLabel.imageAes',
+}
 
 export type HexValidation = { ok: true; hex: string } | { ok: false; error: string }
 
-export { validateWechatKey as validateKeyHex } from '@aiwc/protocol'
+/** Protocol's key parser with its (package-side, Chinese) error mapped to the UI language. */
+export function validateKeyHex(...args: Parameters<typeof validateWechatKey>): HexValidation {
+  const v = validateWechatKey(...args)
+  return v.ok ? v : { ...v, error: localizeKnownText(v.error) }
+}
 
-const DEFAULT_REF: Record<KeyKind, string> = { db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' }
+const DEFAULT_REF: Record<KeyKind, string> = {
+  db_key: 'account:dbKey',
+  image_xor: 'account:imageXorKey',
+  image_aes: 'account:imageAesKey',
+}
 
 /** Secret-store reference for a key: the configured `*Ref`, else the conventional default. */
 export function secretRefFor(account: AppConfig['account'] | undefined, kind: KeyKind): string {
   if (!account) return DEFAULT_REF[kind]
-  const ref = kind === 'db_key' ? account.dbKeyRef : kind === 'image_xor' ? account.imageXorKeyRef : account.imageAesKeyRef
+  const ref =
+    kind === 'db_key' ? account.dbKeyRef : kind === 'image_xor' ? account.imageXorKeyRef : account.imageAesKeyRef
   return ref ?? DEFAULT_REF[kind]
 }
 
@@ -30,11 +44,36 @@ export function maskSecret(kind: KeyKind): string {
   return '•'.repeat(Math.min(48, KEY_HEX_LENGTH[kind]))
 }
 
+/** Placeholder steps until main pushes its own; labels are getters so a copy (`{ ...step }`) takes the current language. */
 export const DEFAULT_KEY_STEPS: readonly KeyAcquireStep[] = [
-  { id: 'db_key', label: '读取数据库密钥', status: 'todo' },
-  { id: 'image_xor', label: '提取图片 XOR 密钥', status: 'todo' },
-  { id: 'image_aes', label: '提取图片 AES 密钥', status: 'todo' },
-  { id: 'verify', label: '验证账号并写入本地配置', status: 'todo' },
+  {
+    id: 'db_key',
+    get label() {
+      return t('settings.account.steps.dbKey')
+    },
+    status: 'todo',
+  },
+  {
+    id: 'image_xor',
+    get label() {
+      return t('settings.account.steps.imageXor')
+    },
+    status: 'todo',
+  },
+  {
+    id: 'image_aes',
+    get label() {
+      return t('settings.account.steps.imageAes')
+    },
+    status: 'todo',
+  },
+  {
+    id: 'verify',
+    get label() {
+      return t('settings.account.steps.verify')
+    },
+    status: 'todo',
+  },
 ]
 
 /** Replace the step with the same id (or append) — used for the substrate:keyStep push events. */
@@ -59,7 +98,14 @@ export function summarizeKeySteps(steps: readonly KeyAcquireStep[]): KeyStepsSum
   const failed = steps.filter((s) => s.status === 'failed')
   const running = steps.find((s) => s.status === 'doing')
   const finished = total > 0 && steps.every((s) => s.status === 'done' || s.status === 'failed')
-  return { done, total, percent: total ? Math.round(((done + failed.length) / total) * 100) : 0, failed, running, finished }
+  return {
+    done,
+    total,
+    percent: total ? Math.round(((done + failed.length) / total) * 100) : 0,
+    failed,
+    running,
+    finished,
+  }
 }
 
 export function keyStepsToProgress(steps: readonly KeyAcquireStep[]): ProgressStep[] {
@@ -68,5 +114,7 @@ export function keyStepsToProgress(steps: readonly KeyAcquireStep[]): ProgressSt
 
 /** Which key kinds a failed step list still needs — drives the "手动输入" fallback. */
 export function missingKeyKinds(steps: readonly KeyAcquireStep[]): KeyKind[] {
-  return steps.filter((s): s is KeyAcquireStep & { id: KeyKind } => s.status === 'failed' && s.id !== 'verify').map((s) => s.id)
+  return steps
+    .filter((s): s is KeyAcquireStep & { id: KeyKind } => s.status === 'failed' && s.id !== 'verify')
+    .map((s) => s.id)
 }

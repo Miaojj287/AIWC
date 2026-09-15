@@ -3,7 +3,8 @@
  * we SELECT * because explicit column lists break on older schemas.
  */
 import type { WxSession } from '@aiwc/protocol'
-import { classifySessionKind, shouldKeepSession } from './accountUtils'
+import { sessionKindFromUsername } from '../normalize/kinds'
+import { shouldKeepSession } from './accountUtils'
 import type { ContactDirectory } from './contactQueries'
 import { processSummary } from './contentParsers'
 import { coerceRowNumber, coerceRowString, getRowField, type Row } from './rowDecoders'
@@ -30,14 +31,18 @@ export function sessionRowSortTimestamp(row: Row): number {
 }
 
 /** Convert to protocol WxSession; returns null for sessions we do not surface. */
-export function rowToWxSession(row: Row, contacts: ContactDirectory | null, memberCounts: ReadonlyMap<string, number>): WxSession | null {
+export function rowToWxSession(
+  row: Row,
+  contacts: ContactDirectory | null,
+  memberCounts: ReadonlyMap<string, number>,
+): WxSession | null {
   const username = sessionRowUsername(row)
   if (!shouldKeepSession(username)) return null
   const sortTs = sessionRowSortTimestamp(row)
   const lastTs = coerceRowNumber(getRowField(row, ['last_timestamp', 'lastTimestamp']), sortTs)
   const lastMsgType = coerceRowNumber(getRowField(row, ['last_msg_type', 'lastMsgType']), 0)
   const record = contacts?.get(username)
-  const kind = record?.kind === 'official' ? 'official' : classifySessionKind(username)
+  const kind = record?.kind === 'official' ? 'official' : sessionKindFromUsername(username)
   const mutedRaw = getRowField(row, ['is_muted', 'mute', 'muted'])
   const session: WxSession = {
     id: username,
@@ -79,7 +84,11 @@ export async function querySessions(
   const sessions: WxSession[] = []
   let offset = 0
   for (;;) {
-    const rows = ctx.q.all(ctx.sessionDbPath, `SELECT * FROM ${quoteIdent(table)} ORDER BY sort_timestamp DESC LIMIT ${PAGE} OFFSET ?`, [offset])
+    const rows = ctx.q.all(
+      ctx.sessionDbPath,
+      `SELECT * FROM ${quoteIdent(table)} ORDER BY sort_timestamp DESC LIMIT ${PAGE} OFFSET ?`,
+      [offset],
+    )
     ctx.contacts?.preload(rows.map(sessionRowUsername))
     const page: WxSession[] = []
     for (const row of rows) {
@@ -112,10 +121,18 @@ export function querySessionActivity(q: WcdbQuery, sessionDbPath: string): Map<s
 }
 
 /** Sessions whose sort_timestamp advanced past `sinceSeconds` (change notifications). */
-export function querySessionsChangedSince(q: WcdbQuery, sessionDbPath: string, sinceSeconds: number): { ids: string[]; maxSortTimestamp: number } {
+export function querySessionsChangedSince(
+  q: WcdbQuery,
+  sessionDbPath: string,
+  sinceSeconds: number,
+): { ids: string[]; maxSortTimestamp: number } {
   const table = resolveSessionTable(q, sessionDbPath)
   if (!table) return { ids: [], maxSortTimestamp: sinceSeconds }
-  const rows = q.all(sessionDbPath, `SELECT * FROM ${quoteIdent(table)} WHERE sort_timestamp > ? ORDER BY sort_timestamp DESC LIMIT 200`, [sinceSeconds])
+  const rows = q.all(
+    sessionDbPath,
+    `SELECT * FROM ${quoteIdent(table)} WHERE sort_timestamp > ? ORDER BY sort_timestamp DESC LIMIT 200`,
+    [sinceSeconds],
+  )
   let max = sinceSeconds
   const ids: string[] = []
   for (const row of rows) {

@@ -27,7 +27,10 @@ export class SubstrateError extends Error {
 }
 
 export function isSubstrateError(err: unknown): err is SubstrateError {
-  return err instanceof SubstrateError || (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'SubstrateError')
+  return (
+    err instanceof SubstrateError ||
+    (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'SubstrateError')
+  )
 }
 
 export function errorMessage(err: unknown): string {

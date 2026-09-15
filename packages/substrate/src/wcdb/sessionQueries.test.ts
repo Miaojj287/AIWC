@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { ContactDirectory } from './contactQueries'
 import type { WcdbQuery } from './query'
 import type { Row } from './rowDecoders'
-import { querySessions } from './sessionQueries'
+import { sessionKindFromUsername } from '../normalize/kinds'
+import { querySessions, rowToWxSession } from './sessionQueries'
 
 function queryFixture(sessionRows: Row[], contactRows: Row[]) {
   const sqlLog: string[] = []
@@ -46,10 +47,8 @@ describe('fast session discovery', () => {
       expect(pages).toEqual([500])
     })
 
-    const result = await querySessions(
-      { q, sessionDbPath: 'sessions', contacts: directory },
-      yieldEvery,
-      (page) => pages.push(page.length),
+    const result = await querySessions({ q, sessionDbPath: 'sessions', contacts: directory }, yieldEvery, (page) =>
+      pages.push(page.length),
     )
 
     expect(pages).toEqual([500, 1])
@@ -69,5 +68,22 @@ describe('fast session discovery', () => {
     expect(directory.get('missing')).toBeUndefined()
     expect(sqlLog.filter((sql) => /WHERE username IN/.test(sql))).toHaveLength(2)
     expect(sqlLog.some((sql) => /rowid >/.test(sql))).toBe(false)
+  })
+})
+
+describe('session kinds', () => {
+  it('classifies surfaced sessions with the same rule the mirror uses', () => {
+    for (const username of [
+      'wxid_friend',
+      '12345@chatroom',
+      '12345@im.chatroom',
+      'gh_news',
+      'filehelper',
+      'fake_bot',
+      'wxapp_demo@app',
+      'buddy@qqim',
+    ]) {
+      expect(rowToWxSession({ username }, null, new Map())?.kind, username).toBe(sessionKindFromUsername(username))
+    }
   })
 })

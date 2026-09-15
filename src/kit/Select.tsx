@@ -1,6 +1,7 @@
 import { Check, ChevronUp, ChevronsUpDown, Search } from 'lucide-react'
 import { Popover as RadixPopover } from 'radix-ui'
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { Divider } from './Divider'
 import { ICON_SIZE, ICON_STROKE, type IconComponent } from './icon'
@@ -53,7 +54,8 @@ export interface SelectProps<T extends string = string> {
   onOpenChange?: (open: boolean) => void
 }
 
-type Row<T extends string> = { kind: 'option'; option: SelectOption<T> } | { kind: 'footer'; action: SelectFooterAction }
+type Row<T extends string> =
+  { kind: 'option'; option: SelectOption<T> } | { kind: 'footer'; action: SelectFooterAction }
 
 /**
  * Select — pick one value from a few (CLAUDE.md §4.3). Figma 154:791 (trigger) + 154:1063 (list).
@@ -65,10 +67,10 @@ export function Select<T extends string = string>({
   options,
   value,
   onValueChange,
-  placeholder = '请选择',
+  placeholder,
   searchable = false,
-  searchPlaceholder = '搜索…',
-  emptyText = '没有匹配的选项',
+  searchPlaceholder,
+  emptyText,
   disabled = false,
   footer,
   size = 'default',
@@ -83,6 +85,7 @@ export function Select<T extends string = string>({
   onOpenChange,
   ...aria
 }: SelectProps<T>) {
+  const t = useT()
   const [openState, setOpenState] = useState(false)
   const open = openProp ?? openState
   const setOpen = (next: boolean) => {
@@ -101,7 +104,12 @@ export function Select<T extends string = string>({
   const rows = useMemo<Row<T>[]>(() => {
     const q = query.trim().toLowerCase()
     const visible = q
-      ? options.filter((o) => o.label.toLowerCase().includes(q) || o.description?.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+      ? options.filter(
+          (o) =>
+            o.label.toLowerCase().includes(q) ||
+            o.description?.toLowerCase().includes(q) ||
+            o.value.toLowerCase().includes(q),
+        )
       : options
     const out: Row<T>[] = visible.map((option) => ({ kind: 'option', option }))
     if (footer) out.push({ kind: 'footer', action: footer })
@@ -110,18 +118,24 @@ export function Select<T extends string = string>({
 
   const isEnabled = (row: Row<T> | undefined) => !!row && (row.kind === 'footer' || !row.option.disabled)
 
-  // Reset state when opening: highlight the selected option.
-  useEffect(() => {
-    if (!open) return
+  // Reset state when opening: highlight the selected option. Runs on the open transition only, reading the latest rows.
+  const resetForOpen = useEffectEvent(() => {
     setQuery('')
     const idx = rows.findIndex((r) => r.kind === 'option' && r.option.value === value)
     setActive(idx >= 0 ? idx : rows.findIndex(isEnabled))
+  })
+  useEffect(() => {
+    if (open) resetForOpen()
   }, [open])
 
-  useEffect(() => {
+  // Keep the highlight on an enabled row when filtering changes the rows.
+  const keepActiveEnabled = useEffectEvent(() => {
     if (!open) return
     const first = rows.findIndex(isEnabled)
     setActive((a) => (isEnabled(rows[a]) ? a : first))
+  })
+  useEffect(() => {
+    keepActiveEnabled()
   }, [rows])
 
   useEffect(() => {
@@ -165,7 +179,10 @@ export function Select<T extends string = string>({
         break
       case 'End': {
         e.preventDefault()
-        const last = [...rows].map((r, i) => (isEnabled(r) ? i : -1)).filter((i) => i >= 0).pop()
+        const last = [...rows]
+          .map((r, i) => (isEnabled(r) ? i : -1))
+          .filter((i) => i >= 0)
+          .pop()
         if (last !== undefined) setActive(last)
         break
       }
@@ -179,7 +196,9 @@ export function Select<T extends string = string>({
       default:
         if (!searchable && e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
           const k = e.key.toLowerCase()
-          const idx = rows.findIndex((r) => r.kind === 'option' && !r.option.disabled && r.option.label.toLowerCase().startsWith(k))
+          const idx = rows.findIndex(
+            (r) => r.kind === 'option' && !r.option.disabled && r.option.label.toLowerCase().startsWith(k),
+          )
           if (idx >= 0) setActive(idx)
         }
     }
@@ -203,7 +222,7 @@ export function Select<T extends string = string>({
           data-state={open ? 'open' : 'closed'}
           data-placeholder={selected ? undefined : ''}
           className={cn(
-            'inline-flex shrink-0 items-center gap-1.5 rounded-control border border-line-8 bg-hover-5 pl-2.5 pr-2 text-caption text-fg',
+            'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-control border border-line-8 bg-hover-5 pl-2.5 pr-2 text-caption text-fg',
             'transition-colors duration-(--dur-fast) hover:bg-line-10',
             'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
             'data-[state=open]:border-accent/70 data-[state=open]:hover:bg-hover-5',
@@ -214,12 +233,32 @@ export function Select<T extends string = string>({
             className,
           )}
         >
-          {selected?.icon ? <selected.icon size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" /> : null}
-          <span className={cn('min-w-0 truncate text-left', fullWidth && 'flex-1')}>{triggerText ?? placeholder}</span>
+          {selected?.icon ? (
+            <selected.icon
+              size={ICON_SIZE.menuAux}
+              strokeWidth={ICON_STROKE}
+              aria-hidden
+              className="shrink-0 text-fg-3"
+            />
+          ) : null}
+          {/* A custom `renderValue` brings its own (flex) layout and truncates its leaves itself; a plain label truncates here. */}
+          <span className={cn('min-w-0 flex-1 text-left', !renderValue && 'truncate')}>
+            {triggerText ?? placeholder ?? t('kit.select.placeholder')}
+          </span>
           {open ? (
-            <ChevronUp size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden className="ml-auto shrink-0 text-fg-3" />
+            <ChevronUp
+              size={ICON_SIZE.menuAux}
+              strokeWidth={ICON_STROKE}
+              aria-hidden
+              className="ml-auto shrink-0 text-fg-3"
+            />
           ) : (
-            <ChevronsUpDown size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden className="ml-auto shrink-0 text-fg-3" />
+            <ChevronsUpDown
+              size={ICON_SIZE.menuAux}
+              strokeWidth={ICON_STROKE}
+              aria-hidden
+              className="ml-auto shrink-0 text-fg-3"
+            />
           )}
         </button>
       </RadixPopover.Trigger>
@@ -232,7 +271,8 @@ export function Select<T extends string = string>({
           onOpenAutoFocus={(e) => {
             e.preventDefault()
             // Only pull focus into the list when the user opened it from the trigger (not when forced open).
-            if (document.activeElement === triggerRef.current) (searchable ? searchRef.current : listRef.current)?.focus()
+            if (document.activeElement === triggerRef.current)
+              (searchable ? searchRef.current : listRef.current)?.focus()
           }}
           className={cn(
             'kit-menu z-50 flex max-h-(--radix-popover-content-available-height) w-max min-w-[max(200px,var(--radix-popover-trigger-width))] max-w-[360px]',
@@ -248,7 +288,7 @@ export function Select<T extends string = string>({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={searchPlaceholder}
+                placeholder={searchPlaceholder ?? t('kit.select.searchPlaceholder')}
                 aria-controls={listId}
                 aria-activedescendant={rows[active] ? `${listId}-${active}` : undefined}
                 className="min-w-0 flex-1 bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3"
@@ -265,7 +305,7 @@ export function Select<T extends string = string>({
             className="flex min-h-0 flex-col gap-px overflow-y-auto outline-none"
           >
             {rows.length === 0 || (rows.length === 1 && rows[0]?.kind === 'footer' && options.length > 0 && query) ? (
-              <div className="px-2 py-2 text-caption text-fg-3">{emptyText}</div>
+              <div className="px-2 py-2 text-caption text-fg-3">{emptyText ?? t('kit.select.empty')}</div>
             ) : null}
             {rows.map((row, i) => {
               if (row.kind === 'footer') {
@@ -288,7 +328,9 @@ export function Select<T extends string = string>({
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col gap-px">
                         <span className="truncate text-tab text-fg">{row.action.label}</span>
-                        {row.action.description ? <span className="truncate text-micro text-fg-3">{row.action.description}</span> : null}
+                        {row.action.description ? (
+                          <span className="truncate text-micro text-fg-3">{row.action.description}</span>
+                        ) : null}
                       </span>
                     </div>
                   </div>
@@ -314,10 +356,19 @@ export function Select<T extends string = string>({
                     {isSelected ? <Check size={ICON_SIZE.menuAux} strokeWidth={2} aria-hidden /> : null}
                   </span>
                   {option.leading}
-                  {option.icon ? <option.icon size={ICON_SIZE.menu} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" /> : null}
+                  {option.icon ? (
+                    <option.icon
+                      size={ICON_SIZE.menu}
+                      strokeWidth={ICON_STROKE}
+                      aria-hidden
+                      className="shrink-0 text-fg-3"
+                    />
+                  ) : null}
                   <span className="flex min-w-0 flex-1 flex-col gap-px">
                     <span className="truncate text-tab text-fg">{option.label}</span>
-                    {option.description ? <span className="truncate text-micro text-fg-3">{option.description}</span> : null}
+                    {option.description ? (
+                      <span className="truncate text-micro text-fg-3">{option.description}</span>
+                    ) : null}
                   </span>
                   {option.badge ? <span className="shrink-0">{option.badge}</span> : null}
                 </div>

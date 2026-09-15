@@ -19,9 +19,17 @@ describe('splitLinks', () => {
 
 describe('segmentText', () => {
   it('marks case-insensitive matches without breaking links', () => {
-    expect(segmentText('周报 Weekly 周报', '周报')).toEqual([{ text: '周报', mark: true }, { text: ' Weekly ' }, { text: '周报', mark: true }])
+    expect(segmentText('周报 Weekly 周报', '周报')).toEqual([
+      { text: '周报', mark: true },
+      { text: ' Weekly ' },
+      { text: '周报', mark: true },
+    ])
     const segs = segmentText('见 https://a.com/Report', 'report')
-    expect(segs).toEqual([{ text: '见 ' }, { text: 'https://a.com/', href: 'https://a.com/Report' }, { text: 'Report', href: 'https://a.com/Report', mark: true }])
+    expect(segs).toEqual([
+      { text: '见 ' },
+      { text: 'https://a.com/', href: 'https://a.com/Report' },
+      { text: 'Report', href: 'https://a.com/Report', mark: true },
+    ])
   })
   it('ignores an empty query', () => {
     expect(segmentText('abc', '  ')).toEqual([{ text: 'abc' }])

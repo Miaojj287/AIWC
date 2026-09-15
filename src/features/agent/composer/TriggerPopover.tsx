@@ -4,6 +4,7 @@
  * keyboard; these components only render and report hover / click. Figma 150:619 / 150:674.
  */
 import type { MentionKind, SkillSummary } from '@aiwc/protocol'
+import { useT, type MessageKey } from '@/i18n'
 import { Avatar, EmptyState, Kbd, SegmentedControl } from '@/kit'
 import { MENTION_TABS, type MentionCandidate } from '../mentionSources'
 import { MENTION_ICON } from '../messages/mentionChips'
@@ -19,13 +20,39 @@ export interface MentionListProps {
   query: string
 }
 
-export function MentionList({ kind, onKindChange, items, loading = false, activeIndex, onActiveIndexChange, onPick, query }: MentionListProps) {
+export function MentionList({
+  kind,
+  onKindChange,
+  items,
+  loading = false,
+  activeIndex,
+  onActiveIndexChange,
+  onPick,
+  query,
+}: MentionListProps) {
+  const t = useT()
   return (
     <div className="flex flex-col gap-2.5" data-popover="mention">
-      <SegmentedControl aria-label="引用类型" size="sm" fullWidth options={MENTION_TABS} value={kind} onValueChange={onKindChange} />
-      <div role="listbox" aria-label="引用候选" className="flex max-h-[176px] flex-col gap-px overflow-y-auto">
+      <SegmentedControl
+        aria-label={t('agent.mention.typeLabel')}
+        size="sm"
+        fullWidth
+        options={MENTION_TABS.map((tab) => ({ value: tab.value, label: t(tab.labelKey) }))}
+        value={kind}
+        onValueChange={onKindChange}
+      />
+      <div
+        role="listbox"
+        aria-label={t('agent.mention.candidates')}
+        className="flex max-h-[176px] flex-col gap-px overflow-y-auto"
+      >
         {items.length === 0 ? (
-          <EmptyState variant={loading ? 'loading' : query ? 'no-results' : 'empty'} title={loading ? '正在搜索' : query ? '没有匹配项' : EMPTY_TITLE[kind]} compact className="py-3" />
+          <EmptyState
+            variant={loading ? 'loading' : query ? 'no-results' : 'empty'}
+            title={loading ? t('agent.mention.searching') : query ? t('agent.mention.noMatches') : t(EMPTY_TITLE[kind])}
+            compact
+            className="py-3"
+          />
         ) : (
           items.map((item, i) => {
             const Icon = MENTION_ICON[item.kind]
@@ -50,7 +77,9 @@ export function MentionList({ kind, onKindChange, items, loading = false, active
                 )}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-tab leading-4 text-fg">{item.label}</span>
-                  {item.subtitle ? <span className="truncate text-micro leading-[14px] text-fg-3">{item.subtitle}</span> : null}
+                  {item.subtitle ? (
+                    <span className="truncate text-micro leading-[14px] text-fg-3">{item.subtitle}</span>
+                  ) : null}
                 </span>
               </div>
             )
@@ -62,11 +91,11 @@ export function MentionList({ kind, onKindChange, items, loading = false, active
   )
 }
 
-const EMPTY_TITLE: Record<MentionKind, string> = {
-  session: '没有可引用的会话',
-  file: '中间还没有打开文件',
-  contact: '没有可引用的联系人',
-  memory: '没有记忆文件',
+const EMPTY_TITLE: Record<MentionKind, MessageKey> = {
+  session: 'agent.mention.empty.session',
+  file: 'agent.mention.empty.file',
+  contact: 'agent.mention.empty.contact',
+  memory: 'agent.mention.empty.memory',
 }
 
 export interface SkillListProps {
@@ -77,12 +106,17 @@ export interface SkillListProps {
 }
 
 export function SkillList({ items, activeIndex, onActiveIndexChange, onPick }: SkillListProps) {
+  const t = useT()
   return (
     <div className="flex flex-col gap-1" data-popover="skills">
-      <div className="px-2 pb-1 pt-0.5 text-micro font-medium text-fg-3">技能与指令 · 输入 / 触发</div>
-      <div role="listbox" aria-label="技能" className="flex max-h-[220px] flex-col gap-px overflow-y-auto">
+      <div className="px-2 pb-1 pt-0.5 text-micro font-medium text-fg-3">{t('agent.skills.header')}</div>
+      <div
+        role="listbox"
+        aria-label={t('agent.skills.label')}
+        className="flex max-h-[220px] flex-col gap-px overflow-y-auto"
+      >
         {items.length === 0 ? (
-          <EmptyState variant="no-results" title="没有匹配的技能" compact className="py-3" />
+          <EmptyState variant="no-results" title={t('agent.skills.noMatches')} compact className="py-3" />
         ) : (
           items.map((s, i) => (
             <div
@@ -101,7 +135,11 @@ export function SkillList({ items, activeIndex, onActiveIndexChange, onPick }: S
                 <span className="truncate text-tab leading-4 text-fg">{s.name}</span>
                 <span className="truncate text-micro leading-[14px] text-fg-3">{s.description}</span>
               </span>
-              {s.source !== 'builtin' ? <span className="shrink-0 text-micro text-fg-3">{s.source === 'user' ? '自定义' : 'Agent'}</span> : null}
+              {s.source !== 'builtin' ? (
+                <span className="shrink-0 text-micro text-fg-3">
+                  {s.source === 'user' ? t('agent.skills.custom') : 'Agent'}
+                </span>
+              ) : null}
             </div>
           ))
         )}
@@ -111,16 +149,17 @@ export function SkillList({ items, activeIndex, onActiveIndexChange, onPick }: S
 }
 
 function KeyHints() {
+  const t = useT()
   return (
     <div className="flex items-center gap-2.5 text-micro text-fg-3">
       <span className="flex items-center gap-1">
-        <Kbd keys="↑↓" /> 选择
+        <Kbd keys="↑↓" /> {t('agent.mention.hintSelect')}
       </span>
       <span className="flex items-center gap-1">
-        <Kbd keys="↵" /> 插入
+        <Kbd keys="↵" /> {t('agent.mention.hintInsert')}
       </span>
       <span className="flex items-center gap-1">
-        <Kbd keys="esc" /> 关闭
+        <Kbd keys="esc" /> {t('common.close')}
       </span>
     </div>
   )

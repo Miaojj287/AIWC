@@ -22,8 +22,8 @@ import {
   cn,
   type MenuSpec,
 } from '@/kit'
+import { useT, type Translator } from '@/i18n'
 import { formatClock, formatDateDivider } from '@/platform/format'
-import { toMediaUrl } from './mediaUrl'
 import { wechatEmoji } from './wechatEmoji'
 import { MessageBody } from './MessageBody'
 import { isNoticeKind } from './streamModel'
@@ -55,7 +55,9 @@ export interface MessageRowProps extends MessageActions {
 export function DayPill({ at }: { at: number }) {
   return (
     <div className="flex justify-center px-6 py-2">
-      <span className="rounded-chip bg-raised px-2.5 py-0.5 font-latin text-micro text-fg-3">{formatDateDivider(at)}</span>
+      <span className="rounded-chip bg-raised px-2.5 py-0.5 font-latin text-micro text-fg-3">
+        {formatDateDivider(at)}
+      </span>
     </div>
   )
 }
@@ -63,33 +65,85 @@ export function DayPill({ at }: { at: number }) {
 function NoticeRow({ message }: { message: WxMessage }) {
   return (
     <div data-message-id={message.id} className="flex justify-center px-6 py-3">
-      <span className="max-w-[80%] whitespace-pre-wrap break-words px-2.5 py-0.5 text-center text-caption text-fg-3" title={message.text}>
+      <span
+        className="max-w-[80%] whitespace-pre-wrap break-words px-2.5 py-0.5 text-center text-caption text-fg-3"
+        title={message.text}
+      >
         {wechatEmoji(message.text)}
       </span>
     </div>
   )
 }
 
-function buildMenu(message: WxMessage, actions: MessageActions, mac: boolean, selected: boolean): MenuSpec {
+function buildMenu(
+  message: WxMessage,
+  actions: MessageActions,
+  mac: boolean,
+  selected: boolean,
+  t: Translator,
+): MenuSpec {
   return [
-    { id: 'copy', label: '复制', icon: Copy, shortcut: mac ? '⌘C' : 'Ctrl+C', onSelect: () => actions.onCopy(message) },
-    { id: 'quote', label: '引用到 Agent', icon: AtSign, shortcut: mac ? '⌘⇧A' : 'Ctrl+Shift+A', onSelect: () => actions.onQuote(message) },
-    { id: 'select', label: selected ? '取消勾选' : '勾选', icon: SquareCheck, onSelect: () => actions.onToggleSelect(message) },
+    {
+      id: 'copy',
+      label: t('common.copy'),
+      icon: Copy,
+      shortcut: mac ? '⌘C' : 'Ctrl+C',
+      onSelect: () => actions.onCopy(message),
+    },
+    {
+      id: 'quote',
+      label: t('chat.actions.quoteToAgent'),
+      icon: AtSign,
+      shortcut: mac ? '⌘⇧A' : 'Ctrl+Shift+A',
+      onSelect: () => actions.onQuote(message),
+    },
+    {
+      id: 'select',
+      label: selected ? t('chat.message.unselect') : t('chat.message.select'),
+      icon: SquareCheck,
+      onSelect: () => actions.onToggleSelect(message),
+    },
     { type: 'separator' },
-    { id: 'jump', label: '跳转到时间', icon: Clock, description: '清除筛选，定位到这条消息', onSelect: () => actions.onJumpToTime(message) },
+    {
+      id: 'jump',
+      label: t('chat.message.jumpToTime'),
+      icon: Clock,
+      description: t('chat.message.jumpToTimeDescription'),
+      onSelect: () => actions.onJumpToTime(message),
+    },
     { type: 'separator' },
-    { id: 'delete', label: '删除本地缓存', icon: Trash, danger: true, onSelect: () => actions.onDeleteLocal(message) },
+    {
+      id: 'delete',
+      label: t('chat.message.deleteLocal'),
+      icon: Trash,
+      danger: true,
+      onSelect: () => actions.onDeleteLocal(message),
+    },
   ]
 }
 
-export const MessageRow = memo(function MessageRow({ message, isGroup, selectMode, selected, focused, highlight, selfAvatar, senderAvatar, continued, mac, ...actions }: MessageRowProps) {
+export const MessageRow = memo(function MessageRow({
+  message,
+  isGroup,
+  selectMode,
+  selected,
+  focused,
+  highlight,
+  selfAvatar,
+  senderAvatar,
+  continued,
+  mac,
+  ...actions
+}: MessageRowProps) {
+  const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const self = message.isSelf
-  const menu = useMemo(() => buildMenu(message, actions, mac, selected), [message, actions, mac, selected])
+  const menu = useMemo(() => buildMenu(message, actions, mac, selected, t), [message, actions, mac, selected, t])
 
   if (isNoticeKind(message.kind)) return <NoticeRow message={message} />
 
-  const bare = Boolean(message.rich) || message.kind === 'sticker' || message.kind === 'image' || message.kind === 'video'
+  const bare =
+    Boolean(message.rich) || message.kind === 'sticker' || message.kind === 'image' || message.kind === 'video'
   const bubbleClass = bare
     ? 'p-0'
     : self
@@ -105,18 +159,29 @@ export const MessageRow = memo(function MessageRow({ message, isGroup, selectMod
       )}
       onClick={(e) => e.stopPropagation()}
     >
-      <Tooltip content="复制">
-        <IconButton size="sm" icon={Copy} label="复制" onClick={() => actions.onCopy(message)} />
+      <Tooltip content={t('common.copy')}>
+        <IconButton size="sm" icon={Copy} label={t('common.copy')} onClick={() => actions.onCopy(message)} />
       </Tooltip>
-      <Tooltip content="引用到 Agent" kbd={mac ? '⌘⇧A' : 'Ctrl+Shift+A'}>
-        <IconButton size="sm" icon={AtSign} label="引用到 Agent" onClick={() => actions.onQuote(message)} />
+      <Tooltip content={t('chat.actions.quoteToAgent')} kbd={mac ? '⌘⇧A' : 'Ctrl+Shift+A'}>
+        <IconButton
+          size="sm"
+          icon={AtSign}
+          label={t('chat.actions.quoteToAgent')}
+          onClick={() => actions.onQuote(message)}
+        />
       </Tooltip>
-      <Tooltip content={selected ? '取消勾选' : '勾选'}>
-        <IconButton size="sm" icon={SquareCheck} label="勾选" active={selected} onClick={() => actions.onToggleSelect(message)} />
+      <Tooltip content={selected ? t('chat.message.unselect') : t('chat.message.select')}>
+        <IconButton
+          size="sm"
+          icon={SquareCheck}
+          label={t('chat.message.select')}
+          active={selected}
+          onClick={() => actions.onToggleSelect(message)}
+        />
       </Tooltip>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <IconButton size="sm" icon={Ellipsis} label="更多" active={menuOpen} />
+          <IconButton size="sm" icon={Ellipsis} label={t('common.more')} active={menuOpen} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align={self ? 'end' : 'start'}>
           <DropdownMenuItems items={menu} />
@@ -141,16 +206,31 @@ export const MessageRow = memo(function MessageRow({ message, isGroup, selectMod
     >
       {selectMode ? (
         <span className={cn('flex h-7 items-center', self ? 'order-last' : '')} onClick={(e) => e.stopPropagation()}>
-          <Checkbox checked={selected} onCheckedChange={() => actions.onToggleSelect(message)} aria-label="勾选这条消息" />
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => actions.onToggleSelect(message)}
+            aria-label={t('chat.message.selectThis')}
+          />
         </span>
       ) : null}
       <div className="w-7 shrink-0 self-start pt-4">
-        {continued ? null : <Avatar id={message.senderId} name={message.senderName ?? (self ? '我' : message.senderId)} src={self ? selfAvatar : senderAvatar} size={28} />}
+        {continued ? null : (
+          <Avatar
+            id={message.senderId}
+            name={message.senderName ?? (self ? t('common.me') : message.senderId)}
+            src={self ? selfAvatar : senderAvatar}
+            size={28}
+          />
+        )}
       </div>
       <div className={cn('flex min-w-0 max-w-[72%] flex-col gap-1', self ? 'items-end' : 'items-start')}>
         {continued ? null : (
-          <div className={cn('flex items-center gap-2 px-0.5 font-latin text-micro text-fg-3', self && 'flex-row-reverse')}>
-            {!self && isGroup && message.senderName ? <span className="font-sans text-caption text-fg-2">{message.senderName}</span> : null}
+          <div
+            className={cn('flex items-center gap-2 px-0.5 font-latin text-micro text-fg-3', self && 'flex-row-reverse')}
+          >
+            {!self && isGroup && message.senderName ? (
+              <span className="font-sans text-caption text-fg-2">{message.senderName}</span>
+            ) : null}
             <time dateTime={new Date(message.createdAt).toISOString()}>{formatClock(message.createdAt)}</time>
           </div>
         )}
@@ -175,7 +255,3 @@ export const MessageRow = memo(function MessageRow({ message, isGroup, selectMod
     </div>
   )
 })
-
-export function avatarSrcOf(path: string | undefined): string | undefined {
-  return toMediaUrl(path)
-}

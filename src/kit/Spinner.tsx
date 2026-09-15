@@ -1,5 +1,6 @@
 import { Loader } from 'lucide-react'
 import { forwardRef, type HTMLAttributes } from 'react'
+import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_STROKE } from './icon'
 
@@ -14,14 +15,15 @@ export interface SpinnerProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'chi
 
 /** Rotating lucide loader. Inherits `color`; defaults to the accent. */
 export const Spinner = forwardRef<HTMLSpanElement, SpinnerProps>(function Spinner(
-  { size = 16, label = '加载中', className, ...rest },
+  { size = 16, label, className, ...rest },
   ref,
 ) {
+  const t = useT()
   return (
     <span
       ref={ref}
       role="status"
-      aria-label={label}
+      aria-label={label ?? t('kit.loading')}
       className={cn('inline-flex shrink-0 items-center justify-center text-accent', className)}
       style={{ width: size, height: size }}
       {...rest}

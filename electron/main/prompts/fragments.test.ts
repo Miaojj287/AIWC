@@ -21,9 +21,16 @@ describe('host fragments', () => {
   })
 
   it('replays observed context only for wechat threads bound to a chat', async () => {
-    const frag: ContextFragment = { kind: 'observed_context', marker: '<observed>', tokenCap: 100, render: () => '<observed>x' }
+    const frag: ContextFragment = {
+      kind: 'observed_context',
+      marker: '<observed>',
+      tokenCap: 100,
+      render: () => '<observed>x',
+    }
     const calls: string[] = []
-    const p = observedFragmentProvider({ observed: { take: () => [], fragment: (id) => (calls.push(id), id === 'g1' ? frag : undefined) } })
+    const p = observedFragmentProvider({
+      observed: { take: () => [], fragment: (id) => (calls.push(id), id === 'g1' ? frag : undefined) },
+    })
     expect(await p.provide(ctx({ channel: 'desktop', chatId: 'g1' }))).toEqual([])
     expect(await p.provide(ctx({ channel: 'wechat-ilink' }))).toEqual([])
     expect(await p.provide(ctx({ channel: 'wechat-ilink', chatId: 'g1' }))).toEqual([frag])

@@ -4,6 +4,7 @@
  * artifact tab) are decided by the store from the same events, never here.
  */
 import type { CallId, Event, HistoryItem, ThreadId, ToolArtifact, TurnId } from '@aiwc/protocol'
+import { t } from '@/i18n'
 import { createThreadView, type PlanStep, type ThreadItem, type ThreadViewState, type ToolCallView } from './model'
 
 /** Tool names are snake_case; without a kernel summary we show them as words. */
@@ -32,10 +33,26 @@ export function itemsFromHistory(history: HistoryItem[]): ThreadItem[] {
   for (const h of history) {
     switch (h.type) {
       case 'user_message':
-        items.push({ kind: 'user', id: h.id, turnId: h.turnId, content: h.content, mentions: h.mentions, createdAt: h.createdAt })
+        items.push({
+          kind: 'user',
+          id: h.id,
+          turnId: h.turnId,
+          content: h.content,
+          mentions: h.mentions,
+          createdAt: h.createdAt,
+        })
         break
       case 'assistant_message':
-        items.push({ kind: 'assistant', id: h.id, turnId: h.turnId, text: h.text, reasoning: h.reasoning, streaming: false, modelId: h.modelId, createdAt: h.createdAt })
+        items.push({
+          kind: 'assistant',
+          id: h.id,
+          turnId: h.turnId,
+          text: h.text,
+          reasoning: h.reasoning,
+          streaming: false,
+          modelId: h.modelId,
+          createdAt: h.createdAt,
+        })
         break
       case 'tool_call':
         pushCall(h.turnId, {
@@ -51,7 +68,12 @@ export function itemsFromHistory(history: HistoryItem[]): ThreadItem[] {
         break
       case 'tool_result': {
         const ref = callIndex.get(h.callId)
-        const output = h.output.type === 'json' ? h.output.value : h.output.type === 'text' ? h.output.text : `[图片 ${h.output.mediaType}]`
+        const output =
+          h.output.type === 'json'
+            ? h.output.value
+            : h.output.type === 'text'
+              ? h.output.text
+              : t('agent.tool.imageOutput', { mediaType: h.output.mediaType })
         if (ref) {
           const group = items[ref.itemIndex]
           const call = group?.kind === 'tools' ? group.calls[ref.callIndex] : undefined
@@ -79,7 +101,13 @@ export function itemsFromHistory(history: HistoryItem[]): ThreadItem[] {
         break
       }
       case 'compaction_summary':
-        items.push({ kind: 'compaction', id: h.id, summaryItemId: h.id, summary: h.summary, foldedItemCount: h.foldedItemCount })
+        items.push({
+          kind: 'compaction',
+          id: h.id,
+          summaryItemId: h.id,
+          summary: h.summary,
+          foldedItemCount: h.foldedItemCount,
+        })
         break
       case 'turn_aborted':
         items.push({ kind: 'aborted', id: h.id, turnId: h.turnId, reason: h.reason })
@@ -110,18 +138,41 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
   const now = opts.now ?? Date.now
   switch (e.type) {
     case 'item.user':
-      return withItems(state, append(state.items, { kind: 'user', id: e.itemId, turnId: e.turnId, content: e.content, mentions: e.mentions, createdAt: now() }), {
-        suggestions: undefined,
-      })
+      return withItems(
+        state,
+        append(state.items, {
+          kind: 'user',
+          id: e.itemId,
+          turnId: e.turnId,
+          content: e.content,
+          mentions: e.mentions,
+          createdAt: now(),
+        }),
+        {
+          suggestions: undefined,
+        },
+      )
 
     case 'turn.started':
       return { ...state, isStreaming: true, currentTurnId: e.turnId, turnStartedAt: e.at }
 
     case 'text.start':
-      return withItems(state, append(state.items, { kind: 'assistant', id: e.itemId, turnId: e.turnId, text: '', streaming: true, startedAt: now(), createdAt: now() }), {
-        isStreaming: true,
-        currentTurnId: state.currentTurnId ?? e.turnId,
-      })
+      return withItems(
+        state,
+        append(state.items, {
+          kind: 'assistant',
+          id: e.itemId,
+          turnId: e.turnId,
+          text: '',
+          streaming: true,
+          startedAt: now(),
+          createdAt: now(),
+        }),
+        {
+          isStreaming: true,
+          currentTurnId: state.currentTurnId ?? e.turnId,
+        },
+      )
 
     case 'text.delta':
       return withItems(
@@ -132,7 +183,10 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
     case 'reasoning.delta':
       return withItems(
         state,
-        upsertAssistant(state.items, e.itemId, e.turnId, now, (a) => ({ ...a, reasoning: (a.reasoning ?? '') + e.delta })),
+        upsertAssistant(state.items, e.itemId, e.turnId, now, (a) => ({
+          ...a,
+          reasoning: (a.reasoning ?? '') + e.delta,
+        })),
       )
 
     case 'text.end':
@@ -147,7 +201,8 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       )
 
     case 'tool.call': {
-      const call: Partial<ToolCallView> & Pick<ToolCallView, 'callId' | 'toolName' | 'summary' | 'status' | 'risk' | 'input' | 'startedAt'> = {
+      const call: Partial<ToolCallView> &
+        Pick<ToolCallView, 'callId' | 'toolName' | 'summary' | 'status' | 'risk' | 'input' | 'startedAt'> = {
         callId: e.callId,
         toolName: e.toolName,
         summary: e.summary || humanizeToolName(e.toolName),
@@ -167,7 +222,10 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
     }
 
     case 'tool.progress':
-      return withItems(state, patchCall(state.items, e.callId, (c) => ({ ...c, progress: e.message })))
+      return withItems(
+        state,
+        patchCall(state.items, e.callId, (c) => ({ ...c, progress: e.message })),
+      )
 
     case 'approval.requested': {
       const pending = state.pendingApprovals.some((a) => a.approvalId === e.approvalId)
@@ -206,7 +264,12 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       if (!req) return { ...state, pendingApprovals }
       const items = patchCall(state.items, req.callId, (c) =>
         c.status === 'awaiting_approval'
-          ? { ...c, approvalId: undefined, status: e.decision === 'deny' ? 'denied' : 'running', ...(e.decision === 'deny' ? { isError: true, durationMs: 0 } : {}) }
+          ? {
+              ...c,
+              approvalId: undefined,
+              status: e.decision === 'deny' ? 'denied' : 'running',
+              ...(e.decision === 'deny' ? { isError: true, durationMs: 0 } : {}),
+            }
           : { ...c, approvalId: undefined },
       )
       return withItems(state, items, { pendingApprovals })
@@ -218,25 +281,51 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
     }
 
     case 'context.compacted':
-      return withItems(state, append(state.items, { kind: 'compaction', id: `cmp_${e.summaryItemId}`, summaryItemId: e.summaryItemId, freedTokens: e.freedTokens }))
+      return withItems(
+        state,
+        append(state.items, {
+          kind: 'compaction',
+          id: `cmp_${e.summaryItemId}`,
+          summaryItemId: e.summaryItemId,
+          freedTokens: e.freedTokens,
+        }),
+      )
 
     case 'plan.updated': {
       const steps: PlanStep[] = e.steps.map((s) => ({ title: s.title, status: s.status }))
-      const idx = findLastIndex(state.items, (it) => it.kind === 'plan' && (state.currentTurnId === undefined || it.turnId === state.currentTurnId))
+      const idx = findLastIndex(
+        state.items,
+        (it) => it.kind === 'plan' && (state.currentTurnId === undefined || it.turnId === state.currentTurnId),
+      )
       if (idx >= 0) {
         const items = state.items.slice()
         const existing = items[idx]
         if (existing && existing.kind === 'plan') items[idx] = { ...existing, steps }
         return withItems(state, items)
       }
-      return withItems(state, append(state.items, { kind: 'plan', id: `plan_${state.currentTurnId ?? 'x'}_${state.items.length}`, turnId: state.currentTurnId, steps }))
+      return withItems(
+        state,
+        append(state.items, {
+          kind: 'plan',
+          id: `plan_${state.currentTurnId ?? 'x'}_${state.items.length}`,
+          turnId: state.currentTurnId,
+          steps,
+        }),
+      )
     }
 
     case 'turn.completed': {
       let items = finalizeStreaming(state.items, e.turnId, now)
       const hasAssistant = items.some((it) => it.kind === 'assistant' && it.turnId === e.turnId)
       if (!hasAssistant && e.finalText.trim()) {
-        items = append(items, { kind: 'assistant', id: `final_${e.turnId}`, turnId: e.turnId, text: e.finalText, streaming: false, createdAt: e.at })
+        items = append(items, {
+          kind: 'assistant',
+          id: `final_${e.turnId}`,
+          turnId: e.turnId,
+          text: e.finalText,
+          streaming: false,
+          createdAt: e.at,
+        })
       }
       return withItems(state, items, {
         isStreaming: false,
@@ -250,10 +339,23 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       let items = finalizeStreaming(state.items, e.turnId, now)
       items = items.map((it) =>
         it.kind === 'tools' && it.turnId === e.turnId
-          ? { ...it, calls: it.calls.map((c) => (isOpen(c.status) ? { ...c, status: c.status === 'awaiting_approval' ? 'denied' : 'error', approvalId: undefined, isError: true } : c)) }
+          ? {
+              ...it,
+              calls: it.calls.map((c) =>
+                isOpen(c.status)
+                  ? {
+                      ...c,
+                      status: c.status === 'awaiting_approval' ? 'denied' : 'error',
+                      approvalId: undefined,
+                      isError: true,
+                    }
+                  : c,
+              ),
+            }
           : it,
       )
-      if (e.reason !== 'error') items = append(items, { kind: 'aborted', id: `abort_${e.turnId}`, turnId: e.turnId, reason: e.reason })
+      if (e.reason !== 'error')
+        items = append(items, { kind: 'aborted', id: `abort_${e.turnId}`, turnId: e.turnId, reason: e.reason })
       return withItems(state, items, {
         isStreaming: false,
         currentTurnId: undefined,
@@ -263,7 +365,16 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
     }
 
     case 'error':
-      return withItems(state, append(state.items, { kind: 'error', id: `err_${e.turnId ?? 'x'}_${state.items.length}`, turnId: e.turnId, error: e.error, actions: e.actions }))
+      return withItems(
+        state,
+        append(state.items, {
+          kind: 'error',
+          id: `err_${e.turnId ?? 'x'}_${state.items.length}`,
+          turnId: e.turnId,
+          error: e.error,
+          actions: e.actions,
+        }),
+      )
 
     case 'subagent': {
       const status: ToolCallView['status'] = e.status === 'started' ? 'running' : e.status === 'done' ? 'done' : 'error'
@@ -271,7 +382,17 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       const turnId = state.currentTurnId ?? (`trn_${e.childId}` as TurnId)
       return withItems(
         state,
-        upsertCall(state.items, turnId, { callId, toolName: 'delegate', summary: e.label, status, risk: 'read', input: null, startedAt: now(), kind: 'subagent', isError: e.status === 'failed' }),
+        upsertCall(state.items, turnId, {
+          callId,
+          toolName: 'delegate',
+          summary: e.label,
+          status,
+          risk: 'read',
+          input: null,
+          startedAt: now(),
+          kind: 'subagent',
+          isError: e.status === 'failed',
+        }),
       )
     }
 
@@ -313,11 +434,20 @@ function findLastIndex<T>(arr: T[], pred: (t: T) => boolean): number {
 
 type AssistantItem = Extract<ThreadItem, { kind: 'assistant' }>
 
-function upsertAssistant(items: ThreadItem[], itemId: string, turnId: TurnId, now: () => number, patch: (a: AssistantItem) => AssistantItem): ThreadItem[] {
+function upsertAssistant(
+  items: ThreadItem[],
+  itemId: string,
+  turnId: TurnId,
+  now: () => number,
+  patch: (a: AssistantItem) => AssistantItem,
+): ThreadItem[] {
   const idx = items.findIndex((it) => it.kind === 'assistant' && it.id === itemId)
   if (idx < 0) {
     // delta without a start (out-of-order or replay): create the item so no text is lost
-    return append(items, patch({ kind: 'assistant', id: itemId, turnId, text: '', streaming: true, startedAt: now(), createdAt: now() }))
+    return append(
+      items,
+      patch({ kind: 'assistant', id: itemId, turnId, text: '', streaming: true, startedAt: now(), createdAt: now() }),
+    )
   }
   const next = items.slice()
   next[idx] = patch(items[idx] as AssistantItem)
@@ -351,7 +481,11 @@ function patchCall(items: ThreadItem[], callId: CallId, patch: (c: ToolCallView)
  * the same turn, or start a new group. Existing fields survive undefined patches (a `running`
  * event does not erase `output`, a later `done` supplies it).
  */
-function upsertCall(items: ThreadItem[], turnId: TurnId, call: Partial<ToolCallView> & Pick<ToolCallView, 'callId'>): ThreadItem[] {
+function upsertCall(
+  items: ThreadItem[],
+  turnId: TurnId,
+  call: Partial<ToolCallView> & Pick<ToolCallView, 'callId'>,
+): ThreadItem[] {
   const loc = locateCall(items, call.callId)
   if (loc) {
     return patchCall(items, call.callId, (c) => mergeCall(c, call))
@@ -388,7 +522,8 @@ function mergeCall(current: ToolCallView, patch: Partial<ToolCallView>): ToolCal
   }
   // a finished call no longer waits for approval
   if (next.status !== 'awaiting_approval') next.approvalId = undefined
-  if (next.status === 'done' || next.status === 'error' || next.status === 'denied' || next.status === 'timeout') next.progress = undefined
+  if (next.status === 'done' || next.status === 'error' || next.status === 'denied' || next.status === 'timeout')
+    next.progress = undefined
   return next
 }
 
@@ -407,7 +542,11 @@ function finalizeStreaming(items: ThreadItem[], turnId: TurnId, now: () => numbe
   const next = items.map((it) => {
     if (it.kind !== 'assistant' || it.turnId !== turnId || !it.streaming) return it
     changed = true
-    return { ...it, streaming: false, durationMs: it.durationMs ?? (it.startedAt !== undefined ? Math.max(0, now() - it.startedAt) : undefined) }
+    return {
+      ...it,
+      streaming: false,
+      durationMs: it.durationMs ?? (it.startedAt !== undefined ? Math.max(0, now() - it.startedAt) : undefined),
+    }
   })
   return changed ? next : items
 }

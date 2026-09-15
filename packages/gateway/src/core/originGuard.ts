@@ -11,21 +11,25 @@ export interface Origin {
   peerId?: string
 }
 
-export const isWechatChannel = (channel: ChannelKind | string | undefined): boolean => typeof channel === 'string' && channel.startsWith('wechat-')
+export const isWechatChannel = (channel: ChannelKind | string | undefined): boolean =>
+  typeof channel === 'string' && channel.startsWith('wechat-')
 
 /**
  * Channels with nobody at the keyboard, bound to one WeChat chat (mirrors the kernel's BOT_CHANNELS):
  * the wechat-* transports plus 'observed' (messages watched in the local WeChat client).
  */
-export const isBotChannel = (channel: ChannelKind | string | undefined): boolean => isWechatChannel(channel) || channel === 'observed'
+export const isBotChannel = (channel: ChannelKind | string | undefined): boolean =>
+  isWechatChannel(channel) || channel === 'observed'
 
 /** 'observed' has no adapter of its own: replies go back through the UI-injection leg of the same local client. */
 export const OBSERVED_SEND_CHANNEL: ChannelKind = 'wechat-ui'
 
 /** The channel a bot thread's reply travels on for a given origin channel. */
-export const sendChannelForOrigin = (channel: ChannelKind): ChannelKind => (channel === 'observed' ? OBSERVED_SEND_CHANNEL : channel)
+export const sendChannelForOrigin = (channel: ChannelKind): ChannelKind =>
+  channel === 'observed' ? OBSERVED_SEND_CHANNEL : channel
 
-export const inferChatType = (chatId: string): SessionSource['chatType'] => (chatId.endsWith('@chatroom') ? 'group' : 'dm')
+export const inferChatType = (chatId: string): SessionSource['chatType'] =>
+  chatId.endsWith('@chatroom') ? 'group' : 'dm'
 
 /** Build a SessionSource for a chat id when only the origin (channel + chatId) is known. */
 export function sourceFromOrigin(origin: Origin & { chatId: string }): SessionSource {
@@ -35,13 +39,6 @@ export function sourceFromOrigin(origin: Origin & { chatId: string }): SessionSo
     chatId: origin.chatId,
     peerId: origin.peerId ?? origin.chatId,
     chatType,
-  }
-}
-
-export class OriginViolationError extends Error {
-  constructor(message = '该会话只能回复到来源聊天') {
-    super(message)
-    this.name = 'OriginViolationError'
   }
 }
 

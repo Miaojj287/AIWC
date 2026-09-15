@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { AiwcBridge, ToastPayload } from '@aiwc/protocol'
+import { AgentWindow } from '@/features/agent'
 import { OnboardingWizard } from '@/features/onboarding'
+import { useT } from '@/i18n'
 import { EmptyState, Spinner, Toaster, TooltipProvider, toast } from '@/kit'
 import { getBridge } from '@/platform/bridge'
 import { useConfig, useConfigStore } from '@/platform/configStore'
@@ -8,7 +10,9 @@ import { invoke, useBridgeEvent } from '@/platform/hooks'
 import { Shell } from '@/shell/Shell'
 import { CloseBehaviorDialog, type CloseBehavior } from './CloseBehaviorDialog'
 import { onCommand, runCommand, type CommandMap, type CommandName } from './commands'
+import { completeOnboarding } from './completeOnboarding'
 import { registerFeatures } from './registerFeatures'
+import { installShellModeCommands } from './shellMode'
 import { detectMac, installShortcuts } from './shortcuts'
 
 /**
@@ -17,24 +21,41 @@ import { detectMac, installShortcuts } from './shortcuts'
  * Shell. Providers: Tooltip, Toaster, global shortcuts, main-process events (commands / toasts / close).
  */
 export function App() {
+  const t = useT()
   const hydrated = useConfigStore((s) => s.hydrated)
   const error = useConfigStore((s) => s.error)
   const completed = useConfig((c) => c.onboarding.completed)
+  const shellMode = useConfig((c) => c.ui.shellMode) ?? 'workbench'
   const [bridge, setBridge] = useState<Pick<AiwcBridge, 'platform' | 'runtime'> | null>(null)
 
   useEffect(() => {
     registerFeatures()
     void getBridge().then((b) => setBridge({ platform: b.platform, runtime: b.runtime }))
-    void useConfigStore.getState().hydrate().catch(() => undefined)
+    void useConfigStore
+      .getState()
+      .hydrate()
+      .catch(() => undefined)
   }, [])
 
   if (!hydrated || !bridge) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-shell text-fg">
         {error ? (
-          <EmptyState variant="error" title="无法读取配置" description={error.message} action={{ label: '重试', onClick: () => void useConfigStore.getState().hydrate().catch(() => undefined) }} />
+          <EmptyState
+            variant="error"
+            title={t('app.configError')}
+            description={error.message}
+            action={{
+              label: t('common.retry'),
+              onClick: () =>
+                void useConfigStore
+                  .getState()
+                  .hydrate()
+                  .catch(() => undefined),
+            }}
+          />
         ) : (
-          <Spinner size={24} label="正在启动" />
+          <Spinner size={24} label={t('app.starting')} />
         )}
       </div>
     )
@@ -42,7 +63,13 @@ export function App() {
 
   return (
     <TooltipProvider>
-      {completed ? <Shell platform={bridge.platform} runtime={bridge.runtime} /> : <OnboardingWizard onDone={() => void useConfigStore.getState().set({ onboarding: { completed: true } }).catch(() => undefined)} />}
+      {!completed ? (
+        <OnboardingWizard onDone={() => void completeOnboarding()} />
+      ) : shellMode === 'agent' ? (
+        <AgentWindow platform={bridge.platform} runtime={bridge.runtime} />
+      ) : (
+        <Shell platform={bridge.platform} runtime={bridge.runtime} />
+      )}
       <AppEvents platform={bridge.platform} runtime={bridge.runtime} shellActive={Boolean(completed)} />
       <Toaster />
     </TooltipProvider>
@@ -57,12 +84,18 @@ interface AppEventsProps {
 
 /** Global shortcuts, main → renderer events and the close-behaviour dialog. Renders only the dialog. */
 function AppEvents({ platform, runtime, shellActive }: AppEventsProps) {
+  const t = useT()
   const [closeAsked, setCloseAsked] = useState(false)
 
   useEffect(() => {
     if (!shellActive) return
     return installShortcuts({ mac: detectMac(platform), web: runtime === 'web' })
   }, [platform, runtime, shellActive])
+  // 工作台 ↔ Agent 窗口 (CLAUDE.md §12): one handler for every entry (pills, ⌘⇧L, menu, settings row).
+  useEffect(() => {
+    if (!shellActive) return
+    return installShellModeCommands()
+  }, [shellActive])
 
   useEffect(() => onCommand('toast', (p) => showToast(p)), [])
 
@@ -72,7 +105,9 @@ function AppEvents({ platform, runtime, shellActive }: AppEventsProps) {
 
   const choose = (behavior: CloseBehavior, remember: boolean) => {
     setCloseAsked(false)
-    void invoke('app:setCloseBehaviorOnce', { behavior, remember }).catch((e: unknown) => toast.error(`操作失败：${e instanceof Error ? e.message : String(e)}`))
+    void invoke('app:setCloseBehaviorOnce', { behavior, remember }).catch((e: unknown) =>
+      toast.error(t('common.operationFailedDetail', { detail: e instanceof Error ? e.message : String(e) })),
+    )
   }
 
   return <CloseBehaviorDialog open={closeAsked} onOpenChange={setCloseAsked} onChoose={choose} platform={platform} />

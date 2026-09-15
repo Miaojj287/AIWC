@@ -14,7 +14,8 @@ const draft = (id: string, patch: Partial<ReplyDraft> = {}): ReplyDraft => ({
   ...patch,
 })
 
-const run = (actions: Parameters<typeof replyDeskReducer>[1][], start: ReplyDeskState = initialReplyDeskState) => actions.reduce(replyDeskReducer, start)
+const run = (actions: Parameters<typeof replyDeskReducer>[1][], start: ReplyDeskState = initialReplyDeskState) =>
+  actions.reduce(replyDeskReducer, start)
 
 describe('replyDeskReducer', () => {
   it('loads pending drafts oldest first and marks loaded', () => {
@@ -24,7 +25,10 @@ describe('replyDeskReducer', () => {
   })
 
   it('upserts pending drafts and removes resolved ones', () => {
-    let s = run([{ type: 'draft', draft: draft('d1') }, { type: 'draft', draft: draft('d2', { mode: 'auto', countdownEndsAt: 5000 }) }])
+    let s = run([
+      { type: 'draft', draft: draft('d1') },
+      { type: 'draft', draft: draft('d2', { mode: 'auto', countdownEndsAt: 5000 }) },
+    ])
     expect(pendingCount(s)).toBe(2)
     s = replyDeskReducer(s, { type: 'draft', draft: draft('d1', { draft: '改过的文案' }) })
     expect(s.drafts.find((d) => d.id === 'd1')?.draft).toBe('改过的文案')
@@ -36,7 +40,10 @@ describe('replyDeskReducer', () => {
   })
 
   it('keeps failed drafts until dismissed and they do not count as pending', () => {
-    let s = run([{ type: 'draft', draft: draft('d1') }, { type: 'draft', draft: draft('d1', { state: 'failed', error: '通道已熔断' }) }])
+    let s = run([
+      { type: 'draft', draft: draft('d1') },
+      { type: 'draft', draft: draft('d1', { state: 'failed', error: '通道已熔断' }) },
+    ])
     expect(s.drafts).toHaveLength(1)
     expect(pendingCount(s)).toBe(0)
     // a reload from the backend (pending only) keeps the failed one
@@ -73,7 +80,10 @@ describe('replyDeskReducer', () => {
   })
 
   it('records load failures without dropping known drafts', () => {
-    const s = run([{ type: 'draft', draft: draft('d1') }, { type: 'load_failed', error: 'offline' }])
+    const s = run([
+      { type: 'draft', draft: draft('d1') },
+      { type: 'load_failed', error: 'offline' },
+    ])
     expect(s.loaded).toBe(true)
     expect(s.error).toBe('offline')
     expect(s.drafts).toHaveLength(1)

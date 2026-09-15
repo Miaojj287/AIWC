@@ -15,13 +15,19 @@ function fakeBridge(): AiwcBridge {
     platform: 'darwin',
     on: () => () => {},
     invoke: (async (channel: string) => {
-      if (channel === 'substrate:status') return { connection: 'ready', account: { wxid: 'wxid_test', nickname: '张明' } }
+      if (channel === 'substrate:status')
+        return { connection: 'ready', account: { wxid: 'wxid_test', nickname: '张明' } }
       throw new Error(`unexpected ${channel}`)
     }) as AiwcBridge['invoke'],
   }
 }
 
-const mount = () => render(<TooltipProvider><IconRail mac /></TooltipProvider>)
+const mount = () =>
+  render(
+    <TooltipProvider>
+      <IconRail mac />
+    </TooltipProvider>,
+  )
 
 beforeEach(() => {
   __resetShellStoreForTests()
@@ -89,16 +95,23 @@ describe('IconRail', () => {
       listener = cb
       return () => {}
     }) as AiwcBridge['on']
-    bridge.invoke = (async () => ({ connection: 'ready', account: { wxid: 'wxid_test', nickname: '张明', avatarPath: avatar } })) as AiwcBridge['invoke']
+    bridge.invoke = (async () => ({
+      connection: 'ready',
+      account: { wxid: 'wxid_test', nickname: '张明', avatarPath: avatar },
+    })) as AiwcBridge['invoke']
     __setBridgeForTests(bridge)
     mount()
     await screen.findByRole('button', { name: '张明 · 设置' })
-    expect(screen.getByTestId('rail-account').querySelector('img')?.getAttribute('src')).toBe('aiwc-media:///avatars/old.png')
+    expect(screen.getByTestId('rail-account').querySelector('img')?.getAttribute('src')).toBe(
+      'aiwc-media:///avatars/old.png',
+    )
     await act(async () => {
       avatar = '/avatars/new.png'
       listener?.({ type: 'connection', state: 'ready' })
     })
-    expect(screen.getByTestId('rail-account').querySelector('img')?.getAttribute('src')).toBe('aiwc-media:///avatars/new.png')
+    expect(screen.getByTestId('rail-account').querySelector('img')?.getAttribute('src')).toBe(
+      'aiwc-media:///avatars/new.png',
+    )
   })
 
   it('opens settings from the account tile and rings it while the settings tab is active', async () => {
