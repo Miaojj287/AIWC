@@ -19,10 +19,15 @@
 > `image-native-manifest.json` 声明的源码目录 `native/image-decrypt` 目前不在本仓库中。
 > 当前只提供 macOS arm64 与 Windows x64 的产物；`package.json` 的 mac 打包目标还包含 x64，Intel 包里将缺少这些组件。
 
+## 没有 WCDB 库的平台
+
+`libWCDBOpen.*` 只有 macOS arm64 一份，**Windows 不需要 `wcdb_open.dll`**：`wcdb/engine.ts` 发现当前平台没有 WCDB 库时，改用纯 TypeScript 的 SQLCipher 引擎读微信库（解密成缓存副本后交给 `node:sqlite`，见 `docs/ARCHITECTURE.md` §13.1）。往这里放一个能用的 WCDB 库就会自动切回原生引擎；放了但加载失败会降级并记一条 warn。
+
 ## 开发时覆盖路径
 
 | 环境变量 | 作用 |
 |---|---|
+| `AIWC_WCDB_ENGINE` | 强制数据库引擎：`wcdb`（原生，缺库时直接报错）或 `sqlcipher`（纯 TypeScript）；默认按有无原生库自动选择 |
 | `AIWC_WCDB_LIBRARY` | 指定 WCDB 动态库路径 |
 | `AIWC_WX_MEMORY_HELPER_PATH` | 指定内存扫描 helper 路径 |
 | `AIWC_WX_XKEY_HELPER_PATH` | 指定登录截获 helper 路径 |

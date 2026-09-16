@@ -13,7 +13,7 @@
 AIWC/
 ├─ packages/protocol/    契约：ID、历史条目、上下文片段、工具、Op/Event、模型端口、网关、基座、记忆、配置、IPC
 ├─ packages/kernel/      Agent 内核：Thread → Turn → Step 循环、ContextManager、系统提示三层、压缩、工具注册/路由/分发、审批、hook、rollout、技能、子代理、模型适配
-├─ packages/substrate/   微信数据基座：WCDB 桥、密钥获取、图片解密、消息归一化、SQLite 镜像（双 FTS5 + 向量）、微信工具集
+├─ packages/substrate/   微信数据基座：两套数据库引擎（原生 WCDB 桥 / 纯 TS SQLCipher）、密钥获取、图片解密、消息归一化、SQLite 镜像（双 FTS5 + 向量）、微信工具集
 ├─ packages/gateway/     通道层：PlatformAdapter、MessageEvent 归一化、SessionKey、ReplyGate、观察上下文、自动回复队列、iLink 适配器、UI 注入发送
 ├─ packages/memory/      记忆：MEMORY/USER/SOUL/AGENTS 四个有界 Markdown、关系档案（克隆）、日记流水线、记忆工具
 ├─ packages/i18n/        界面文案：zh-CN（参考目录）+ en-US、ICU 子集格式化、包内既有中文系统消息的反查表（known）
@@ -54,6 +54,7 @@ Renderer (React)  ──IPC(typed)──▶  Main (composition root)
 ```
 
 - 原生代码（koffi 加载的 WCDB 桥、密钥扫描 helper、图片解密模块）与 SQLite 镜像（`node:sqlite`）只在 `substrateHost` 里跑：崩了只重启这个进程。
+- 读微信库有两套引擎，由 `wcdb/engine.ts` 按 `resources/native` 里有没有当前平台的 WCDB 库选择（§13.1）：macOS 走原生 WCDB 桥，没有原生库的平台走纯 TypeScript 的 SQLCipher 引擎，两者都实现 `wcdb/bridge.ts` 的同一个接口，上层查询代码不知道差别。
 - 内核跑在 main 进程，避免每个工具调用两跳。`KernelHost` 抽象保留把内核挪到 utility process 的余地。
 - 渲染层必须连接桌面 preload；纯浏览器或桥接缺失时显示连接错误。mockBridge 仅供隔离测试使用，不会由应用加载。
 
@@ -204,6 +205,20 @@ Agent 有一个通用 `shell` 工具，让它能像 Cursor / Hermes 这类通用
 - **图片密钥**：`imageKeys.ts` 从 kvcomm 缓存码 + wxid 纯推导（XOR + AES），无需特权，已实测成功。
 - **打包签名**：`resources/macos/entitlements.mac.plist` 含 debugger 权限；`scripts/afterPack.cjs` 在打包时对 `wechat_memory_scan_helper` 用 `resources/macos/helper.entitlements.plist` 重新签名。
 - **前置条件**：SIP 关闭 + 已安装 Xcode/命令行工具（仅重启捕获这条路用到 lldb）；用户需授权「开发者工具」TCC 才能走只读实时扫描，否则自动回退到崩溃转储/重启捕获/手动粘贴。
+
+### 13.1 Windows（2026-09-16）
+
+- **db 密钥**：`key/windowsMemoryScanner.ts` 只申请 `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION`，按三条路依次尝试：
+  1. **`Config.Cipher` 节点**（微信 4.1.13+）——WCDB 把每个库的密钥以 XOR 混淆的形式挂在 `com.Tencent.WCDB.Config.Cipher` 配置对象上，只要微信在登录状态、这个库被它打开过就能直接读出来，拿到的是**已派生**（`direct`）密钥，**不需要用户重新登录**。
+  2. **裸 UUID 块**——4.1.x 登录过程里出现在内存里的账号密钥，`raw` 形式（还要过一遍 PBKDF2），通常只在刚登录时能扫到。
+  3. **ASCII `x'<key><salt>'` 记录**——旧版本。
+  只有当前登录账号的库会出现在第 1 条路里；`db_storage` 里其他历史账号的密钥不在内存中，界面会要求切到那个账号重新登录。
+- **数据库引擎**：`resources/native` 里没有 Windows 的 WCDB 库，所以走纯 TypeScript 的 SQLCipher 引擎（`wcdb/sqlcipherBridge.ts`）：
+  - `sqlcipherCodec.ts` 按 SQLCipher 4 的页格式（页 4096、reserved 80 = IV 16 + HMAC-SHA512 64、页 1 前 16 字节是 KDF salt）用 `node:crypto` 逐页解密；解密后的页保留 reserved 尾部，页头仍然声明 `reserved = 80`，因此**任何标准 SQLite 都能直接读**（SQLite 由页头第 20 字节推导 usable size，`sqlcipherBridge.test.ts` 有回归测试锁住这个前提）。
+  - `decryptedCopy.ts` 把解密结果落在 `<dataRoot>/cache/wcdb-plain/<路径哈希>-<库名>-<salt>.db`，**只读源库、从不回写微信目录**。副本名带 salt，换了库就不会复用旧副本。刷新是增量的：主库只在 size/mtime 变化时重扫，且只重解 IV 变过的页（副本自带上次的 IV，重启后也能接着增量）；WAL 帧叠加在上面，来自 WAL 的页把 reserved 尾部清零，等 checkpoint 后自动从主库恢复。
+  - `sqliteWal.ts` 按 SQLite 的 WAL 恢复规则（校验头、盐一致、checksum 链）取到**最后一个完整提交**为止的帧。WCDB 跑在 WAL 模式下，不叠加 WAL 就会看不到最近的消息；微信正在写入造成的残帧会被 checksum 链挡掉。
+  - 副本是明文聊天数据，和已有的解密图片缓存一样放在 cache 目录里，随缓存清理一起消失。
+- **开发覆盖**：`AIWC_WCDB_ENGINE=wcdb|sqlcipher` 可强制引擎（在 macOS 上就是这样验证 SQLCipher 引擎的）；原生库存在但加载失败时会自动降级到 SQLCipher 引擎并记一条 warn，不会让账号打不开。
 
 ## 14. 办公平台连接器（飞书 / 钉钉 / 企业微信，2026-09-13）
 

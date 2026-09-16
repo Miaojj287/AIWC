@@ -8,7 +8,7 @@
  * they live in the cache directory and are removed with it.
  */
 import { existsSync } from 'node:fs'
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
 import { isPlaintextSqlitePage, readFirstPage } from '../key/sqlcipherPage'
 import { normalizeInt64, type SqlParam, type WcdbBridge, type WcdbLogger, type WcdbQueryResult } from './bridge'
 import { DecryptedCopy } from './decryptedCopy'
@@ -21,11 +21,16 @@ export interface SqlcipherBridgeOptions {
   logger?: WcdbLogger
 }
 
+/** Bound for the prepared-statement cache: the reader's own SQL is a small fixed set, but the audited
+ * `query_sql` tool can send anything, so the cache is dropped instead of grown without limit. */
+const MAX_CACHED_STATEMENTS = 64
+
 interface OpenEntry {
   keyHex: string
   /** Absent when the source is already a plain SQLite file. */
   copy: DecryptedCopy | null
   db: DatabaseSync
+  statements: Map<string, StatementSync>
 }
 
 function errorMessage(error: unknown): string {
@@ -58,7 +63,7 @@ export class SqlcipherBridge implements WcdbBridge {
     try {
       const entry = this.entry(dbPath, normalizeKey(hexKey))
       // node:sqlite opens lazily, so read the schema to prove the file really is a database.
-      entry.db.prepare('SELECT count(*) FROM sqlite_master').get()
+      statementFor(entry, 'SELECT count(*) FROM sqlite_master').get()
       return true
     } catch (error) {
       this.closeDatabase(dbPath)
@@ -77,10 +82,9 @@ export class SqlcipherBridge implements WcdbBridge {
       return { success: false, error: errorMessage(error) }
     }
     try {
-      const statement = entry.db.prepare(sql)
-      // WeChat stores int64 ids that do not fit a JS number; without this node:sqlite throws on them.
-      statement.setReadBigInts(true)
-      const rows = statement.all(...params.map(toInputValue)).map(normalizeRow)
+      const rows = statementFor(entry, sql)
+        .all(...params.map(toInputValue))
+        .map(normalizeRow)
       return { success: true, rows }
     } catch (error) {
       return { success: false, error: errorMessage(error) }
@@ -91,12 +95,12 @@ export class SqlcipherBridge implements WcdbBridge {
     if (dbPath) {
       const entry = this.entries.get(dbPath)
       if (entry) {
-        entry.db.close()
+        closeEntry(entry)
         this.entries.delete(dbPath)
       }
       return
     }
-    for (const entry of this.entries.values()) entry.db.close()
+    for (const entry of this.entries.values()) closeEntry(entry)
     this.entries.clear()
   }
 
@@ -115,7 +119,7 @@ export class SqlcipherBridge implements WcdbBridge {
     if (cached?.keyHex === keyHex) {
       // Reopen rather than let SQLite serve pages it cached before the refresh rewrote them.
       if (cached.copy?.refresh()) {
-        cached.db.close()
+        closeEntry(cached)
         cached.db = openReadOnly(cached.copy.path)
       }
       return cached
@@ -129,7 +133,7 @@ export class SqlcipherBridge implements WcdbBridge {
   private create(dbPath: string, keyHex: string): OpenEntry {
     const page = readFirstPage(dbPath)
     if (!page) throw new Error(`无法读取数据库首页: ${dbPath}`)
-    if (isPlaintextSqlitePage(page)) return { keyHex, copy: null, db: openReadOnly(dbPath) }
+    if (isPlaintextSqlitePage(page)) return { keyHex, copy: null, db: openReadOnly(dbPath), statements: new Map() }
     if (!keyHex) throw new Error('数据库打开失败：路径、密钥或 SQLCipher 参数不匹配')
     if (!/^[0-9a-f]{64}$/.test(keyHex)) throw new Error('数据库密钥必须是 64 位十六进制字符串')
     const cipher = resolvePageCipher(page, keyHex)
@@ -142,7 +146,7 @@ export class SqlcipherBridge implements WcdbBridge {
       logger: this.options.logger,
     })
     copy.refresh(true)
-    return { keyHex, copy, db: openReadOnly(copy.path) }
+    return { keyHex, copy, db: openReadOnly(copy.path), statements: new Map() }
   }
 }
 
@@ -152,4 +156,22 @@ function normalizeKey(hexKey?: string): string {
 
 function openReadOnly(path: string): DatabaseSync {
   return new DatabaseSync(path, { readOnly: true })
+}
+
+/** Cached prepared statement. WeChat stores int64 ids that overflow a JS number, and node:sqlite
+ * throws on those unless the statement is told to read them as BigInt. */
+function statementFor(entry: OpenEntry, sql: string): StatementSync {
+  const cached = entry.statements.get(sql)
+  if (cached) return cached
+  const statement = entry.db.prepare(sql)
+  statement.setReadBigInts(true)
+  if (entry.statements.size >= MAX_CACHED_STATEMENTS) entry.statements.clear()
+  entry.statements.set(sql, statement)
+  return statement
+}
+
+/** Statements belong to their connection, so they go when it does. */
+function closeEntry(entry: OpenEntry): void {
+  entry.statements.clear()
+  entry.db.close()
 }
