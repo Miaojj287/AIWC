@@ -5,6 +5,7 @@
  */
 import { createDecipheriv, pbkdf2Sync } from 'node:crypto'
 import { closeSync, openSync, readSync } from 'node:fs'
+import { basename } from 'node:path'
 
 export const SQLCIPHER_PAGE_SIZE = 4096
 export const SQLCIPHER_SALT_SIZE = 16
@@ -104,6 +105,27 @@ export function verifyDbKey(dbPath: string, hexKey: string): DbKeyVerification {
   if (!page) return { ok: false, error: `无法读取数据库首页: ${dbPath}` }
   const form = classifyKeyAgainstPage(page, normalized)
   if (!form) return { ok: false, error: '密钥与数据库不匹配' }
+  return { ok: true, form }
+}
+
+/**
+ * Verify one key against several databases of the same account.
+ *
+ * Every SQLCipher file has its own random salt, so a key is only account-wide if it is the raw
+ * passphrase (PBKDF2 is then applied per file) or a key SQLCipher uses as is. A key scanned out of
+ * WeChat's memory is validated against a single database — usually `session.db` — and a per-file
+ * derived key would pass that check while leaving every message shard unreadable. The app stores one
+ * key per account, so that case has to be caught here instead of surfacing later as empty chats.
+ */
+export function verifyDbKeyAcross(dbPaths: readonly string[], hexKey: string): DbKeyVerification {
+  if (dbPaths.length === 0) return { ok: false, error: '未找到 session.db' }
+  let form: DbKeyForm | undefined
+  for (const dbPath of dbPaths) {
+    const check = verifyDbKey(dbPath, hexKey)
+    if (!check.ok)
+      return { ok: false, error: `密钥无法打开 ${basename(dbPath)}：${check.error ?? '密钥与数据库不匹配'}` }
+    form ??= check.form
+  }
   return { ok: true, form }
 }
 

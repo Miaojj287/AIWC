@@ -100,6 +100,16 @@ function verifyRawKey(key: Buffer, page: Buffer): boolean {
   return !!body && looksLikeSqliteHeaderBody(body)
 }
 
+/**
+ * One key has to open the whole account, not just the database we scanned against. WeChat configures
+ * WCDB per database (`x'<key><salt>'`), so a candidate that only fits `session.db` would leave every
+ * message shard unreadable; rejecting it here lets the scan keep looking for the account-wide key.
+ * Callers check the scanned database first, so this only runs for a candidate that already fits it.
+ */
+function fitsAccount(keyHex: string, otherPages: readonly Buffer[]): boolean {
+  return otherPages.every((page) => classifyKeyAgainstPage(page, keyHex) !== null)
+}
+
 /* -------------------------------------------------------------- image AES */
 
 function isAsciiAlphaNumeric(value: number | undefined): boolean {
@@ -296,6 +306,7 @@ function scanConfigCipherKey(
   k: Kernel32,
   handle: bigint,
   encryptedFirstPage: Buffer,
+  otherPages: readonly Buffer[],
   deadline?: number,
 ): { key: string | null; candidates: number } {
   const nameAddresses = findProcessBytes(k, handle, CONFIG_CIPHER_NAME, deadline)
@@ -344,7 +355,8 @@ function scanConfigCipherKey(
           const candidate = Buffer.from(hex, 'hex')
           if (candidate.length !== RAW_KEY_SIZE || new Set(candidate).size < 15) continue
           candidates += 1
-          if (verifyDirectKey(candidate, encryptedFirstPage)) return { key: hex, candidates }
+          if (verifyDirectKey(candidate, encryptedFirstPage) && fitsAccount(hex, otherPages))
+            return { key: hex, candidates }
         }
       }
     }
@@ -352,14 +364,28 @@ function scanConfigCipherKey(
   return { key: null, candidates }
 }
 
-/** Read-only memory scan for the WeChat db key. Returns key:null when not found. */
-export function scanWindowsDbKey(pid: number, dbPath: string, deadline?: number): WindowsDbKeyScanResult {
+/**
+ * Read-only memory scan for the WeChat db key. Returns key:null when not found.
+ *
+ * `accountDbPaths` are the other databases of the same account (contact, message shards). A candidate
+ * must open all of them, not only `dbPath` — see `fitsAccount`.
+ */
+export function scanWindowsDbKey(
+  pid: number,
+  dbPath: string,
+  deadline?: number,
+  accountDbPaths: readonly string[] = [],
+): WindowsDbKeyScanResult {
   const result: WindowsDbKeyScanResult = { key: null, opened: false, dbOk: false, bytes: 0, candidates: 0 }
   if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return result
   const salt = readEncryptedDbSalt(dbPath)
   const page = readFirstPage(dbPath)
   if (!salt || !page || page.length < SQLCIPHER_PAGE_SIZE) return result
   result.dbOk = true
+  const otherPages = accountDbPaths
+    .filter((path) => path !== dbPath)
+    .map((path) => readFirstPage(path))
+    .filter((other): other is Buffer => other !== null)
 
   const funcs = loadKernel32()
   if (!funcs) return result
@@ -373,7 +399,7 @@ export function scanWindowsDbKey(pid: number, dbPath: string, deadline?: number)
   // Path 1: the deterministic Config.Cipher node (WeChat 4.1.13+). Runs first because it is not a
   // brute-force over random UUID-shaped sequences and it works whenever the user is logged in.
   try {
-    const config = scanConfigCipherKey(k, handle, page, deadline)
+    const config = scanConfigCipherKey(k, handle, page, otherPages, deadline)
     result.candidates += config.candidates
     if (config.key) {
       result.key = config.key
@@ -424,7 +450,7 @@ export function scanWindowsDbKey(pid: number, dbPath: string, deadline?: number)
             }
             const records = extractMemoryDbKeyCandidates(searchable)
             result.candidates += records.length
-            const match = records.find((c) => c.salt === salt)
+            const match = records.find((c) => c.salt === salt && fitsAccount(c.key, otherPages))
             if (match) {
               result.key = match.key
               break
@@ -446,18 +472,16 @@ export function scanWindowsDbKey(pid: number, dbPath: string, deadline?: number)
 
   if (!result.key) {
     for (const rawKey of rawCandidates) {
-      if (verifyRawKey(rawKey, page)) {
-        result.key = rawKey.toString('hex')
-        break
-      }
-      if (verifyDirectKey(rawKey, page)) {
-        result.key = rawKey.toString('hex')
-        break
-      }
+      const hex = rawKey.toString('hex')
+      if (!verifyRawKey(rawKey, page) && !verifyDirectKey(rawKey, page)) continue
+      if (!fitsAccount(hex, otherPages)) continue
+      result.key = hex
+      break
     }
   }
-  // If we recovered a raw record, confirm it matches this exact database page.
-  if (result.key && classifyKeyAgainstPage(page, result.key) === null) result.key = null
+  // If we recovered a raw record, confirm it matches this exact database page and the rest of the account.
+  if (result.key && (classifyKeyAgainstPage(page, result.key) === null || !fitsAccount(result.key, otherPages)))
+    result.key = null
   return result
 }
 

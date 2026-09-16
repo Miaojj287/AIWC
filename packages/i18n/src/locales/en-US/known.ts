@@ -137,6 +137,7 @@ export const known: Messages['known'] = {
     keyMismatchReacquire:
       "The key doesn't match the WeChat database. Get the database key for the logged-in account again.",
     keyDbMismatch: "The key doesn't match the database",
+    keyPartialAccount: "The key can't open {name}: {reason}",
     imageXorMissing: 'The image XOR key is missing',
     imageAesMissing: 'The image AES key is missing. Get it in Settings first.',
   },

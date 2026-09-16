@@ -142,6 +142,7 @@ export const known = {
     sessionDbMissing: '未找到 session.db',
     keyMismatchReacquire: '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥',
     keyDbMismatch: '密钥与数据库不匹配',
+    keyPartialAccount: '密钥无法打开 {name}：{reason}',
     imageXorMissing: '缺少图片 XOR 密钥',
     imageAesMissing: '缺少图片 AES 密钥，请先在设置中获取',
   },

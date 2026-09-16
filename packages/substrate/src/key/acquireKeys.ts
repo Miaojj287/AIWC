@@ -5,10 +5,16 @@
  * silently prompting for sudo.
  */
 import type { KeyAcquireStep } from '@aiwc/protocol'
-import { findSessionDbCandidates, resolveAccountDir, resolveDbStoragePath } from '../wcdb/dbFiles'
+import {
+  findMessageShards,
+  findNamedDb,
+  findSessionDbCandidates,
+  resolveAccountDir,
+  resolveDbStoragePath,
+} from '../wcdb/dbFiles'
 import { cleanAccountDirName } from '../wcdb/accountUtils'
 import { findWeChatPidSync } from '../discovery/processDetect'
-import { verifyDbKey } from './sqlcipherPage'
+import { verifyDbKeyAcross } from './sqlcipherPage'
 import { validateKeyHexDetailed } from './validateKeyHex'
 import { resolveImageKeys } from './imageKeys'
 import {
@@ -77,6 +83,19 @@ class StepTracker {
   fail(id: KeyAcquireStep['id'], detail: string): void {
     this.emit(id, 'failed', detail)
   }
+}
+
+/**
+ * The databases this one key has to open. The reader needs all of them, and every SQLCipher file has
+ * its own salt, so verifying only `session.db` would accept a key that cannot read a single message
+ * (see verifyDbKeyAcross). Missing files are simply left out.
+ */
+function accountDbTargets(dbStoragePath: string): string[] {
+  return [
+    ...findSessionDbCandidates(dbStoragePath).slice(0, 1),
+    findNamedDb(dbStoragePath, 'contact.db'),
+    findMessageShards(dbStoragePath)[0]?.dbPath,
+  ].filter((path): path is string => !!path)
 }
 
 async function acquireDbKey(
@@ -163,7 +182,7 @@ async function acquireDbKey(
       tracker.fail('db_key', '未找到 session.db')
       return undefined
     }
-    const scan = scanWindowsDbKey(pid, sessionDb, Date.now() + timeout)
+    const scan = scanWindowsDbKey(pid, sessionDb, Date.now() + timeout, accountDbTargets(dbStoragePath))
     if (scan.key) {
       tracker.done('db_key', '已从微信进程内存获取密钥')
       return scan.key
@@ -237,8 +256,8 @@ export async function acquireKeys(opts: AcquireKeysOptions): Promise<AcquireKeys
       tracker.fail('verify', check.error ?? '密钥格式非法')
       return { steps: tracker.steps, imageXorHex: image.xorHex, imageAesHex: image.aesHex }
     }
-    const sessionDb = findSessionDbCandidates(dbStoragePath)[0]
-    const verified = sessionDb ? verifyDbKey(sessionDb, dbKeyHex) : { ok: false, error: '未找到 session.db' }
+    // Verify against the whole account, not just session.db: one key must open every database.
+    const verified = verifyDbKeyAcross(accountDbTargets(dbStoragePath), dbKeyHex)
     if (verified.ok) tracker.done('verify', '数据库密钥校验通过')
     else tracker.fail('verify', verified.error ?? '密钥校验失败')
     return {
