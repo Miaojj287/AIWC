@@ -91,11 +91,17 @@ export class SqlcipherBridge implements WcdbBridge {
     }
   }
 
+  /**
+   * Closing one database means the caller hit an error on it (corruption, unreadable copy), so its
+   * copy is dropped and rebuilt on the next query — a half-written copy left behind by a crash heals
+   * itself. Closing all of them is plain shutdown and keeps the copies for the next launch.
+   */
   closeDatabase(dbPath?: string): void {
     if (dbPath) {
       const entry = this.entries.get(dbPath)
       if (entry) {
         closeEntry(entry)
+        entry.copy?.remove()
         this.entries.delete(dbPath)
       }
       return

@@ -1,4 +1,4 @@
-import { mkdtempSync, openSync, closeSync, writeFileSync, writeSync } from 'node:fs'
+import { mkdtempSync, openSync, closeSync, readdirSync, writeFileSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -98,6 +98,23 @@ describe('SqlcipherBridge', () => {
     b.closeDatabase(plain)
     b.dispose()
     expect(b.execQuery(plain, 'SELECT count(*) AS n FROM msg').rows).toEqual([{ n: 2 }])
+  })
+
+  it('rebuilds the decrypted copy of a database closed after an error, but keeps copies on shutdown', () => {
+    const encrypted = join(root, 'session.db')
+    writeFileSync(encrypted, encryptPage(plaintextPage(1, 0x33), Buffer.alloc(32, 7), 1, fixtureIv(1)))
+    const copies = join(cacheDir, 'wcdb-plain')
+    const b = bridge()
+
+    expect(b.execQuery(encrypted, 'SELECT count(*) FROM sqlite_master', [], KEY_HEX).success).toBe(false)
+    expect(readdirSync(copies)).toHaveLength(1)
+    // A corruption error takes the copy with it, so a half-written copy heals on the next query.
+    b.closeDatabase(encrypted)
+    expect(readdirSync(copies)).toEqual([])
+
+    b.execQuery(encrypted, 'SELECT count(*) FROM sqlite_master', [], KEY_HEX)
+    b.dispose()
+    expect(readdirSync(copies)).toHaveLength(1)
   })
 
   it('uses the salt of the database it was keyed for', () => {
