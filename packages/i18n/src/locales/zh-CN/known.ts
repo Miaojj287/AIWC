@@ -169,6 +169,7 @@ export const known = {
     aesFailed: '未能获取图片 AES 密钥',
     formatInvalid: '密钥格式非法',
     dbKeyVerified: '数据库密钥校验通过',
+    sessionOnlyVerified: '会话数据库密钥校验通过；其余数据库在读取时各自取用密钥',
     verifyFailed: '密钥校验失败',
     noDbKey: '未获取到数据库密钥',
     helperMissing: '缺少 wechat_memory_scan_helper',

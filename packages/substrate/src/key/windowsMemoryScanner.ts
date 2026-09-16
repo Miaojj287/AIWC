@@ -46,6 +46,8 @@ const MAX_REGION_SIZE = 512 * 1024 * 1024
 const CHUNK_SIZE = 2 * 1024 * 1024
 const OVERLAP = 98
 const MAX_RAW_CANDIDATES = 32
+/** Config.Cipher runs kept for the deferred PBKDF2 pass; each check costs ~250 ms. */
+const MAX_DEFERRED_CANDIDATES = 16
 const MAX_MEMORY_HITS = 128
 const IMAGE_KEY_OVERLAP_SIZE = 65
 const MAX_IMAGE_REGION_SIZE = 100 * 1024 * 1024
@@ -56,6 +58,8 @@ const CONFIG_XOR_MASK = Buffer.from('d2c7442458020000004889442450488b450048844c2
 
 export interface WindowsDbKeyScanResult {
   key: string | null
+  /** True when the key also opens the other databases of the account, not just the scanned one. */
+  accountWide: boolean
   opened: boolean
   dbOk: boolean
   bytes: number
@@ -101,9 +105,10 @@ function verifyRawKey(key: Buffer, page: Buffer): boolean {
 }
 
 /**
- * One key has to open the whole account, not just the database we scanned against. WeChat configures
- * WCDB per database (`x'<key><salt>'`), so a candidate that only fits `session.db` would leave every
- * message shard unreadable; rejecting it here lets the scan keep looking for the account-wide key.
+ * Prefer a candidate that opens the whole account over one that only fits the scanned database.
+ * WeChat on Windows configures WCDB per database, so a per-database key is the normal outcome and
+ * `key/dbKeyResolver.ts` resolves the rest at read time — but an account-wide key (the macOS shape,
+ * and any build that keeps the passphrase around) needs no further scanning at all, so it wins.
  * Callers check the scanned database first, so this only runs for a candidate that already fits it.
  */
 function fitsAccount(keyHex: string, otherPages: readonly Buffer[]): boolean {
@@ -297,20 +302,20 @@ function findProcessBytes(k: Kernel32, handle: bigint, needle: Buffer, deadline?
 }
 
 /**
- * Walk the WCDB `Config.Cipher` node and read the per-database key directly. This is the deterministic
- * WeChat 4.1.13+ path: it finds the `com.Tencent.WCDB.Config.Cipher` name, follows references to the
- * config object, XOR-decodes the stored blob and validates each embedded `x'<hex>'` run against the
- * encrypted first page. Returns a 'direct' (already-derived) 64-hex key.
+ * Walk every `x'<hex>'` run WeChat has configured WCDB with: find the
+ * `com.Tencent.WCDB.Config.Cipher` name, follow references to the config object and XOR-decode the
+ * stored blob. WeChat keeps one such node per open database, and on Windows each database has its own
+ * key, so the walk yields a candidate per database. `onCandidate` returning true stops the walk.
+ * Returns the number of candidates seen.
  */
-function scanConfigCipherKey(
+function walkConfigCipherRuns(
   k: Kernel32,
   handle: bigint,
-  encryptedFirstPage: Buffer,
-  otherPages: readonly Buffer[],
+  onCandidate: (keyHex: string) => boolean,
   deadline?: number,
-): { key: string | null; candidates: number } {
+): number {
   const nameAddresses = findProcessBytes(k, handle, CONFIG_CIPHER_NAME, deadline)
-  if (!nameAddresses.length) return { key: null, candidates: 0 }
+  if (!nameAddresses.length) return 0
 
   let candidates = 0
   const tested = new Set<string>()
@@ -355,20 +360,91 @@ function scanConfigCipherKey(
           const candidate = Buffer.from(hex, 'hex')
           if (candidate.length !== RAW_KEY_SIZE || new Set(candidate).size < 15) continue
           candidates += 1
-          if (verifyDirectKey(candidate, encryptedFirstPage) && fitsAccount(hex, otherPages))
-            return { key: hex, candidates }
+          if (onCandidate(hex)) return candidates
         }
       }
     }
   }
-  return { key: null, candidates }
+  return candidates
+}
+
+/**
+ * Find the Config.Cipher key for one database. Both key shapes are tried: a run can hold the key
+ * SQLCipher uses as is, or the account passphrase, which only validates after PBKDF2. The expensive
+ * PBKDF2 pass is deferred until the cheap pass over every candidate has failed, so a hit costs nothing.
+ */
+function scanConfigCipherKey(
+  k: Kernel32,
+  handle: bigint,
+  encryptedFirstPage: Buffer,
+  consider: (keyHex: string) => boolean,
+  deadline?: number,
+): { stop: boolean; candidates: number } {
+  const deferred: string[] = []
+  let stop = false
+  const candidates = walkConfigCipherRuns(
+    k,
+    handle,
+    (hex) => {
+      if (verifyDirectKey(Buffer.from(hex, 'hex'), encryptedFirstPage)) {
+        stop = consider(hex)
+        return stop
+      }
+      if (deferred.length < MAX_DEFERRED_CANDIDATES) deferred.push(hex)
+      return false
+    },
+    deadline,
+  )
+  if (!stop) {
+    for (const hex of deferred) {
+      if (deadline && Date.now() >= deadline) break
+      if (!verifyRawKey(Buffer.from(hex, 'hex'), encryptedFirstPage)) continue
+      if (consider(hex)) {
+        stop = true
+        break
+      }
+    }
+  }
+  return { stop, candidates }
+}
+
+/**
+ * Every key WeChat has configured WCDB with in this process, for matching against individual
+ * databases locally. One walk serves the whole account: on Windows each database has its own key, and
+ * re-walking the process for every message shard would cost seconds each.
+ */
+export function collectWindowsConfigCipherKeys(pid: number, deadline?: number): string[] {
+  if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return []
+  const funcs = loadKernel32()
+  if (!funcs) return []
+  const handle = BigInt(funcs.openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
+  if (!handle) return []
+  const keys: string[] = []
+  try {
+    walkConfigCipherRuns(
+      { virtualQueryEx: funcs.virtualQueryEx, readProcessMemory: funcs.readProcessMemory },
+      handle,
+      (hex) => {
+        keys.push(hex)
+        return false
+      },
+      deadline,
+    )
+  } catch {
+    // A mapping can change mid-walk; whatever was collected so far is still usable.
+  } finally {
+    funcs.closeHandle(handle)
+  }
+  return keys
 }
 
 /**
  * Read-only memory scan for the WeChat db key. Returns key:null when not found.
  *
  * `accountDbPaths` are the other databases of the same account (contact, message shards). A candidate
- * must open all of them, not only `dbPath` — see `fitsAccount`.
+ * that opens all of them is account-wide and wins immediately; one that only opens `dbPath` is kept
+ * as a fallback and reported with `accountWide: false`, because WeChat configures WCDB per database
+ * and such a key cannot read any message.
  */
 export function scanWindowsDbKey(
   pid: number,
@@ -376,7 +452,14 @@ export function scanWindowsDbKey(
   deadline?: number,
   accountDbPaths: readonly string[] = [],
 ): WindowsDbKeyScanResult {
-  const result: WindowsDbKeyScanResult = { key: null, opened: false, dbOk: false, bytes: 0, candidates: 0 }
+  const result: WindowsDbKeyScanResult = {
+    key: null,
+    accountWide: false,
+    opened: false,
+    dbOk: false,
+    bytes: 0,
+    candidates: 0,
+  }
   if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return result
   const salt = readEncryptedDbSalt(dbPath)
   const page = readFirstPage(dbPath)
@@ -386,6 +469,18 @@ export function scanWindowsDbKey(
     .filter((path) => path !== dbPath)
     .map((path) => readFirstPage(path))
     .filter((other): other is Buffer => other !== null)
+
+  let fallback: string | null = null
+  /** Take a key that already opens `dbPath`; true means "account-wide, stop scanning". */
+  const consider = (keyHex: string): boolean => {
+    if (fitsAccount(keyHex, otherPages)) {
+      result.key = keyHex
+      result.accountWide = true
+      return true
+    }
+    fallback ??= keyHex
+    return false
+  }
 
   const funcs = loadKernel32()
   if (!funcs) return result
@@ -399,10 +494,9 @@ export function scanWindowsDbKey(
   // Path 1: the deterministic Config.Cipher node (WeChat 4.1.13+). Runs first because it is not a
   // brute-force over random UUID-shaped sequences and it works whenever the user is logged in.
   try {
-    const config = scanConfigCipherKey(k, handle, page, otherPages, deadline)
+    const config = scanConfigCipherKey(k, handle, page, consider, deadline)
     result.candidates += config.candidates
-    if (config.key) {
-      result.key = config.key
+    if (config.stop) {
       closeHandle(handle)
       return result
     }
@@ -450,11 +544,8 @@ export function scanWindowsDbKey(
             }
             const records = extractMemoryDbKeyCandidates(searchable)
             result.candidates += records.length
-            const match = records.find((c) => c.salt === salt && fitsAccount(c.key, otherPages))
-            if (match) {
-              result.key = match.key
-              break
-            }
+            const match = records.find((c) => c.salt === salt && consider(c.key))
+            if (match) break
             trailing = searchable.subarray(Math.max(0, searchable.length - OVERLAP))
           } else {
             trailing = Buffer.alloc(0)
@@ -470,18 +561,21 @@ export function scanWindowsDbKey(
     closeHandle(handle)
   }
 
+  // PBKDF2 is deferred to here: validating inline is slow enough that a key in a later region can
+  // disappear before that region is read.
   if (!result.key) {
     for (const rawKey of rawCandidates) {
-      const hex = rawKey.toString('hex')
       if (!verifyRawKey(rawKey, page) && !verifyDirectKey(rawKey, page)) continue
-      if (!fitsAccount(hex, otherPages)) continue
-      result.key = hex
-      break
+      if (consider(rawKey.toString('hex'))) break
     }
   }
-  // If we recovered a raw record, confirm it matches this exact database page and the rest of the account.
-  if (result.key && (classifyKeyAgainstPage(page, result.key) === null || !fitsAccount(result.key, otherPages)))
+  // Nothing account-wide turned up: hand back the key that at least opens this database, flagged.
+  if (!result.key && fallback) result.key = fallback
+  // Final guard: whatever we return must decrypt this exact database page.
+  if (result.key && classifyKeyAgainstPage(page, result.key) === null) {
     result.key = null
+    result.accountWide = false
+  }
   return result
 }
 

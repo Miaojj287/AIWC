@@ -213,8 +213,20 @@ Agent 有一个通用 `shell` 工具，让它能像 Cursor / Hermes 这类通用
   2. **裸 UUID 块**——4.1.x 登录过程里出现在内存里的账号密钥，`raw` 形式（还要过一遍 PBKDF2），通常只在刚登录时能扫到。
   3. **ASCII `x'<key><salt>'` 记录**——旧版本。
   只有当前登录账号的库会出现在第 1 条路里；`db_storage` 里其他历史账号的密钥不在内存中，界面会要求切到那个账号重新登录。
-- **密钥必须能打开整个账号，不是只打开 session.db**：每个 SQLCipher 文件都有自己的 salt，所以只有「原始口令」（按各文件 salt 走 PBKDF2）和「账号级直接密钥」（SQLCipher 原样使用）才是全账号通用的；只为某一个文件派生出来的密钥能通过 `session.db` 的校验，却读不出任何一条消息。因此候选密钥要同时通过 `session.db` + `contact.db` + 第一个消息分片（`accountDbTargets`），不通过就继续往下扫（`fitsAccount`）；`acquireKeys` 的「校验密钥」这一步用 `verifyDbKeyAcross` 做同样的跨库校验。`verifyAccount` 仍然只做「目录形态 + 密钥初筛」，严格的门槛在获取这一步。
-- **两个平台拿到的密钥形态不同、值也无关**：macOS 的 helper 找的是账号口令（`raw`），Windows 的 `Config.Cipher` 给的是 SQLCipher 原样使用的密钥（`direct`）；再加上两台机器的微信库本来就是两套各自随机加密的文件，同一个微信号在 Mac 和 Windows 上的密钥必然完全不同，互相不能用。`classifyKeyAgainstPage` 负责判别形态，两种形态在 WCDB 桥和 SQLCipher 引擎里都各自处理。
+- **Windows 是「一库一密钥」（2026-09-16 真机实测）**：`packages/substrate/src/key/windowsKeys.realdb.test.ts` 在真机上逐库扫描的结果是 4 个库、4 把互不相同的密钥，全部为 `direct` 形态：
+
+ | 库 | salt | 形态 |
+ |---|---|---|
+ | `session.db` | `fcbf391c…` | direct |
+ | `contact.db` | `be79928f…` | direct |
+ | `biz_message_0.db` | `85acbfb4…` | direct |
+ | `message_0.db` | `20932641…` | direct |
+
+ 所以 `account.dbKeyRef` 存的那一把只是**会话库**的密钥，它是账号可用性的门槛，不是全账号的钥匙。其余库的密钥由 `key/dbKeyResolver.ts` 在读取时解析：先试存下来的密钥，不行就用 `collectWindowsConfigCipherKeys()` 把微信进程里所有 Config.Cipher 候选**一次性**收集起来（一次遍历约 2 秒），再用各库首页在本地逐个匹配（每个候选一次 AES）；命中即缓存，未命中的库进 30 秒负缓存，避免在查询循环里反复扫描。查询层的 `createBridgeQuery(bridge, keyFor)` 本来就是按 `dbPath` 取密钥的，两套引擎都按库缓存连接，所以这里不需要改引擎。
+- **限制**：Windows 上读消息库需要微信进程在运行（候选密钥只存在于它的内存里）。微信没开时会话列表仍可用（会话库密钥已持久化），消息库会失败并记一条 warn。把按库密钥持久化进 `secretStore` 是待办。
+- **候选密钥两种形态都要试**：Config.Cipher 里的 run 可能是 SQLCipher 原样使用的密钥，也可能是账号口令（要过 PBKDF2）。先对所有候选做便宜的直连校验，失败后再对最多 16 个候选做延迟的 PBKDF2 校验；扫描优先返回能打开整个账号的密钥（`fitsAccount`），只能开会话库的作为兜底返回并标 `accountWide: false`。
+- **两个平台拿到的密钥形态不同、值也无关**：macOS 的 helper 找的是账号口令（`raw`，按各文件 salt 走 PBKDF2，因此一把通用），Windows 的 `Config.Cipher` 给的是按库派生、SQLCipher 原样使用的密钥（`direct`）；再加上两台机器的微信库本来就是两套各自随机加密的文件，同一个微信号在 Mac 和 Windows 上的密钥必然完全不同，互相不能用。`classifyKeyAgainstPage` 判别形态，两种形态在 WCDB 桥和 SQLCipher 引擎里都各自处理。
+- `verifyAccount` 只做「目录形态 + 会话库密钥初筛」；`acquireKeys` 的「校验密钥」步骤用 `verifyDbKeyAcross` 报告这把密钥覆盖到哪些库，只覆盖会话库在 Windows 上是正常结果。
 - **数据库引擎**：`resources/native` 里没有 Windows 的 WCDB 库，所以走纯 TypeScript 的 SQLCipher 引擎（`wcdb/sqlcipherBridge.ts`）：
   - `sqlcipherCodec.ts` 按 SQLCipher 4 的页格式（页 4096、reserved 80 = IV 16 + HMAC-SHA512 64、页 1 前 16 字节是 KDF salt）用 `node:crypto` 逐页解密；解密后的页保留 reserved 尾部，页头仍然声明 `reserved = 80`，因此**任何标准 SQLite 都能直接读**（SQLite 由页头第 20 字节推导 usable size，`sqlcipherBridge.test.ts` 有回归测试锁住这个前提）。
   - `decryptedCopy.ts` 把解密结果落在 `<dataRoot>/cache/wcdb-plain/<路径哈希>-<库名>-<salt>.db`，**只读源库、从不回写微信目录**。副本名带 salt，换了库就不会复用旧副本。刷新是增量的：主库只在 size/mtime 变化时重扫，且只重解 IV 变过的页（副本自带上次的 IV，重启后也能接着增量）；WAL 帧叠加在上面，来自 WAL 的页把 reserved 尾部清零，等 checkpoint 后自动从主库恢复。

@@ -14,7 +14,7 @@ import {
 } from '../wcdb/dbFiles'
 import { cleanAccountDirName } from '../wcdb/accountUtils'
 import { findWeChatPidSync } from '../discovery/processDetect'
-import { verifyDbKeyAcross } from './sqlcipherPage'
+import { verifyDbKey, verifyDbKeyAcross } from './sqlcipherPage'
 import { validateKeyHexDetailed } from './validateKeyHex'
 import { resolveImageKeys } from './imageKeys'
 import {
@@ -256,13 +256,19 @@ export async function acquireKeys(opts: AcquireKeysOptions): Promise<AcquireKeys
       tracker.fail('verify', check.error ?? '密钥格式非法')
       return { steps: tracker.steps, imageXorHex: image.xorHex, imageAesHex: image.aesHex }
     }
-    // Verify against the whole account, not just session.db: one key must open every database.
-    const verified = verifyDbKeyAcross(accountDbTargets(dbStoragePath), dbKeyHex)
-    if (verified.ok) tracker.done('verify', '数据库密钥校验通过')
-    else tracker.fail('verify', verified.error ?? '密钥校验失败')
+    // The session database is the gate. Whether this one key also covers the others depends on the
+    // platform: WeChat on Windows keys every database separately and the rest are resolved at read
+    // time (key/dbKeyResolver.ts), so covering only the session database is normal there.
+    const targets = accountDbTargets(dbStoragePath)
+    const across = verifyDbKeyAcross(targets, dbKeyHex)
+    const sessionDb = targets[0]
+    const sessionOnly = !across.ok && sessionDb ? verifyDbKey(sessionDb, dbKeyHex) : undefined
+    if (across.ok) tracker.done('verify', '数据库密钥校验通过')
+    else if (sessionOnly?.ok) tracker.done('verify', '会话数据库密钥校验通过；其余数据库在读取时各自取用密钥')
+    else tracker.fail('verify', across.error ?? '密钥校验失败')
     return {
       steps: tracker.steps,
-      dbKeyHex: verified.ok ? check.normalized : undefined,
+      dbKeyHex: across.ok || sessionOnly?.ok ? check.normalized : undefined,
       imageXorHex: image.xorHex,
       imageAesHex: image.aesHex,
     }

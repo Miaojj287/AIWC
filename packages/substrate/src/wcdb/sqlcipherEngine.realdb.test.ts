@@ -2,13 +2,10 @@
  * Real-machine diagnosis of the database key and the pure-TypeScript SQLCipher engine.
  *
  * It recovers the key from the running WeChat itself, so nothing secret has to be typed on a command
- * line, then reports **which key representation every database of the account accepts** before
- * reading the account through the engine. That middle step is the interesting one: a key is valid for
- * one SQLCipher file only if it either is that file's raw passphrase ('raw', PBKDF2 with the file's
- * own salt) or is a key SQLCipher can use as is ('direct'). If a key matched `session.db` but no
- * other file, WeChat would be handing out per-file keys and the single account-wide key this app
- * stores could never work — this test is what tells the two apart. Output is structural only: paths,
- * public header salts, forms and counts, never chat content.
+ * line, reports which databases that one key covers, and then reads the account through the engine —
+ * which resolves the remaining databases' keys on its own (Windows keys every database separately,
+ * see key/dbKeyResolver.ts). Reading messages is therefore the real assertion here.
+ * Output is structural only: paths, public header salts, forms and counts, never chat content.
  *
  * PowerShell:
  *   $env:AIWC_TEST_ROOT = 'C:\Users\<you>\Documents\xwechat_files'
@@ -62,7 +59,7 @@ run('SQLCipher engine on real WeChat data', () => {
     ].filter((path): path is string => !!path)
     expect(files.length).toBeGreaterThan(1)
 
-    const forms = files.map((file) => {
+    for (const file of files) {
       const page = readFirstPage(file)
       const form = page ? classifyKeyAgainstPage(page, keyHex) : null
       console.log(
@@ -70,13 +67,10 @@ run('SQLCipher engine on real WeChat data', () => {
         file.slice((storage as string).length),
         '| salt',
         readEncryptedDbSalt(file) ?? 'plaintext',
-        '| key form',
-        form ?? 'NO MATCH',
+        '| acquired key',
+        form ?? 'needs its own key',
       )
-      return { file, form }
-    })
-    const rejected = forms.filter((entry) => entry.form === null).map((entry) => entry.file)
-    expect(rejected, 'these databases reject the account key').toEqual([])
+    }
 
     cacheDir = mkdtempSync(join(tmpdir(), 'aiwc-realdb-'))
     const reader = createWcdbSourceReader({

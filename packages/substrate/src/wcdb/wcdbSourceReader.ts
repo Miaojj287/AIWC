@@ -6,6 +6,8 @@
 import type { WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
 import type { SourceOpenOptions, SourceReader } from '../source'
 import type { GuardedSql } from '../shared/sqlGuard'
+import { createDbKeyResolver } from '../key/dbKeyResolver'
+import { collectWeChatDbKeyCandidates } from '../key/liveKeyCandidates'
 import { verifyDbKey } from '../key/sqlcipherPage'
 import { buildIdentityKeys, cleanAccountDirName } from './accountUtils'
 import { ContactDirectory } from './contactQueries'
@@ -88,7 +90,14 @@ export class WcdbSourceReader implements SourceReader {
     })
     try {
       const sessionDbPath = this.pickSessionDb(bridge, sessionCandidates, keyHex)
-      const q = createBridgeQuery(bridge, () => keyHex)
+      // WeChat on Windows keys every database separately, so the verified key is only the starting
+      // point: each file resolves its own key from what WeChat has in memory (see dbKeyResolver).
+      const keys = createDbKeyResolver({
+        sessionKeyHex: keyHex,
+        collectCandidates: () => collectWeChatDbKeyCandidates(),
+        logger: this.options.logger,
+      })
+      const q = createBridgeQuery(bridge, (dbPath) => keys.keyFor(dbPath))
       const contactDbPath = findNamedDb(dbStoragePath, 'contact.db')
       const shards = findMessageShards(dbStoragePath)
       this.state = {

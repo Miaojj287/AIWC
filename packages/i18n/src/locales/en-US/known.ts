@@ -166,6 +166,7 @@ export const known: Messages['known'] = {
     aesFailed: "Couldn't get the image AES key",
     formatInvalid: 'Invalid key format',
     dbKeyVerified: 'Database key verified',
+    sessionOnlyVerified: 'Session database key verified; the other databases get their own key when read',
     verifyFailed: 'Key verification failed',
     noDbKey: 'No database key was obtained',
     helperMissing: 'wechat_memory_scan_helper is missing',
