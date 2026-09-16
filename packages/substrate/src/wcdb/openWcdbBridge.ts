@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { classifyKeyAgainstPage, readFirstPage, type DbKeyForm } from '../key/sqlcipherPage'
+import { normalizeInt64, type SqlParam, type WcdbBridge, type WcdbQueryResult } from './bridge'
 import type { Row } from './rowDecoders'
 
 const requireNative = createRequire(import.meta.url)
@@ -16,14 +17,6 @@ type NativeRef = { innerValue: unknown }
 // koffi is untyped at the call site; we keep the surface small and wrap everything below.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type KoffiFn = (...args: any[]) => any
-
-export type SqlParam = string | number | bigint | boolean | null | undefined | Buffer | Uint8Array
-
-export interface WcdbQueryResult {
-  success: boolean
-  rows?: Row[]
-  error?: string
-}
 
 const WCDB_COLUMN_INTEGER = 1
 const WCDB_COLUMN_FLOAT = 2
@@ -36,18 +29,12 @@ function hasRef(value: NativeRef | null | undefined): value is NativeRef {
   return !!value?.innerValue
 }
 
-function normalizeInt64(value: number | bigint): number | string {
-  if (typeof value === 'number') return value
-  if (value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER)) return Number(value)
-  return value.toString()
-}
-
 interface OpenDatabase {
   ref: NativeRef
   keyHex: string
 }
 
-export class OpenWcdbBridge {
+export class OpenWcdbBridge implements WcdbBridge {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private koffi: any = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

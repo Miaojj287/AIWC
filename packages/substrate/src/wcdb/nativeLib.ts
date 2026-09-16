@@ -36,10 +36,14 @@ export function wcdbLibraryCandidates(nativeDir: string): string[] {
   return Array.from(new Set(list))
 }
 
+/** The bundled WCDB library, or null when this platform has none (callers then use another engine). */
+export function findWcdbLibrary(nativeDir: string): string | null {
+  return wcdbLibraryCandidates(nativeDir).find((p) => existsSync(p)) ?? null
+}
+
 export function resolveWcdbLibrary(nativeDir: string): string {
-  const candidates = wcdbLibraryCandidates(nativeDir)
-  const found = candidates.find((p) => existsSync(p))
-  if (!found) throw new NativeMissingError(wcdbLibraryName(), candidates)
+  const found = findWcdbLibrary(nativeDir)
+  if (!found) throw new NativeMissingError(wcdbLibraryName(), wcdbLibraryCandidates(nativeDir))
   return found
 }
 

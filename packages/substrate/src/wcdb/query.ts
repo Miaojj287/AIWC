@@ -2,7 +2,7 @@
  * Thin synchronous query surface over the WCDB bridge. Higher layers depend on this interface
  * (not on koffi) so they can be exercised with an in-memory fake in tests.
  */
-import type { OpenWcdbBridge, SqlParam } from './openWcdbBridge'
+import type { SqlParam, WcdbBridge } from './bridge'
 import type { Row } from './rowDecoders'
 
 export interface WcdbQuery {
@@ -24,7 +24,7 @@ export function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`
 }
 
-export function createBridgeQuery(bridge: OpenWcdbBridge, keyFor: (dbPath: string) => string | undefined): WcdbQuery {
+export function createBridgeQuery(bridge: WcdbBridge, keyFor: (dbPath: string) => string | undefined): WcdbQuery {
   const columnCache = new Map<string, string[]>()
   const all = (dbPath: string, sql: string, params: SqlParam[] = []): Row[] => {
     const result = bridge.execQuery(dbPath, sql, params, keyFor(dbPath))

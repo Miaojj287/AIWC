@@ -21,8 +21,8 @@ import {
 import { extractMediaLocator } from './messageMapper'
 import { findMessageRow, queryMessagesAfter, queryMessagesBefore, type MessageQueryContext } from './messageQueries'
 import { resolveMediaFor, type MediaResolverContext } from './mediaResolver'
-import { resolveWcdbLibrary } from './nativeLib'
-import { OpenWcdbBridge } from './openWcdbBridge'
+import type { WcdbBridge, WcdbLogger } from './bridge'
+import { createWcdbBridge } from './engine'
 import { createBridgeQuery, yieldToLoop, type WcdbQuery } from './query'
 import { querySessionActivity, querySessions, querySessionsChangedSince } from './sessionQueries'
 import { MessageTableIndex } from './tableResolver'
@@ -34,11 +34,12 @@ export interface WcdbSourceReaderOptions {
   nativeDir: string
   /** Debounce for change notifications (ms). */
   watchDebounceMs?: number
-  logger?: (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
+  logger?: WcdbLogger
 }
 
 interface OpenState {
   opts: SourceOpenOptions
+  bridge: WcdbBridge
   dbStoragePath: string
   accountDir: string
   sessionDbPath: string
@@ -62,7 +63,6 @@ const SHARD_RESCAN_MS = 30_000
 
 export class WcdbSourceReader implements SourceReader {
   readonly kind = 'wcdb' as const
-  private readonly bridge = new OpenWcdbBridge()
   private state: OpenState | null = null
   private readonly listeners = new Set<ChangeListener>()
   private stopWatching: (() => void) | null = null
@@ -75,71 +75,62 @@ export class WcdbSourceReader implements SourceReader {
 
   async open(opts: SourceOpenOptions): Promise<void> {
     if (this.state) await this.close()
-    const libraryPath = resolveWcdbLibrary(this.options.nativeDir)
-    const init = this.bridge.initialize(libraryPath)
-    if (!init.success) throw new Error(init.error || 'WCDB 初始化失败')
-
     const keyHex = opts.dbKeyHex.trim().toLowerCase()
     const dbStoragePath = resolveDbStoragePath(opts.dbRoot, opts.wxid)
     if (!dbStoragePath) throw new Error(`未找到账号目录或 db_storage: ${opts.dbRoot}`)
     const sessionCandidates = findSessionDbCandidates(dbStoragePath)
     if (sessionCandidates.length === 0) throw new Error(`未找到 session.db: ${dbStoragePath}`)
 
-    let sessionDbPath: string | undefined
-    let lastError = ''
-    for (const candidate of sessionCandidates) {
-      const check = verifyDbKey(candidate, keyHex)
-      if (!check.ok) {
-        lastError = check.error ?? ''
-        continue
+    const { bridge, engine } = createWcdbBridge({
+      nativeDir: this.options.nativeDir,
+      cacheDir: opts.cacheDir,
+      logger: this.options.logger,
+    })
+    try {
+      const sessionDbPath = this.pickSessionDb(bridge, sessionCandidates, keyHex)
+      const q = createBridgeQuery(bridge, () => keyHex)
+      const contactDbPath = findNamedDb(dbStoragePath, 'contact.db')
+      const shards = findMessageShards(dbStoragePath)
+      this.state = {
+        opts,
+        bridge,
+        dbStoragePath,
+        accountDir: dirname(dbStoragePath),
+        sessionDbPath,
+        contactDbPath,
+        emoticonDbPath: findNamedDb(dbStoragePath, 'emoticon.db'),
+        hardlinkDbPath: findNamedDb(dbStoragePath, 'hardlink.db'),
+        mediaDbPaths: findMediaDbs(dbStoragePath),
+        keyHex,
+        selfKeys: Array.from(new Set([opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean))),
+        q,
+        contacts: new ContactDirectory(q, contactDbPath, findNamedDb(dbStoragePath, 'head_image.db')),
+        index: new MessageTableIndex(q, () => this.currentShards()),
+        shards,
+        shardsScannedAt: Date.now(),
+        lastSortTimestamp: 0,
       }
-      if (this.bridge.canOpen(candidate, keyHex)) {
-        sessionDbPath = candidate
-        break
-      }
-      lastError = 'WCDB 无法打开数据库'
+      this.log('info', 'wcdb source opened', {
+        engine,
+        dbStoragePath,
+        shards: shards.length,
+        contact: !!contactDbPath,
+      })
+      this.startWatching()
+    } catch (error) {
+      bridge.dispose()
+      throw error
     }
-    if (!sessionDbPath) {
-      this.bridge.dispose()
-      throw new Error(
-        lastError.includes('不匹配')
-          ? '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥'
-          : `数据库打开失败：${lastError || '未知原因'}`,
-      )
-    }
-
-    const q = createBridgeQuery(this.bridge, () => keyHex)
-    const contactDbPath = findNamedDb(dbStoragePath, 'contact.db')
-    const shards = findMessageShards(dbStoragePath)
-    const state: OpenState = {
-      opts,
-      dbStoragePath,
-      accountDir: dirname(dbStoragePath),
-      sessionDbPath,
-      contactDbPath,
-      emoticonDbPath: findNamedDb(dbStoragePath, 'emoticon.db'),
-      hardlinkDbPath: findNamedDb(dbStoragePath, 'hardlink.db'),
-      mediaDbPaths: findMediaDbs(dbStoragePath),
-      keyHex,
-      selfKeys: Array.from(new Set([opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean))),
-      q,
-      contacts: new ContactDirectory(q, contactDbPath, findNamedDb(dbStoragePath, 'head_image.db')),
-      index: new MessageTableIndex(q, () => this.currentShards()),
-      shards,
-      shardsScannedAt: Date.now(),
-      lastSortTimestamp: 0,
-    }
-    this.state = state
-    this.log('info', 'wcdb source opened', { dbStoragePath, shards: shards.length, contact: !!contactDbPath })
-    this.startWatching()
   }
 
   async close(): Promise<void> {
     this.stopWatching?.()
     this.stopWatching = null
-    if (this.state) this.state.index.reset()
+    if (this.state) {
+      this.state.index.reset()
+      this.state.bridge.dispose()
+    }
     this.state = null
-    this.bridge.dispose()
   }
 
   async account(): Promise<WxAccount> {
@@ -278,6 +269,25 @@ export class WcdbSourceReader implements SourceReader {
     return this.state
   }
 
+  /** First session.db this key both verifies against (pure TS) and the engine can actually open. */
+  private pickSessionDb(bridge: WcdbBridge, candidates: string[], keyHex: string): string {
+    let lastError = ''
+    for (const candidate of candidates) {
+      const check = verifyDbKey(candidate, keyHex)
+      if (!check.ok) {
+        lastError = check.error ?? ''
+        continue
+      }
+      if (bridge.canOpen(candidate, keyHex)) return candidate
+      lastError = 'WCDB 无法打开数据库'
+    }
+    throw new Error(
+      lastError.includes('不匹配')
+        ? '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥'
+        : `数据库打开失败：${lastError || '未知原因'}`,
+    )
+  }
+
   private currentShards(): MessageShard[] {
     const s = this.requireOpen()
     if (Date.now() - s.shardsScannedAt > SHARD_RESCAN_MS) {
@@ -307,7 +317,7 @@ export class WcdbSourceReader implements SourceReader {
         })
         const text = error instanceof Error ? error.message : String(error)
         if (/malformed|corrupt|not a database/i.test(text)) {
-          this.bridge.closeDatabase(dbPath)
+          s.bridge.closeDatabase(dbPath)
           s.index.invalidate()
         }
       },
