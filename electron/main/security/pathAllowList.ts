@@ -27,9 +27,10 @@ export interface AllowListOptions {
 }
 
 function normalise(p: string): string {
-  // strip a trailing separator so `relative()` treats root and file the same way
+  // strip a trailing separator so `relative()` treats root and file the same way — but never from a
+  // filesystem root: 'C:' (unlike 'C:\') means the drive's current directory.
   const r = resolve(p)
-  return r.length > 1 && r.endsWith(sep) ? r.slice(0, -1) : r
+  return r.endsWith(sep) && r !== parse(r).root ? r.slice(0, -1) : r
 }
 
 /**

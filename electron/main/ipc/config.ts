@@ -23,10 +23,11 @@ export function registerConfigIpc(ctx: AppContext, _host: HostBridge, handle: Ha
     const refused = refusedSecretRefInPatch(patch)
     if (refused !== undefined) throw new Error(t('main.config.secretRefRefused', { ref: refused }))
     // account.cacheDir feeds the substrate's media cache; it is NOT allowed to widen the file
-    // allow-list, so it must already be allowed (picked via dialog this session / under the data root).
+    // allow-list, so it must already be allowed (picked via dialog this session / under the data root) or unchanged.
     const cacheDir = customCacheDir(patch.account?.cacheDir)
     if (cacheDir) {
-      const verdict = validateCacheDir(cacheDir, { allowList: ctx.allowList })
+      const saved = customCacheDir(ctx.config.get().account.cacheDir)
+      const verdict = validateCacheDir(cacheDir, { allowList: ctx.allowList, saved })
       if (!verdict.ok) throw new Error(verdict.reason)
     }
     return ctx.config.set(patch)

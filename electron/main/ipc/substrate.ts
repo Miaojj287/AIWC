@@ -192,7 +192,8 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     const selected = target ? AccountTargetSchema.parse(target) : undefined
     const cache = customCacheDir(selected?.cacheDir)
     if (cache) {
-      const verdict = validateCacheDir(cache, { allowList: ctx.allowList })
+      const saved = customCacheDir(config.get().account.cacheDir)
+      const verdict = validateCacheDir(cache, { allowList: ctx.allowList, saved })
       if (!verdict.ok) throw new Error(verdict.reason)
     }
     return activate(selected)

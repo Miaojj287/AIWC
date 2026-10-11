@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CACHE_DIR_ERRORS, customCacheDir, isDirectorySync, validateCacheDir } from './cacheDirPolicy'
 import { createAllowList } from './pathAllowList'
@@ -48,6 +48,21 @@ describe('cacheDir policy', () => {
     expect(validateCacheDir('/etc', { home, allowList: al })).toEqual({
       ok: false,
       reason: CACHE_DIR_ERRORS.notAllowed,
+    })
+  })
+
+  it('accepts the saved cache dir again after a restart, when only its account folder is allowed', () => {
+    const cache = join(dir, 'cache')
+    const al = createAllowList([join(dir, 'aiwc'), join(cache, 'aiwc-accounts', 'abc')], { home })
+    expect(validateCacheDir(cache, { home, allowList: al, saved: `${cache}/` })).toEqual({ ok: true, dir: cache })
+    expect(validateCacheDir(join(dir, 'other'), { home, allowList: al, saved: cache })).toEqual({
+      ok: false,
+      reason: CACHE_DIR_ERRORS.notAllowed,
+    })
+    const root = parse(dir).root
+    expect(validateCacheDir(root, { home, allowList: al, saved: root })).toEqual({
+      ok: false,
+      reason: CACHE_DIR_ERRORS.forbiddenRoot,
     })
   })
 

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   pathDeniedMessage,
@@ -57,6 +57,15 @@ describe('path allow-list', () => {
     expect(isForbiddenRoot('/', '/Users/me')).toBe(true)
     expect(isForbiddenRoot('/Users/me', '/Users/me')).toBe(true)
     expect(isForbiddenRoot('/Users/me/Documents', '/Users/me')).toBe(false)
+  })
+
+  it("refuses this platform's own filesystem root (C:\\ on Windows)", () => {
+    const root = parse(tmpdir()).root
+    expect(isForbiddenRoot(root, '/Users/me')).toBe(true)
+    const al = createAllowList([root], { home: '/Users/me' })
+    expect(al.roots()).toEqual([])
+    expect(al.addRoot(root)).toBe(false)
+    expect(isWithinRoot(join(tmpdir(), 'x'), root)).toBe(true)
   })
 })
 

@@ -3,7 +3,8 @@
  * renderer renders untrusted WeChat content, so it must never be able to turn a config write into a
  * new allow-list root. A custom cache dir is accepted only when it is an absolute path that is not a
  * filesystem root or the home directory, and (when an allow-list is given) already lies inside the
- * allow-list — i.e. it was picked through the native dialog this session or sits under the data root.
+ * allow-list — i.e. it was picked through the native dialog this session or sits under the data root — or is
+ * the value already saved (vetted when it was first set; resubmitting it widens nothing).
  */
 import { isAbsolute, resolve } from 'node:path'
 import { statSync } from 'node:fs'
@@ -15,6 +16,11 @@ export interface CacheDirPolicyOptions {
   home?: string
   /** When given, the directory must already be allowed (no privilege escalation). */
   allowList?: Pick<AllowList, 'isAllowed'>
+  /**
+   * The cache dir already saved for this account. Resubmitting it is not an escalation, yet after a restart
+   * only its `aiwc-accounts/<scope>` folder is an allow-list root, so it skips the allow-list check.
+   */
+  saved?: string
   /** When given, the directory must exist as a directory (startup root validation). */
   isDirectory?: (path: string) => boolean
 }
@@ -56,7 +62,9 @@ export function validateCacheDir(raw: string, opts: CacheDirPolicyOptions = {}):
     return { ok: false, reason: CACHE_DIR_ERRORS.notAbsolute }
   const dir = resolve(raw)
   if (isForbiddenRoot(dir, opts.home)) return { ok: false, reason: CACHE_DIR_ERRORS.forbiddenRoot }
-  if (opts.allowList && !opts.allowList.isAllowed(dir)) return { ok: false, reason: CACHE_DIR_ERRORS.notAllowed }
+  const isSaved = opts.saved !== undefined && isAbsolute(opts.saved) && resolve(opts.saved) === dir
+  if (opts.allowList && !isSaved && !opts.allowList.isAllowed(dir))
+    return { ok: false, reason: CACHE_DIR_ERRORS.notAllowed }
   if (opts.isDirectory && !opts.isDirectory(dir)) return { ok: false, reason: CACHE_DIR_ERRORS.missing }
   return { ok: true, dir }
 }
