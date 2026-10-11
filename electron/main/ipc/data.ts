@@ -91,8 +91,7 @@ export function registerDataIpc(ctx: AppContext, host: HostBridge, handle: Handl
         store.clearStorageData(),
       ),
     )
-    app.relaunch()
-    host.quit()
+    host.relaunch()
   })
 
   // ---- 文件预览 ------------------------------------------------------------------------------

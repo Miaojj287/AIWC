@@ -44,6 +44,8 @@ export interface HostBridge {
   isTrustedSender(sender: WebContents): boolean
   hideMainWindow(): void
   quit(): void
+  /** Quit and start again; under `npm run dev` the dev server restarts Electron (devRelaunch.ts). */
+  relaunch(): void
   /** Fired when the renderer calls app:getInfo — the --smoke run waits for this. */
   onGetInfo?: () => void
 }

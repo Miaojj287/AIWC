@@ -44,6 +44,7 @@ import { createPrivacyHost } from './windows/privacyHost'
 import { openAccountProfile } from './services/accountProfiles'
 import { createAccountSession, seedProfileSecrets, type AccountSession } from './services/accountSession'
 import { applyPendingDataReset } from './services/dataReset'
+import { DEV_RELAUNCH_EXIT_CODE, relaunchesThroughDevServer } from './devRelaunch'
 
 const here = dirname(fileURLToPath(import.meta.url)) // dist-electron/
 const SMOKE = process.argv.includes('--smoke')
@@ -67,6 +68,7 @@ let windows: WindowManager | undefined
 let accountSession: AccountSession | undefined
 let quitting = false
 let shutdownDone = false
+let devRelaunchOnExit = false
 
 // Own userData directory (reverse-DNS, dev suffix) so we never share a data dir or the single-instance
 // lock with the legacy "aiwc" app on a case-insensitive file system.
@@ -185,8 +187,7 @@ async function bootstrap(): Promise<void> {
     restart: () => {
       notifier.dispose()
       windows?.get()?.destroy()
-      app.relaunch()
-      app.quit()
+      relaunch()
     },
   })
 
@@ -259,6 +260,7 @@ async function bootstrap(): Promise<void> {
       wm.hide()
     },
     quit: () => app.quit(),
+    relaunch,
     onGetInfo: smoke ? () => smoke.finish(0, 'renderer invoked app:getInfo') : undefined,
   }
   registerIpc(context, host)
@@ -287,6 +289,13 @@ async function bootstrap(): Promise<void> {
   wm.create()
   app.on('activate', () => wm.ensure())
   logger.info('ready')
+}
+
+/** Quit and start again (account switch, 清除全部数据); devRelaunch.ts explains the dev-server path. */
+function relaunch(): void {
+  if (relaunchesThroughDevServer(process.env, app.isPackaged)) devRelaunchOnExit = true
+  else app.relaunch()
+  app.quit()
 }
 
 function applyTheme(cfg: AppConfig): void {
@@ -357,8 +366,9 @@ async function gracefulQuit(code: number): Promise<void> {
     logger.error('shutdown error', e)
   }
   shutdownDone = true
-  logger.info('exit', { code })
-  if (SMOKE || code !== 0) app.exit(code)
+  logger.info('exit', { code, devRelaunch: devRelaunchOnExit })
+  if (devRelaunchOnExit) app.exit(DEV_RELAUNCH_EXIT_CODE)
+  else if (SMOKE || code !== 0) app.exit(code)
   else app.quit()
 }
 

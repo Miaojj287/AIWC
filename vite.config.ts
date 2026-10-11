@@ -7,9 +7,32 @@ import { fileURLToPath, URL } from 'node:url'
 import { builtinModules } from 'node:module'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { DEV_RELAUNCH_ENV, DEV_RELAUNCH_EXIT_CODE } from './electron/main/devRelaunch'
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 const devElectronPackage = here('./scripts/aiwc-electron.cjs')
+
+type Startup = (argv?: string[], options?: SpawnOptions, customElectronPkg?: string) => Promise<boolean>
+
+/**
+ * Start Electron. vite-plugin-electron exits the dev server together with Electron; an exit with
+ * DEV_RELAUNCH_EXIT_CODE (account switch, 清除全部数据) starts Electron again instead (electron/main/devRelaunch.ts).
+ * A rebuild restart removes this listener before killing the old process, so it never fires twice.
+ */
+async function startElectron(startup: Startup): Promise<void> {
+  process.env[DEV_RELAUNCH_ENV] = '1'
+  if (!(await startup(undefined, undefined, devElectronPackage))) return
+  const child = (process as NodeJS.Process & { electronApp?: ChildProcess }).electronApp
+  if (!child) return
+  child.removeAllListeners('exit')
+  child.once('exit', (code) => {
+    if (code !== DEV_RELAUNCH_EXIT_CODE) process.exit(code ?? 0)
+    startElectron(startup).catch((error: unknown) => {
+      process.stderr.write(`[aiwc] relaunching Electron failed: ${String(error)}\n`)
+      process.exit(1)
+    })
+  })
+}
 const pkg = JSON.parse(readFileSync(here('./package.json'), 'utf8')) as { dependencies?: Record<string, string> }
 
 const aliases = {
@@ -56,12 +79,8 @@ export default defineConfig({
           electron([
             ...mainEntries.map(({ entry, out }) => ({
               entry,
-              onstart({
-                startup,
-              }: {
-                startup: (argv?: string[], options?: SpawnOptions, customElectronPkg?: string) => Promise<boolean>
-              }) {
-                return startup(undefined, undefined, devElectronPackage).then(() => undefined)
+              onstart({ startup }: { startup: Startup }) {
+                return startElectron(startup)
               },
               vite: {
                 resolve: { alias: aliases },
@@ -80,7 +99,7 @@ export default defineConfig({
                   options.reload()
                   return
                 }
-                return options.startup(undefined, undefined, devElectronPackage).then(() => undefined)
+                return startElectron(options.startup)
               },
               vite: {
                 resolve: { alias: aliases },
