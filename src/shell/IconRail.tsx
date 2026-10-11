@@ -31,7 +31,7 @@ export interface IconRailProps {
 }
 
 /**
- * IconRail — 64px shell-ground column (Figma 115:428): four 40×40 gradient tiles (r10, icon 20 in on-accent
+ * IconRail — 64px panel-ground column: five 40×40 gradient tiles (r10, icon 20 in on-accent
  * white). Selected = 1px accent-30 ring + 3×22 fg indicator bar at the rail's left edge; the accent
  * drop-shadow glow is deliberately dropped (shadows are for floating layers only, CLAUDE.md §2.1) and the
  * white 55% / 14% borders are replaced by tokens. Others = 1px line-10 ring. Bottom: the current account
@@ -50,7 +50,7 @@ export function IconRail({ mac }: IconRailProps) {
     <nav
       aria-label={t('shell.rail.nav')}
       data-testid="icon-rail"
-      className="shell-rail relative flex h-full w-16 shrink-0 flex-col items-center gap-2.5 border-r border-line-6 bg-shell py-3.5"
+      className="shell-rail relative flex h-full w-16 shrink-0 flex-col items-center gap-2.5 border-r border-line-6 bg-panel py-3.5"
     >
       {RAIL_FUNCTIONS.map(({ fn, labelKey, icon: Icon }) => {
         const label = t(labelKey)

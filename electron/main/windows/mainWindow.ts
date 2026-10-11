@@ -4,7 +4,7 @@
  * the close button into the configured behaviour (quit / minimize / ask).
  */
 import { BrowserWindow, Menu, nativeTheme, screen, shell, type WebContents } from 'electron'
-import { DEFAULT_APPEARANCE, type EventMap } from '@aiwc/protocol'
+import { DEFAULT_APPEARANCE, panelBackgroundFor, type EventMap } from '@aiwc/protocol'
 import { t } from '../i18n'
 import type { ConfigService } from '../config/configService'
 import type { Logger } from '../log'
@@ -35,10 +35,10 @@ export type { RendererFault } from './preloadDiagnostics'
 const ERR_ABORTED = -3
 
 /**
- * First-paint colours when no palette is known (tests, callers without a config): the default dark shell ground,
+ * First-paint colours when no palette is known (tests, callers without a config): the default dark frame ground,
  * never a local grey. The live window derives them from the user's palette (nativeChrome.ts).
  */
-export const SHELL_BACKGROUND = DEFAULT_APPEARANCE.dark.surface
+export const SHELL_BACKGROUND = panelBackgroundFor(DEFAULT_APPEARANCE.dark)
 export const SHELL_FOREGROUND = DEFAULT_APPEARANCE.dark.foreground
 export const TITLE_BAR_HEIGHT = 32
 const DEFAULT_CHROME: NativeChromeColors = { background: SHELL_BACKGROUND, foreground: SHELL_FOREGROUND }

@@ -15,6 +15,9 @@ import type { AppContext } from '../contracts'
 import type { HostBridge } from './register'
 import { registerSubstrateIpc } from './substrate'
 import { createHandlerHarness } from './testing/handlerHarness'
+import { setMainLanguage, t } from '../i18n'
+import { createConfigService } from '../config/configService'
+import { createSecretStore, SECRET_REFS } from '../config/secretStore'
 
 vi.mock('@aiwc/substrate', () => ({
   acquireKeys: vi.fn(),
@@ -26,15 +29,15 @@ vi.mock('@aiwc/substrate', () => ({
   verifyAccount: vi.fn().mockResolvedValue({ ok: true }),
 }))
 
-function setup() {
+function setup(accountSession?: HostBridge['accountSession']) {
   const config = { ...defaultConfig(), account: { wxid: 'old', dbRoot: '/old', dbKeyRef: 'account:dbKey' } }
-  const secrets = { set: vi.fn(), reveal: vi.fn(() => 'a'.repeat(64)), delete: vi.fn() }
+  const secrets = { set: vi.fn(), reveal: vi.fn((): string | undefined => 'a'.repeat(64)), delete: vi.fn() }
   const set = vi.fn()
   const logger = { child: () => logger }
   const ipc = createHandlerHarness()
   registerSubstrateIpc(
     { logger, config: { get: () => config, set }, secrets, substrate: {}, paths: {} } as unknown as AppContext,
-    {} as HostBridge,
+    { accountSession } as HostBridge,
     ipc.handle,
   )
   // setManualKey answers synchronously; the tests read its result without awaiting.
@@ -84,6 +87,68 @@ describe('manual WeChat key IPC', () => {
     const { invoke } = setup()
     await invoke('substrate:testConnection', { wxid: 'new', dbRoot: '/new' })
     expect(verifyAccount).toHaveBeenLastCalledWith({ wxid: 'new', dbRoot: '/new', dbKeyHex: 'a'.repeat(64) })
+  })
+})
+
+describe('account verification IPC', () => {
+  it.each([false, true])('uses only the selected account credentials (saved key: %s)', async (hasSavedKey) => {
+    const root = mkdtempSync(join(tmpdir(), 'aiwc-verify-account-'))
+    try {
+      const config = createConfigService({ file: join(root, 'config.json') })
+      const secrets = createSecretStore({
+        file: join(root, 'secrets.bin'),
+        safeStorage: {
+          isEncryptionAvailable: () => true,
+          encryptString: (value) => Buffer.from(value),
+          decryptString: (value) => value.toString(),
+        },
+      })
+      config.set({ account: { wxid: 'new', dbRoot: '/new', dbKeyRef: SECRET_REFS.dbKey } })
+      if (hasSavedKey) secrets.set(SECRET_REFS.dbKey, 'b'.repeat(64))
+      const credentials = vi.fn(() => ({ config, secrets }))
+      const current = setup({ credentials, switch: vi.fn(), isSwitching: () => false })
+      vi.mocked(verifyAccount).mockClear()
+      const result = await current.invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
+      expect(credentials).toHaveBeenCalledWith({ wxid: 'new', dbRoot: '/new' })
+      expect(current.secrets.reveal).not.toHaveBeenCalled()
+      expect(result.ok).toBe(hasSavedKey)
+      if (hasSavedKey)
+        expect(verifyAccount).toHaveBeenCalledWith({ wxid: 'new', dbRoot: '/new', dbKeyHex: 'b'.repeat(64) })
+      else expect(verifyAccount).not.toHaveBeenCalled()
+      expect(secrets.has(SECRET_REFS.dbKey)).toBe(hasSavedKey)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects verification without a saved database key instead of accepting directory-only validation', async () => {
+    const { invoke, secrets } = setup()
+    secrets.reveal.mockReturnValueOnce(undefined)
+    vi.mocked(verifyAccount).mockClear()
+    const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
+    expect(result).toEqual({ ok: false, error: t('main.substrate.accountKeyMissing') })
+    expect(verifyAccount).not.toHaveBeenCalled()
+  })
+
+  it('guides the user to reacquire the key when database verification fails', async () => {
+    const { invoke } = setup()
+    vi.mocked(verifyAccount).mockResolvedValueOnce({ ok: false, error: '密钥与数据库不匹配' })
+    const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('重新获取')
+  })
+
+  it('localizes both the mismatch and recovery guidance in English', async () => {
+    setMainLanguage('en-US')
+    try {
+      const { invoke } = setup()
+      vi.mocked(verifyAccount).mockResolvedValueOnce({ ok: false, error: '密钥与数据库不匹配' })
+      const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
+      expect(result.error).toContain('Retrieve keys again')
+      expect(result.error).not.toMatch(/[\u4e00-\u9fff]/)
+    } finally {
+      setMainLanguage('zh-CN')
+    }
   })
 })
 

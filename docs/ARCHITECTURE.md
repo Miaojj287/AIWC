@@ -65,7 +65,7 @@ Renderer (React)  ──IPC(typed)──▶  Main (composition root)
 
 | 模块 | 职责 |
 |---|---|
-| `nativeChrome.ts` | 由 `general.theme` + `general.appearance` + `nativeTheme.shouldUseDarkColors` 算出窗口底色与 Windows `titleBarOverlay` 颜色（取调色板 surface / foreground，不写死色值）；主题、配色、系统外观任一变化即 `setTitleBarOverlay` + `setBackgroundColor`（透明效果开启时不设底色）。 |
+| `nativeChrome.ts` | 由 `general.theme` + `general.appearance` + `nativeTheme.shouldUseDarkColors` 算出窗口底色与 Windows `titleBarOverlay` 颜色（共用 protocol 的 `panelBackgroundFor`，与渲染层面板色一致；符号取 foreground，不写死色值）；主题、配色、系统外观任一变化即 `setTitleBarOverlay` + `setBackgroundColor`（透明效果开启时不设底色）。Windows 由共享 `WindowChrome` 预留整窗 32px 标题栏，工作台和 Agent 窗口均适用，全屏时收回；Mac 红黄绿灯仍融入左侧栏。 |
 | `transparency.ts` | 原生材质（vibrancy / acrylic）的开关；关闭时回退到上面的底色。 |
 | `windowState.ts` | 位置 / 尺寸持久化；`minimumSizeFor(workArea)` 让最小尺寸不超过所在显示器的工作区，`display-metrics-changed` 与 `moved` 时重算。 |
 | `tray.ts` | 非 macOS 的系统托盘。懒创建：第一次要隐藏窗口前 `ensure()`（`onBeforeHide`），语言切换 `refresh()`，`will-quit` 时 `dispose()`。macOS 靠程序坞的 `activate`，不建托盘。 |
@@ -330,6 +330,7 @@ Agent 有一个通用 `shell` 工具，让它能像 Cursor / Hermes 这类通用
 - `services/accountProfiles.ts` 在组合应用之前选择 `<userData>/aiwc/accounts/<SHA-256(账号目录标识)>`。`AppPaths.dataRoot` 及所有可变路径随账号迁移：config、secretStore、Agent 历史与索引、记忆、关系、回复规则/草稿/审计、定时任务、每日待办、手机通道、扩展、工作区、导出、用量与缓存；打包资源保持共享。自定义缓存追加 `aiwc-accounts/<账号摘要>`。账号标识不直接拼入路径。
 - `active-account.json` 只记录明确选择的账号。`substrate:connect` 跨账号时先验证目标目录和已有密钥（尚无密钥时进入新账号的解锁页），再保存选择、停止旧账号任务、关闭通知与窗口并重启完整进程。禁止在旧组合根中只更换数据源。重启（含清除全部数据）只走 `index.ts` 的 `relaunch()`：`npm run dev` 下 vite-plugin-electron 会随 Electron 退出关掉开发服务器，所以由 `vite.config.ts` 启动的进程改为以退出码 75 结束、由它重新拉起 Electron（`electron/main/devRelaunch.ts`），打包版本仍用 `app.relaunch()`。已保存的自定义缓存目录重启后只有 `aiwc-accounts/<账号摘要>` 在文件白名单里，`config:set` / `substrate:connect` 原样提交它时跳过白名单检查（`cacheDirPolicy` 的 `saved`）。切换中的 IPC 被拒绝，旧事件与通知停止发布；新进程重新创建所有服务与界面状态。
 - 自动回复、监控、定时任务、每日扫描和手机通道在用户点击「进入」、确认当前账号之后才启动。停在启动账号选择页不会运行上次账号的提醒。账号密钥获取和手动输入均写入明确目标账号的 secretStore，不改当前账号的密钥或选择；普通 `config:set` 不允许跨账号修改 wxid。
+- 引导页的 `substrate:verifyAccount` 从所选账号的独立 secretStore 取数据库密钥；没有密钥立即拒绝，不能使用底层 `verifyAccount` 的无密钥目录检查作为解锁验证，也不回退到当前账号密钥。渲染层用 `keyTarget` 记录页面密钥归属，加载缓存、获取成功或手动替换数据库密钥时更新；`onboarding/accountVerification.ts` 先拒绝归属不一致的密钥并清除旧密钥的界面状态（不删除安全存储），再调用后台校验。验证失败的多语言提示要求重新获取，账号与密钥的可用状态撤销；账号、目录或密钥已变更后的旧结果忽略。底层无密钥目录检查仍供账号环境切换进入解锁页使用。
 - Chromium 使用独立 `persist:account-<摘要>` 分区，媒体协议注册到对应分区，搜索历史/已打开会话等浏览器状态不再共享。文件白名单只允许当前账号目录；即使选择父目录，其他账号和旧公共存储仍被拒绝。聊天视频只开放当前账号的目录，不开放整个微信数据根目录。
 - 旧版公共目录的历史无法可靠判断归属，保留原文件且不自动导入任何账号，也不启动旧任务。首次仅沿用外观、模型接入及账号连接配置；旧扩展、授权、自动回复和扫描设置不继承。切回已建立的新账号目录时恢复其自身数据。清除全部数据仍覆盖全部账号目录与 Chromium 分区。
 - 开发版 macOS 包在 `scripts/aiwc-electron.cjs` 中将标准 Logo 写入 `electron.icns`，缓存路径含图片摘要；Dock、窗口图标和通知使用同一份品牌素材，通知授权界面的图标由应用包提供。

@@ -373,8 +373,7 @@ export const agent = {
   },
   empty: {
     noModel: {
-      title: '先接入一个模型',
-      description: 'Agent 需要模型才能回答。可以用在线服务商，也可以用本机的 Ollama。',
+      title: 'Agent需要接入模型才能回答，请先配置模型',
       action: '去接入模型',
     },
   },

@@ -31,7 +31,7 @@ export interface ShellProps {
 }
 
 /**
- * Shell — compact native window controls integrated into the four-column body (DESIGN-SPEC §0.1): IconRail 64 | ObjectList
+ * Shell — shared Windows title row or macOS controls integrated into the four-column body (DESIGN-SPEC §0.1): IconRail 64 | ObjectList
  * (config width, collapsible to a 12px handle) | Workspace fill | AgentPanel (config width, collapsible
  * to a 40px strip). Only the Workspace absorbs width; only the body absorbs height.
  */
@@ -77,12 +77,16 @@ export function Shell({ platform, runtime }: ShellProps) {
       data-runtime={runtime}
       data-agent-collapsed={layout.agentCollapsed}
     >
-      <WindowChrome title={activeTitle} showControls={runtime === 'electron' && platform === 'darwin'} />
+      <WindowChrome
+        title={activeTitle}
+        showControls={runtime === 'electron' && platform === 'darwin'}
+        showTitleBar={runtime === 'electron' && platform === 'win32'}
+      />
       <div className="flex min-h-0 flex-1 items-stretch">
         <IconRail mac={mac} />
         {layout.listCollapsed ? (
           <div
-            className="shell-list flex h-full shrink-0 border-r border-line-6 bg-panel"
+            className="shell-list flex h-full shrink-0 border-r border-line-6 bg-shell"
             style={{ width: LIST_HANDLE_WIDTH }}
             data-testid="list-handle"
           >

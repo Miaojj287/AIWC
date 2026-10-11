@@ -77,6 +77,7 @@ export const onboarding = {
     rescan: '重新扫描',
     verify: '验证账号',
     verifyMismatch: '该 wxid 与所选数据库目录不匹配，请重新选择或验证',
+    keyMismatch: '当前密钥与所选微信账号或数据库目录不匹配，请为该账号重新获取密钥后再验证',
     verifyToContinue: '验证账号后才能继续',
     chooseOne: '检测到 {n} 个账号，请选择一个',
     notFoundRunning: '未找到数据目录，请点击「浏览」手动选择',

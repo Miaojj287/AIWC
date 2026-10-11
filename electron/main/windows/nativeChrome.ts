@@ -1,15 +1,15 @@
 /**
  * Native window chrome colours: the Windows caption buttons (titleBarOverlay) and the page base painted before the
- * renderer's first frame. Both follow the user's palette — the theme mode plus the configurable surface / foreground —
+ * renderer's first frame. Both share the renderer's derived frame colour and palette foreground,
  * so a light-theme user never gets dark caption buttons or a dark flash at launch. Pure helpers; the window-facing
  * part takes a narrow target so it is unit-tested without Electron.
  */
-import { DEFAULT_APPEARANCE, type AppConfig } from '@aiwc/protocol'
+import { DEFAULT_APPEARANCE, panelBackgroundFor, type AppConfig } from '@aiwc/protocol'
 
 export type ChromeMode = 'light' | 'dark'
 
 export interface NativeChromeColors {
-  /** The shell ground (`--bg-shell` = palette surface): window base and caption-button background. */
+  /** The frame ground (`--bg-panel`): window base and caption-button background. */
   background: string
   /** The palette foreground (`--fg`): caption-button symbols. */
   foreground: string
@@ -27,17 +27,17 @@ export function resolveChromeMode(theme: AppConfig['general']['theme'], systemDa
   return theme
 }
 
-/** The colours the renderer will paint its shell with, derived the same way `paletteTokens` does. */
+/** The colours of the continuous window frame, shared with the renderer's `paletteTokens`. */
 export function nativeChromeColors(
   general: Pick<AppConfig['general'], 'theme' | 'appearance'>,
   systemDark: boolean,
 ): NativeChromeColors {
   const mode = resolveChromeMode(general.theme, systemDark)
   const palette = general.appearance?.[mode] ?? DEFAULT_APPEARANCE[mode]
-  return { background: palette.surface, foreground: palette.foreground }
+  return { background: panelBackgroundFor(palette), foreground: palette.foreground }
 }
 
-/** Windows caption buttons sit above the tab strip: same ground, same symbol colour. */
+/** Windows caption buttons sit in the full-width title row: same ground, same symbol colour. */
 export function titleBarOverlayFor(colors: NativeChromeColors, height: number): TitleBarOverlayColors {
   return { color: colors.background, symbolColor: colors.foreground, height }
 }

@@ -84,6 +84,8 @@ export const main = {
     keysAcquiredPartial: '已获取数据库密钥，图片密钥可稍后补齐',
     selectDbRootAndAccount: '请先选择数据库目录和账号',
     dbKeyMissing: '尚未获取数据库密钥',
+    accountKeyMissing: '所选账号没有匹配的数据库密钥，请为该账号重新获取密钥后再验证',
+    accountKeyVerifyFailed: '验证失败：{detail}。请为所选账号重新获取密钥后再验证',
     exported: '已导出 {n} 条消息',
     openLocation: '打开文件',
     selectAccountAndDbRoot: '请先选择微信账号和数据库目录',

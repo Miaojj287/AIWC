@@ -60,6 +60,17 @@ it('does not show Mac controls on other platforms', () => {
   expect(screen.queryByRole('group', { name: '窗口控制' })).toBeNull()
 })
 
+it('reserves the Windows title row and releases its height in native full screen', async () => {
+  const { container } = render(<WindowChrome showTitleBar />)
+  expect(container.childElementCount).toBe(1)
+  expect(screen.queryByRole('group', { name: '窗口控制' })).toBeNull()
+  await act(async () => {})
+  act(() => listeners.get('app:windowState')?.({ fullscreen: true, maximized: false }))
+  expect(container.childElementCount).toBe(0)
+  act(() => listeners.get('app:windowState')?.({ fullscreen: false, maximized: true }))
+  expect(container.childElementCount).toBe(1)
+})
+
 it('switches to the inactive appearance on blur', () => {
   render(<WindowChrome showControls />)
   fireEvent.focus(window)

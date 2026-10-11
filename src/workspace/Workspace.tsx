@@ -18,7 +18,7 @@ export interface WorkspaceProps {
 }
 
 /**
- * Workspace — the Tab container (CLAUDE.md §1): TabStrip on the shell ground, the active tab's renderer
+ * Workspace — the Tab container (CLAUDE.md §1): TabStrip on the content ground, the active tab's renderer
  * on the content ground, the last 3 visited tabs kept mounted but hidden, a per-function empty state,
  * and the dirty-guard dialog. Handles tab.* / rail.select / agent.quoteActiveTab commands.
  */

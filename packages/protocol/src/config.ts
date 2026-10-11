@@ -3,6 +3,7 @@
  * `Ref` point into the OS-backed secret store (electron safeStorage).
  */
 import { z } from 'zod'
+import { mixPaletteColors } from './appearance'
 import { JEV_DEFAULT_BASE_URL, JEV_DEFAULT_MODEL } from './jev'
 import { CallLogConfigSchema, ProxyConfigSchema } from './modelNetwork'
 import { PET_ID_PATTERN } from './pet'
@@ -51,13 +52,6 @@ const samePalette = (
   )
 }
 
-const mixHex = (a: string, b: string, amount: number): string => {
-  const rgb = [1, 3, 5].map((i) =>
-    Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - amount) + parseInt(b.slice(i, i + 2), 16) * amount),
-  )
-  return `#${rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`
-}
-
 /** Before surface was configurable it was derived from background, font color and contrast. */
 const addLegacySurface = (raw: unknown): unknown => {
   if (!raw || typeof raw !== 'object') return raw
@@ -69,7 +63,10 @@ const addLegacySurface = (raw: unknown): unknown => {
     typeof value.contrast !== 'number'
   )
     return value
-  return { ...value, surface: mixHex(value.background, value.foreground, 0.04 + (value.contrast / 100) * 0.127) }
+  return {
+    ...value,
+    surface: mixPaletteColors(value.background, value.foreground, 0.04 + (value.contrast / 100) * 0.127),
+  }
 }
 
 /** Upgrade untouched legacy defaults while preserving every palette the user customized. */

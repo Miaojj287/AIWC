@@ -54,8 +54,12 @@
   background: var(--scrollbar-thumb-hover);
 }
 
-/* Native controls occupy existing columns, never a full-width title row. Column rules key on the shell-* classes,
+/* Windows uses one continuous title row; macOS controls stay in the rail. Column rules key on the shell-* classes,
  * never on test ids or aria-label (translated copy; AGENTS.md §2.5). */
+.shell-titlebar {
+  height: 32px;
+  background: var(--bg-panel);
+}
 [data-runtime='electron'][data-platform='darwin'] .shell-rail {
   padding-top: 44px;
 }
@@ -68,33 +72,6 @@
 [data-runtime='electron'] .workspace-tab-strip > :not([role='tablist']),
 [data-runtime='electron'] .workspace-tab-strip [role='tablist'] > * {
   -webkit-app-region: no-drag;
-}
-/* Windows caption buttons (minimise / maximise / close) overlay the top-right corner. Their real width comes from
- * the Window Controls Overlay environment variables Electron exposes with `titleBarOverlay`; 138px (3 × 46) is the
- * fallback for a runtime that does not report them. */
-[data-runtime='electron'][data-platform='win32'] {
-  --caption-inset: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
-}
-/* They sit above the Agent tools in their own column; the band above the panel still drags the window. */
-[data-runtime='electron'][data-platform='win32'] .shell-agent-panel:not([hidden]) {
-  position: relative;
-  padding-top: 32px;
-}
-[data-runtime='electron'][data-platform='win32'] .shell-agent-panel:not([hidden])::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: var(--caption-inset);
-  height: 32px;
-  -webkit-app-region: drag;
-}
-[data-runtime='electron'][data-platform='win32'] .shell-agent-strip {
-  padding-top: 40px;
-}
-/* With the panel collapsed the 40px strip already covers part of the buttons; the tab strip yields the rest. */
-[data-runtime='electron'][data-platform='win32'][data-agent-collapsed='true'] .workspace-tab-strip {
-  padding-right: calc(var(--caption-inset) - 40px);
 }
 
 /* macOS lights: 12px dots on the system's 20px pitch (12 + 8), a 24px-tall hit box each, a hairline rim like the
@@ -158,8 +135,8 @@
   /* Light tints on purpose. The native material (macOS sidebar vibrancy / Windows acrylic) already keeps text readable
    * over white pages and dark editors alike; measured on macOS 26, a 50% tint on top made the glass look nearly opaque,
    * while 18% / 12% lets the wallpaper colour through and still carries a trace of the palette. */
-  --glass-rail: color-mix(in srgb, var(--bg-shell) 18%, transparent);
-  --glass-list: color-mix(in srgb, var(--bg-panel) 12%, transparent);
+  --glass-rail: color-mix(in srgb, var(--bg-panel) 18%, transparent);
+  --glass-list: color-mix(in srgb, var(--bg-shell) 12%, transparent);
   --glass-control: color-mix(in srgb, var(--bg-content) 28%, transparent);
   /* 1px specular line along the top edge, painted as a background layer (no box-shadow in the shell — CLAUDE.md §2.1). */
   --glass-edge: linear-gradient(color-mix(in srgb, var(--fg) 14%, transparent), color-mix(in srgb, var(--fg) 14%, transparent));
@@ -207,13 +184,6 @@
 [data-runtime='electron'] .shell-agent-header [role='combobox'] {
   -webkit-app-region: no-drag;
 }
-/* Windows caption buttons overlay the top-right corner: the header while the pane is hidden, else the pane's tab strip. */
-[data-runtime='electron'][data-platform='win32'] .shell-agent-window[data-pane-visible='false'] .shell-agent-header {
-  padding-right: var(--caption-inset);
-}
-[data-runtime='electron'][data-platform='win32'] .shell-agent-pane .workspace-tab-strip {
-  padding-right: var(--caption-inset);
-}
 /* 透明效果: the Agent window's sidebar is the object list's counterpart and gets the same tinted glass. */
 :root[data-glass='true'] .shell-agent-sidebar {
   background-color: var(--glass-list);
@@ -229,9 +199,9 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :root[data-glass='true'] > body,
   :root[data-glass='true'] .shell-root { background: var(--bg-shell); }
-  :root[data-glass='true'] .shell-rail { background: var(--bg-shell); }
+  :root[data-glass='true'] .shell-rail { background: var(--bg-panel); }
   :root[data-glass='true'] .shell-list,
-  :root[data-glass='true'] .shell-agent-sidebar { background: var(--bg-panel); }
+  :root[data-glass='true'] .shell-agent-sidebar { background: var(--bg-shell); }
   :root[data-glass='true'] .shell-list [role='search'],
   :root[data-glass='true'] .shell-agent-sidebar [role='search'],
   :root[data-glass='true'] .shell-list .shell-list-tool { background: var(--bg-content); }

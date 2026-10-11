@@ -61,7 +61,7 @@
 
 - **设置行**：左「标题 13 Medium + 说明 12 弱色 / 行高 20」，右控件；上下内边距 16，行间 1px 线；最后一行无线。所有设置页与克隆参数复用此行，窄栏控件整行下移。
 - **列表项**：头像 36 r8 ｜ 名 13 Medium ＋ 第二行 12 弱色 ｜ 右侧时间 / 徽标 / 开关；选中 = `--selected-bg` + `--selected-ring`（默认即强调色 15% 底 + 30% 内描边，窗口失焦时退为中性灰，系统「增加对比度」下变为实色描边），hover = 白 5% 底并露出 `···`，按下 = 白 7%；选中切换不做过渡。会话、联系人、自动回复规则都用它。
-- **Tab**：h40，图标 14 + 文案 12.5；激活 = 与内容区同底色 + 上圆角 8 + 主色文字与图标 + ×（不用强调色：常驻的 Tab 条上不留蓝色标记）；未激活 = 弱色。工作区和 Agent 面板的 Tab 是同一个组件。
+- **Tab**：h40，图标 14 + 文案 12.5；Tab 栏整体与内容区同底色，激活 = 主色文字与图标 + ×（不用强调色，也不额外拼一块不同底色）；未激活 = 弱色。工作区和 Agent 面板的 Tab 是同一个组件。
 - **卡片**：面板色 + 1px 白 6% + r12，内 pad 16，不加投影。
 - **按钮**：只有 primary / ghost / outline / danger / link 五种，h30 r6。每个独立任务区最多一个 primary；同级操作使用相同层级，按任务主次选择 primary 或 outline。danger 只出现在破坏性确认里。状态统一：hover / 按下只换颜色（填充一律用 `hover-5/7`、`fill-13/20`，不用随对比度缩放的 `line-*` 做填充）；禁用 = 40% 且保留 hover，用 `disabledReason` 给出原因 tooltip；loading 不变灰，只换 spinner 并忽略点击。
 - **浮层**：菜单、下拉、popover、弹窗、抽屉、Toast、tooltip 各只有一套样式（尺寸见 `DESIGN-SPEC.md` §6 与 Figma 的通用组件看板），项高 30、带说明 42、hover 白 7%、danger 项红字。
@@ -152,7 +152,7 @@
 - 单行文字溢出必须以「…」结尾，不允许截出半个字：`truncate` 放在文字自己的元素上，禁止放在 `flex` / `inline-flex` 容器上；它与受限祖先之间的每个 flex 子项都要 `min-w-0`。徽标、胶囊、分段项、Select 触发器、输入框已在 kit 内处理；`src/kit/truncation.test.ts` 会拦住同一 class 串里同时出现 `flex` 与 `truncate`。
 - 文案密度：设置行说明、空态说明、弹窗说明各一句短话，不复述标题或按钮。需要展开解释的内容放进问号图标（`SettingRow` / `Section` / `FieldLabel` 的 `help`，kit `HelpTip`），hover 或键盘聚焦显示。§6 的数据去向写进问号说明，不做常驻提示条。
 - 设置行在宽度不足约 380px 时把控件移到文字下方（容器查询），不再把标题挤成一列单字。
-- 启动不闪色：主进程用当前主题 / 配色的 surface 作为窗口底色与 Windows 标题栏按钮颜色（`electron/main/windows/nativeChrome.ts`，主题、配色或系统外观变化时同步更新）；渲染层在首帧前从 localStorage 恢复上次的主题与配色（`src/platform/themeBoot.ts`），配置到达后只做确认。
+- 启动不闪色：主进程用当前主题 / 配色派生的面板色作为窗口底色与 Windows 标题栏按钮颜色（`electron/main/windows/nativeChrome.ts`，主题、配色或系统外观变化时同步更新）；渲染层在首帧前从 localStorage 恢复上次的主题与配色（`src/platform/themeBoot.ts`），配置到达后只做确认。
 - 滚动条按平台：macOS 不写任何 `::-webkit-scrollbar` 样式，保留系统 overlay 滚动条（遵循「显示滚动条」设置、滚动后淡出）；Windows / Linux 用 8px 细滚动条，由 `<html data-platform>` 选择。kit `ScrollArea` 的滚动条淡入淡出，不再硬切。
 - 固定两侧列宽在窗口变窄时让位（`fitColumns`）：先收 Agent 面板、再收列表，各自不小于最小值，工作区至少保留 400px；保存的宽度不被改写。
 
@@ -244,8 +244,8 @@
 
 ### 12.3 视觉
 
-- 外框对齐 ZCode：侧栏与对话列用面板色，头部是对话列的顶端（同为面板色，会话有内容后才出 1px 底线；空会话不显示标题与 ···），工作区栏沿用 `Workspace` 自己的壳 / 内容色；三者之间只有 1px 线，没有投影。侧栏是安静的导航：32px 单行行（kit `ListItem compact`），选中为中性底、不用强调色；标题 Semibold、无图标。
-- 头部 h40 是拖动区（`.shell-agent-header`，控件自动 no-drag）。macOS：侧栏顶部留 44px 给红黄绿灯，侧栏收起时头部左侧留 76px。Windows：右上角给标题栏按钮留 100px（工作区栏隐藏时给头部，显示时给它的 Tab 条）。
+- 外框的背景衔接对齐微信（2026-10-11 用户提供 Windows / Mac 截图）：导航侧栏使用较亮的壳色，对话列、头部、工作区及其 Tab 栏整体使用内容色；三者之间只有 1px 线，没有投影。空会话不显示标题与 ···，不画头部底线。侧栏是安静的导航：32px 单行行（kit `ListItem compact`），选中为中性底、不用强调色；标题 Semibold、无图标。
+- 头部 h40 是拖动区（`.shell-agent-header`，控件自动 no-drag）。macOS：侧栏顶部留 44px 给红黄绿灯，侧栏收起时头部左侧留 76px。Windows：整窗顶部统一预留 32px 标题栏，原生按钮与背景同色；下方所有列从同一高度开始，不再单独垫高 Agent 面板或挤压 Tab 栏。原生全屏时收回标题栏。
 - 透明效果只作用于侧栏（同对象列表的玻璃层）；对话列与工作区栏保持不透明。
 - 布局类名 `shell-agent-*` 只由 `src/shell/AgentWindowFrame.tsx` 渲染并在 `shell.css` 定义（`shell.css.test.ts` 会拦），`src/features/agent/window/` 里不写布局 CSS。列宽与侧栏收起状态经 `src/shell/agentWindowLayout.ts` 持久化到 `ui.*`。
 
@@ -259,7 +259,7 @@
 ## 13. 跨平台交互与动效
 
 - 沿用唯一 Kit 与主题派生系统。系统字体、2px 可见焦点（统一由 `src/styles/accessibility.css` 的 outline 提供，组件不再写 `focus-visible:ring-*`；行 / 选项 / 菜单项的焦点框画在盒内，输入框点击聚焦只加深中性边框（`--line-25`），不出现强调色；只有 Tab 键移入时才显示 1px 强调色边 + 1px ring，由 `.kit-field` 与 `<html data-focus-nav>` 控制）、键盘操作和语义色是共享基线；原生窗口控件位置、Cmd / Ctrl 快捷键和 vibrancy / acrylic 按平台分开。
-- 必须按平台分开的规则：快捷键标签 macOS 按系统菜单顺序 ⌃⌥⇧⌘（`⇧⌘T`），Windows 写 `Ctrl+Shift+T`；弹窗按钮 macOS「取消在前、主按钮在后」，Windows 反序（`DialogFooter actions`，DOM 顺序同步反转，默认焦点仍在取消）；「关闭窗口后继续运行」在 macOS 留在程序坞、Windows / Linux 先建系统托盘再隐藏窗口；Windows 标题栏按钮的避让宽度读 `env(titlebar-area-*)`（回退 138px）；macOS 自绘红黄绿灯 20px 间距、失焦变灰、悬停显示图形、⌥ 点击绿灯 = 缩放、原生全屏时隐藏且各列收回预留高度、不进 Tab 序；输入框右键给原生的撤销 / 剪切 / 复制 / 粘贴 / 全选菜单；最小窗口尺寸不超过所在显示器的工作区；开机自启写入系统登录项（仅打包版本）。
+- 必须按平台分开的规则：快捷键标签 macOS 按系统菜单顺序 ⌃⌥⇧⌘（`⇧⌘T`），Windows 写 `Ctrl+Shift+T`；弹窗按钮 macOS「取消在前、主按钮在后」，Windows 反序（`DialogFooter actions`，DOM 顺序同步反转，默认焦点仍在取消）；「关闭窗口后继续运行」在 macOS 留在程序坞、Windows / Linux 先建系统托盘再隐藏窗口；Windows 原生按钮位于整窗 32px 标题栏内，各列从它下方对齐，全屏时收回标题栏；macOS 自绘红黄绿灯 20px 间距、失焦变灰、悬停显示图形、⌥ 点击绿灯 = 缩放、原生全屏时隐藏且各列收回预留高度、不进 Tab 序；输入框右键给原生的撤销 / 剪切 / 复制 / 粘贴 / 全选菜单；最小窗口尺寸不超过所在显示器的工作区；开机自启写入系统登录项（仅打包版本）。
 - 窗口失焦时选中态退为中性灰（`<html data-window-focus>`），与系统列表一致；各列顶部一带（对象列表头、工作区 Tab 条、Agent 窗口头、Windows 上 Agent 面板上方的留白）都可拖动窗口，其中的控件 no-drag。
 - Tab 支持左右方向键循环选择、Home / End 到首尾、Delete / Backspace 关闭；工作区与 Agent 面板共用实现。
 - 日常菜单、下拉、Tooltip、Tab / 会话切换立即响应；不做进入队列、滑动页面或列表 stagger。鼠标按压即时改变颜色；高频按钮不反复缩放。

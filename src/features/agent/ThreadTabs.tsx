@@ -93,7 +93,7 @@ export function ThreadTabs({
 
   return (
     // The strip is window chrome: its empty stretch drags the window, the tabs and buttons opt out.
-    <div className="app-drag flex h-10 shrink-0 items-center bg-shell pr-1.5" data-testid="agent-thread-tabs">
+    <div className="app-drag flex h-10 shrink-0 items-center bg-content pr-1.5" data-testid="agent-thread-tabs">
       <div
         ref={stripRef}
         role="tablist"
@@ -123,7 +123,7 @@ export function ThreadTabs({
                   label={isUntitledTitle(thread.title) ? t('agent.thread.untitled') : thread.title}
                   active={isActive}
                   pinned={thread.pinned}
-                  activeBg="panel"
+                  activeBg="content"
                   onSelect={() => onSelect(thread.threadId)}
                   onClose={() => closeTab(thread.threadId)}
                   indicator={attentionIndicator(marks[thread.threadId], t)}

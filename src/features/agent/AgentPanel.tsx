@@ -28,7 +28,7 @@ export function AgentPanel({ collapsed, onToggleCollapsed }: AgentPanelProps) {
   if (collapsed) {
     return (
       <div
-        className="flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-panel pt-2"
+        className="flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-content pt-2"
         data-testid="agent-panel-strip"
       >
         <Tooltip
@@ -51,7 +51,7 @@ export function AgentPanel({ collapsed, onToggleCollapsed }: AgentPanelProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-panel" data-testid="agent-panel-root">
+    <div className="flex h-full min-h-0 w-full flex-col bg-content" data-testid="agent-panel-root">
       <ThreadTabs
         open={surface.open}
         all={surface.saved}

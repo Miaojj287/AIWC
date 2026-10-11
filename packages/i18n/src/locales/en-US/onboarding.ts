@@ -77,6 +77,8 @@ export const onboarding: Messages['onboarding'] = {
     rescan: 'Rescan',
     verify: 'Verify account',
     verifyMismatch: "This wxid doesn't match the selected database folder. Choose another account or verify again",
+    keyMismatch:
+      'The current keys do not match the selected WeChat account or database folder. Retrieve keys again for this account, then verify.',
     verifyToContinue: 'Verify the account to continue',
     chooseOne: '{n, plural, one {Found # account, select it} other {Found # accounts, select one}}',
     notFoundRunning: 'Data folder not found. Click "Browse" to choose it manually',

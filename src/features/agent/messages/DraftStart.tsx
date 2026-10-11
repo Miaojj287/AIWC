@@ -18,9 +18,9 @@ export function DraftStart({ className }: { className?: string }) {
   return (
     <EmptyState
       className={className}
+      compact
       icon={Plug}
       title={t('agent.empty.noModel.title')}
-      description={t('agent.empty.noModel.description')}
       action={{
         label: t('agent.empty.noModel.action'),
         onClick: () => runCommand('tab.openSettings', { page: 'ai', highlight: 'ai.providers' }),

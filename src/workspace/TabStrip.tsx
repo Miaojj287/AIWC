@@ -35,7 +35,7 @@ export interface TabStripProps {
 }
 
 /**
- * TabStrip — h40 shell ground (Figma 119:415). kit Tab per descriptor: active = content ground + top r8,
+ * TabStrip — h40 content ground. kit Tab per descriptor: active = primary text + close button,
  * pinned first without ×, dirty dot, middle-click closes, pointer-drag reorders, right-click menu,
  * horizontal overflow scroll with a `···` manager menu on the right (DESIGN-SPEC §0.3).
  */
@@ -131,7 +131,7 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
   })
 
   return (
-    <div className="workspace-tab-strip flex h-10 shrink-0 items-stretch bg-shell pr-2" data-testid="tab-strip">
+    <div className="workspace-tab-strip flex h-10 shrink-0 items-stretch bg-content pr-2" data-testid="tab-strip">
       <div
         ref={scrollRef}
         role="tablist"

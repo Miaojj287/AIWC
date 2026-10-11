@@ -10,6 +10,7 @@ import { getBridge } from '@/platform/bridge'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
 import { closeKeySteps, initialKeySteps } from '@/platform/wechatKeys'
+import { verifyWizardAccount } from './accountVerification'
 import {
   DEFAULT_KEY_STEPS,
   EMPTY_KEYS,
@@ -49,6 +50,7 @@ export interface WizardState {
   verifyError?: string
 
   keys: KeyStates
+  keyTarget?: Pick<WxAccount, 'wxid' | 'dbRoot'>
   acquiring: boolean
   acquireSteps: KeyAcquireStep[]
   acquireStrategy: 'auto' | 'memory_scan'
@@ -157,6 +159,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       wxid: acc.wxid ?? '',
       verifyState: acc.wxid && acc.verifiedAt ? 'verified' : 'idle',
       keys,
+      keyTarget: acc.wxid && acc.dbRoot ? { wxid: acc.wxid, dbRoot: acc.dbRoot } : undefined,
       page: config.onboarding.completed ? 'connect' : 'welcome',
     })
     if (acc.dbRoot) await get().loadAccounts()
@@ -268,28 +271,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   selectWxid(wxid) {
     const acc = get().accounts.find((a) => a.wxid === wxid)
-    set({ wxid, verifyState: acc?.verified ? 'verified' : 'idle', verifyError: undefined })
+    const target = get().keyTarget
+    const keysMatch = !target || (target.wxid === wxid && target.dbRoot === get().dbRoot)
+    set({ wxid, verifyState: acc?.verified && keysMatch ? 'verified' : 'idle', verifyError: undefined })
   },
 
   async verify() {
-    const { wxid, dbRoot } = get()
-    if (!wxid || !dbRoot) return false
-    set({ verifyState: 'verifying', verifyError: undefined })
-    try {
-      const res = await invoke('substrate:verifyAccount', { wxid, dbRoot })
-      if (res.ok) {
-        set((s) => ({
-          verifyState: 'verified',
-          accounts: s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a)),
-        }))
-        return true
-      }
-      set({ verifyState: 'failed', verifyError: res.error ?? t('onboarding.account.verifyMismatch') })
-      return false
-    } catch (e) {
-      set({ verifyState: 'failed', verifyError: errText(e) })
-      return false
-    }
+    return verifyWizardAccount(get, set)
   },
 
   async acquire(strategy) {
@@ -320,6 +308,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         acquireSteps: finalSteps,
         acquireFailed: finalSteps.some((st) => st.status === 'failed' && st.failure !== 'cancelled'),
         keys,
+        keyTarget: verifyStep?.status === 'done' ? { wxid, dbRoot } : s.keyTarget,
         permissionDialog: needsPermission(finalSteps),
         verifyState: verifyStep?.status === 'done' ? 'verified' : s.verifyState,
         accounts:
@@ -366,15 +355,18 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   async setManualKey(kind, input) {
     const v = validateKeyHex(kind, input)
     if (!v.ok) return { ok: false, error: v.error }
+    const target = { wxid: get().wxid, dbRoot: get().dbRoot }
     try {
       const res = await invoke('substrate:setManualKey', {
         kind,
         hex: v.hex,
-        target: { wxid: get().wxid, dbRoot: get().dbRoot },
+        target,
       })
       if (!res.ok) return { ok: false, error: res.error ?? t('onboarding.keys.invalidKey') }
+      if (get().wxid !== target.wxid || get().dbRoot !== target.dbRoot) return { ok: true }
       set((s) => ({
         keys: { ...s.keys, [kind]: { status: 'manual', hex: v.hex } },
+        keyTarget: kind === 'db_key' ? { wxid: s.wxid, dbRoot: s.dbRoot } : s.keyTarget,
         testError: undefined,
         ...(kind === 'db_key'
           ? {
@@ -486,6 +478,7 @@ export function __resetWizardStoreForTests(): void {
     verifyState: 'idle',
     verifyError: undefined,
     keys: EMPTY_KEYS,
+    keyTarget: undefined,
     acquiring: false,
     acquireSteps: [...DEFAULT_KEY_STEPS],
     acquireStrategy: 'auto',

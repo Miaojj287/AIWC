@@ -1,15 +1,9 @@
-import { DEFAULT_APPEARANCE, type AppConfig } from '@aiwc/protocol'
+import { DEFAULT_APPEARANCE, mixPaletteColors as mix, panelBackgroundFor, type AppConfig } from '@aiwc/protocol'
 
 type Palette = AppConfig['general']['appearance']['dark']
 export const DEFAULT_PALETTES: Record<'light' | 'dark', Palette> = {
   light: { ...DEFAULT_APPEARANCE.light },
   dark: { ...DEFAULT_APPEARANCE.dark },
-}
-const mix = (a: string, b: string, amount: number) => {
-  const rgb = [1, 3, 5].map((i) =>
-    Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - amount) + parseInt(b.slice(i, i + 2), 16) * amount),
-  )
-  return `#${rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`
 }
 export function contrastRatio(a: string, b: string): number {
   const luminance = (hex: string) =>
@@ -27,7 +21,7 @@ export function paletteTokens(p: Palette): Record<string, string> {
   const out: Record<string, string> = {
     '--bg-content': bg,
     '--bg-shell': surface,
-    '--bg-panel': mix(bg, surface, 0.65 - strength * 0.167),
+    '--bg-panel': panelBackgroundFor(p),
     '--bg-raised': mix(surface, fg, 0.02),
     '--bg-overlay': mix(bg, surface, 0.7),
     '--fg': fg,

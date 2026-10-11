@@ -363,8 +363,7 @@ export const agent: Messages['agent'] = {
   },
   empty: {
     noModel: {
-      title: 'Connect a model first',
-      description: 'The Agent needs a model to answer. Use an online provider, or Ollama on this computer.',
+      title: 'Agent needs a model to answer. Please configure a model first.',
       action: 'Connect a model',
     },
   },

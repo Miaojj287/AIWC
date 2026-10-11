@@ -22,6 +22,7 @@ import {
 } from '../services/exporter'
 import type { Handle, HostBridge } from './register'
 import { t } from '../i18n'
+import { localizeText } from '../localizePayloads'
 
 const KEY_REF_BY_KIND = {
   db_key: { ref: SECRET_REFS.dbKey, field: 'dbKeyRef' },
@@ -80,8 +81,11 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     const { config, secrets } = credentials({ wxid, dbRoot })
     const ref = config.get().account.dbKeyRef
     const dbKeyHex = ref ? (secrets.reveal(ref) ?? undefined) : undefined
+    if (!dbKeyHex) return { ok: false, error: t('main.substrate.accountKeyMissing') }
     const r = await verifyAccount({ dbRoot, wxid, dbKeyHex })
-    return r
+    return r.ok
+      ? r
+      : { ok: false, error: t('main.substrate.accountKeyVerifyFailed', { detail: localizeText(r.error ?? '') }) }
   })
 
   // One acquisition at a time: a new request (or 取消) aborts the running one and waits it out, so two

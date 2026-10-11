@@ -62,9 +62,9 @@ export function ThreadConversation({ surface, layout }: ThreadConversationProps)
 
   return (
     <>
-      <div className={cn('flex min-h-0 flex-1 flex-col', isDraft && 'justify-end px-4 pb-6')}>
+      <div className={cn('flex min-h-0 flex-1 flex-col', isDraft && 'flex-auto overflow-y-auto px-4 pb-2')}>
         {active && view && isDraft ? (
-          <DraftStart className={column} />
+          <DraftStart className={cn('mt-auto shrink-0 py-3', column)} />
         ) : active && view ? (
           <MessageList
             key={active.threadId}

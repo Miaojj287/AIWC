@@ -81,6 +81,8 @@ export const main: Messages['main'] = {
     keysAcquiredPartial: 'Database key retrieved. Image keys can be added later.',
     selectDbRootAndAccount: 'Choose the database folder and account first',
     dbKeyMissing: 'No database key yet',
+    accountKeyMissing: 'No matching database key is saved for this account. Retrieve its keys again, then verify.',
+    accountKeyVerifyFailed: 'Verification failed: {detail}. Retrieve keys again for the selected account, then verify.',
     exported: '{n, plural, one {Exported # message} other {Exported # messages}}',
     openLocation: 'Open file',
     selectAccountAndDbRoot: 'Choose the WeChat account and database folder first',

@@ -1,4 +1,4 @@
-import { DEFAULT_APPEARANCE } from '@aiwc/protocol'
+import { DEFAULT_APPEARANCE, panelBackgroundFor } from '@aiwc/protocol'
 import { describe, expect, it, vi } from 'vitest'
 import { applyNativeChrome, nativeChromeColors, resolveChromeMode, titleBarOverlayFor } from './nativeChrome'
 
@@ -8,6 +8,11 @@ const custom = {
 }
 
 describe('native chrome colours', () => {
+  it('matches the continuous window frame instead of the brighter navigation surface', () => {
+    expect(nativeChromeColors({ theme: 'dark', appearance: DEFAULT_APPEARANCE }, false).background).toBe('#292929')
+    expect(nativeChromeColors({ theme: 'light', appearance: DEFAULT_APPEARANCE }, true).background).toBe('#f2f2f2')
+  })
+
   it('follows the OS only while the theme is system', () => {
     expect(resolveChromeMode('system', true)).toBe('dark')
     expect(resolveChromeMode('system', false)).toBe('light')
@@ -15,20 +20,20 @@ describe('native chrome colours', () => {
     expect(resolveChromeMode('dark', false)).toBe('dark')
   })
 
-  it('paints the shell ground and foreground of the resolved palette', () => {
+  it('paints the frame ground and foreground of the resolved palette', () => {
     expect(nativeChromeColors({ theme: 'light', appearance: custom }, true)).toEqual({
-      background: '#ececec',
+      background: '#f2f2f2',
       foreground: '#111111',
     })
     expect(nativeChromeColors({ theme: 'system', appearance: custom }, true)).toEqual({
-      background: '#2a2a2a',
+      background: '#1d1d1d',
       foreground: '#f5f5f5',
     })
   })
 
   it('falls back to the default palette when none was saved yet', () => {
     expect(nativeChromeColors({ theme: 'light' } as never, false)).toEqual({
-      background: DEFAULT_APPEARANCE.light.surface,
+      background: panelBackgroundFor(DEFAULT_APPEARANCE.light),
       foreground: DEFAULT_APPEARANCE.light.foreground,
     })
   })

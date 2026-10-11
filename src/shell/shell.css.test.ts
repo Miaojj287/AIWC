@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 // jsdom global URL is not a Node URL, so pass import.meta.url to fileURLToPath as a string.
 const shellDir = dirname(fileURLToPath(import.meta.url))
 const raw = readFileSync(join(shellDir, 'shell.css'), 'utf8')
-const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+const css = raw.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
 
 function declarations(selector: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -126,8 +126,8 @@ describe('shell.css glass (透明效果)', () => {
 
   it('tints the rail and the list with translucent mixes of the palette tokens, never a raw colour', () => {
     const vars = declarations(GLASS)
-    expect(vars['--glass-rail']).toMatch(/^color-mix\(in srgb, var\(--bg-shell\) \d+%, transparent\)$/)
-    expect(vars['--glass-list']).toMatch(/^color-mix\(in srgb, var\(--bg-panel\) \d+%, transparent\)$/)
+    expect(vars['--glass-rail']).toMatch(/^color-mix\(in srgb, var\(--bg-panel\) \d+%, transparent\)$/)
+    expect(vars['--glass-list']).toMatch(/^color-mix\(in srgb, var\(--bg-shell\) \d+%, transparent\)$/)
     for (const value of Object.values(vars)) expect(value).not.toMatch(/rgb\(|#[0-9a-f]{3,8}\b/i)
     expect(declarations(`${GLASS} .shell-rail`)['background-color']).toBe('var(--glass-rail)')
     const sheet = declarations(`${GLASS} .shell-rail,\n${GLASS} .shell-list`)
@@ -149,6 +149,13 @@ describe('shell.css glass (透明效果)', () => {
 })
 
 describe('shell.css selectors', () => {
+  it('reserves one continuous Windows title bar without stepping down only the Agent column', () => {
+    expect(declarations('.shell-titlebar').height).toBe('32px')
+    expect(declarations('.shell-titlebar').background).toBe('var(--bg-panel)')
+    expect(css).not.toContain('.shell-agent-panel:not([hidden])')
+    expect(css).not.toContain('var(--caption-inset) - 40px')
+  })
+
   const selectors = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap((m) =>
     (m[1] ?? '').split(',').map((part) => part.trim()),
   )
@@ -182,25 +189,12 @@ describe('shell.css selectors', () => {
 
   it('makes room for the native window controls through the column classes', () => {
     const mac = "[data-runtime='electron'][data-platform='darwin']"
-    const win = "[data-runtime='electron'][data-platform='win32']"
     expect(declarations(`${mac} .shell-rail`)['padding-top']).toBe('44px')
-    expect(declarations(`${win} .shell-agent-panel:not([hidden])`)['padding-top']).toBe('32px')
-    expect(declarations(`${win} .shell-agent-strip`)['padding-top']).toBe('40px')
-    // The caption-button width is read from the Window Controls Overlay, with 138px (3 × 46) as the fallback.
-    expect(declarations(win)['--caption-inset']).toContain('env(titlebar-area-width')
-    expect(declarations(win)['--caption-inset']).toContain('138px')
-    expect(declarations(`${win}[data-agent-collapsed='true'] .workspace-tab-strip`)['padding-right']).toBe(
-      'calc(var(--caption-inset) - 40px)',
-    )
     // Agent window (CLAUDE.md §12): the sidebar makes room like the rail; the header does once the sidebar is gone.
     expect(declarations(`${mac} .shell-agent-sidebar`)['padding-top']).toBe('44px')
     expect(
       declarations(`${mac} .shell-agent-window[data-sidebar-collapsed='true'] .shell-agent-header`)['padding-left'],
     ).toBe('76px')
-    expect(
-      declarations(`${win} .shell-agent-window[data-pane-visible='false'] .shell-agent-header`)['padding-right'],
-    ).toBe('var(--caption-inset)')
-    expect(declarations(`${win} .shell-agent-pane .workspace-tab-strip`)['padding-right']).toBe('var(--caption-inset)')
     // Native full screen: no traffic lights, so the macOS columns stop reserving their band.
     const full = ":root[data-fullscreen='true']"
     expect(declarations(`${full} ${mac} .shell-rail`)['padding-top']).toBe('14px')

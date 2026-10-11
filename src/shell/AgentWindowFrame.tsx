@@ -35,9 +35,9 @@ export interface AgentWindowFrameProps {
  * AgentWindowFrame — the Agent window's layout (CLAUDE.md §12, DESIGN-SPEC「Agent 窗口」): sidebar (config width,
  * collapsible) | conversation fill | workspace pane (config width, on demand). Layout only: the content of the
  * three regions comes from the agent feature. Only the conversation absorbs width; the pane is clamped so the
- * conversation keeps AGENT_MAIN_MIN_WIDTH. Grounds (ZCode's frame): sidebar and conversation on the panel ground, the
- * header is the top of the conversation column (same ground, a hairline under it once the thread has content); only
- * the workspace pane keeps its own shell-ground tab strip.
+ * conversation keeps AGENT_MAIN_MIN_WIDTH. WeChat-style grounds: brighter navigation, continuous content ground for
+ * conversation, header and workspace. Windows reserves one title row above all columns; macOS keeps its lights in
+ * the sidebar. A hairline appears under the conversation header once the thread has content.
  */
 export function AgentWindowFrame({
   platform,
@@ -63,12 +63,16 @@ export function AgentWindowFrame({
       data-sidebar-collapsed={sidebarCollapsed}
       data-pane-visible={paneVisible}
     >
-      <WindowChrome title={title} showControls={runtime === 'electron' && platform === 'darwin'} />
+      <WindowChrome
+        title={title}
+        showControls={runtime === 'electron' && platform === 'darwin'}
+        showTitleBar={runtime === 'electron' && platform === 'win32'}
+      />
       <div className="flex min-h-0 flex-1 items-stretch">
         {sidebarCollapsed ? null : (
           <>
             <div
-              className="shell-agent-sidebar flex h-full min-w-0 shrink-0 flex-col border-r border-line-6 bg-panel"
+              className="shell-agent-sidebar flex h-full min-w-0 shrink-0 flex-col border-r border-line-6 bg-shell"
               style={{ width: sidebarWidth.width }}
               data-testid="agent-window-sidebar"
             >
@@ -85,7 +89,7 @@ export function AgentWindowFrame({
             />
           </>
         )}
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-testid="agent-window-main">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-content" data-testid="agent-window-main">
           <div
             className={cn(
               'shell-agent-header flex h-10 shrink-0 items-center gap-1 border-b px-2',

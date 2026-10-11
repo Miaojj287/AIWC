@@ -20,7 +20,7 @@ export interface AgentColumnProps {
 const UNREAD_EVENTS = new Set(['text.end', 'turn.completed', 'approval.requested', 'error'])
 
 /**
- * AgentColumn — the always-present Agent panel (CLAUDE.md §1, §5). Expanded: panel ground, 1px line on
+ * AgentColumn — the always-present Agent panel (CLAUDE.md §1, §5). Expanded: content ground, 1px line on
  * the left, width from config. Collapsed: a 40px strip with the bot button (+ unread dot). The panel
  * itself stays mounted while collapsed so thread state survives; it is just hidden.
  */
@@ -41,7 +41,7 @@ export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentC
     <>
       {collapsed ? (
         <div
-          className="shell-agent-strip flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-panel pt-2"
+          className="shell-agent-strip flex h-full w-10 shrink-0 flex-col items-center border-l border-line-6 bg-content pt-2"
           data-testid="agent-strip"
         >
           <Tooltip
@@ -82,7 +82,7 @@ export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentC
         aria-label={t('shell.agent.panel')}
         style={collapsed ? undefined : { width }}
         className={cn(
-          'shell-agent-panel h-full shrink-0 border-l border-line-6 bg-panel',
+          'shell-agent-panel h-full shrink-0 border-l border-line-6 bg-content',
           collapsed ? 'hidden' : 'flex min-w-0 flex-col',
         )}
         data-testid="agent-panel"

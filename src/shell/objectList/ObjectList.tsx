@@ -30,7 +30,7 @@ export interface ObjectListProps {
 
 /** Square 32px tool next to the list search (更多筛选, 刷新); `shell-list-tool` lets 透明效果 make it translucent. */
 const HEADER_TOOL_CLASS =
-  'shell-list-tool app-no-drag size-8 rounded-item border border-line-8 bg-content text-fg-2 enabled:hover:bg-content enabled:hover:text-fg'
+  'shell-list-tool app-no-drag size-8 rounded-item border border-transparent bg-transparent text-fg-2 enabled:hover:bg-hover-7 enabled:hover:text-fg'
 
 /** The column is a singleton; remember which ⌘K request has already been honoured across remounts. */
 let handledFocusRequest = 0
@@ -123,7 +123,7 @@ export function ObjectList({ mac }: ObjectListProps) {
   return (
     <aside
       aria-label={registration?.title ?? t('shell.objectList.ariaLabel')}
-      className="shell-list @container/list flex h-full w-full min-w-0 flex-col border-r border-line-6 bg-panel"
+      className="shell-list @container/list flex h-full w-full min-w-0 flex-col border-r border-line-6 bg-shell"
     >
       {/* The top band of every column drags the window, like a native toolbar; its controls opt out. */}
       <div className="app-drag flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
@@ -142,7 +142,7 @@ export function ObjectList({ mac }: ObjectListProps) {
           shortcut={mac ? '⌘K' : 'Ctrl+K'}
           aria-label={searchLabel}
           landmark
-          wrapperClassName="app-no-drag h-8 min-w-0 flex-1 rounded-item"
+          wrapperClassName="app-no-drag h-8 min-w-0 flex-1 rounded-item border-transparent bg-hover-5 hover:border-transparent"
         />
         {/* 更多筛选 sits with the other header tools: three counted chips plus two icons do not fit one 280px row. */}
         {filterOptions.length > 0 ? (

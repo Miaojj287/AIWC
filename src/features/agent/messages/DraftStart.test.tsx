@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultConfig, type ProviderConfig } from '@aiwc/protocol'
 import { onCommand } from '@/app/commands'
+import { __resetLanguageForTests, setLanguage } from '@/i18n'
 import { __resetConfigStoreForTests, useConfigStore } from '@/platform/configStore'
 import { DraftStart } from './DraftStart'
 
@@ -14,9 +15,20 @@ function seed(providers: ProviderConfig[]) {
 afterEach(() => {
   cleanup()
   __resetConfigStoreForTests()
+  __resetLanguageForTests()
 })
 
 describe('empty thread without a model', () => {
+  it.each([
+    ['zh-CN', 'Agent需要接入模型才能回答，请先配置模型'],
+    ['en-US', 'Agent needs a model to answer. Please configure a model first.'],
+  ] as const)('shows the model setup instruction in %s', (language, instruction) => {
+    seed([])
+    setLanguage(language)
+    render(<DraftStart />)
+    expect(screen.getByText(instruction)).toBeTruthy()
+  })
+
   it('offers to connect a model and opens 设置 › AI 接入', () => {
     seed([])
     const opened = vi.fn()

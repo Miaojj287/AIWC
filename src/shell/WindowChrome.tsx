@@ -31,7 +31,16 @@ const GLYPH_STROKE = 3
  * in native full screen, and never a Tab stop (⌘W / ⌘M / ⌃⌘F cover the keyboard). Also keeps `document.title` in
  * step with the active tab for Mission Control and the Window menu.
  */
-export function WindowChrome({ title, showControls = false }: { title?: string; showControls?: boolean }) {
+export function WindowChrome({
+  title,
+  showControls = false,
+  showTitleBar = false,
+}: {
+  title?: string
+  showControls?: boolean
+  /** Windows reserves a full-width band for native caption buttons, above every column. */
+  showTitleBar?: boolean
+}) {
   const t = useT()
   const text = title?.trim() || APP_NAME
   const [focused, setFocused] = useState(() => document.hasFocus())
@@ -68,7 +77,9 @@ export function WindowChrome({ title, showControls = false }: { title?: string; 
       delete document.documentElement.dataset.fullscreen
     }
   }, [fullscreen])
-  if (!showControls || fullscreen) return null
+  if (fullscreen) return null
+  if (showTitleBar) return <div className="shell-titlebar app-drag shrink-0" aria-hidden />
+  if (!showControls) return null
   return (
     <div
       className="mac-window-controls app-no-drag"
