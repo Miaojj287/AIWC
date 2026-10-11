@@ -6,6 +6,7 @@
  */
 import { Bot, Ellipsis, Eye, MessageSquare, Quote, RefreshCw, Reply, Trash, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { VList } from 'virtua'
 import type { CloneStatus } from '@aiwc/protocol'
 import {
   Avatar,
@@ -30,17 +31,11 @@ import { runCommand } from '@/app/commands'
 import { useT, type MessageKey } from '@/i18n'
 import { formatTime } from '@/platform/format'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
+import { listKeyNav } from '@/platform/listNavigation'
 import type { ObjectListProps } from '@/shell/objectListRegistry'
 import { servableAvatar } from '@/shell/objectList/sessionListModel'
 import { useShellStore } from '@/shell/shellStore'
-import {
-  cloneStatusLine,
-  filterContacts,
-  progressPercent,
-  readyCount,
-  type CloneListEntry,
-  type CloneSegment,
-} from './cloneView'
+import { cloneStatusLine, filterContacts, progressPercent, type CloneListEntry, type CloneSegment } from './cloneView'
 import { deleteImpactText } from './profileModel'
 import { CancelCloneDialog } from './views/CloneDialogs'
 
@@ -75,7 +70,6 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
     [merged, query, segment],
   )
   const total = list.data?.length ?? 0
-  const ready = readyCount(merged)
   // The dialog follows the live status: it closes by itself once that build finishes or fails.
   const cancelStatus = cancelTarget
     ? merged.find((e) => e.contactId === cancelTarget.entry.contactId)?.status
@@ -187,7 +181,7 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
     }
   }
 
-  if (list.loading && !list.data) return <SkeletonListRows rows={6} className="px-2.5 py-2" />
+  if (list.loading && !list.data) return <SkeletonListRows rows={6} className="px-5 pt-2" />
   if (list.error)
     return (
       <EmptyState
@@ -219,7 +213,7 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
         compact
         variant="no-results"
         title={query ? t('clone.list.noMatch', { query }) : t('clone.list.noneCloned')}
-        description={query ? t('clone.list.dmOnly') : t('clone.list.pickFromAll')}
+        description={query ? t('clone.list.dmOnly') : undefined}
         action={segment !== 'all' ? { label: t('clone.list.viewAll'), onClick: () => setSegment(null) } : undefined}
         secondaryAction={
           query
@@ -231,60 +225,59 @@ export function ContactList({ query, activeObjectId }: ObjectListProps) {
   }
 
   return (
-    <div
-      role="list"
-      aria-label={t('clone.list.ariaLabel')}
-      className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-1.5"
-    >
-      <div className="flex items-center px-2.5 pb-1 text-micro text-fg-3">
-        <span>
-          {segment === 'ready' ? t('clone.list.countReady', { n: ready }) : t('clone.list.countAll', { total, ready })}
-        </span>
-      </div>
-      {entries.map((e) => {
-        const line = cloneStatusLine(e.status, e.messageCount)
-        const spec = menuFor(e)
-        return (
-          <ContextMenu key={e.contactId}>
-            <ContextMenuTrigger asChild>
-              <ListItem
-                role="listitem"
-                leading={<Avatar id={e.contactId} name={e.displayName} src={servableAvatar(e.avatarPath)} />}
-                title={e.displayName}
-                subtitle={
-                  <span className={cn('flex min-w-0 items-center gap-1.5', TONE_CLASS[line.tone])}>
-                    {e.status.state === 'ready' || e.status.state === 'building' ? (
-                      <span
-                        aria-hidden
-                        className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_CLASS[line.tone])}
-                      />
-                    ) : null}
-                    <span className="truncate" title={line.text}>
-                      {line.text}
+    // ↑ ↓ Home End walk the rows; a real account has about a thousand contacts, so the rows are virtualised.
+    <div className="flex h-full min-h-0 flex-col" onKeyDown={listKeyNav}>
+      <VList
+        data={entries}
+        role="group"
+        aria-label={t('clone.list.ariaLabel')}
+        className="min-h-0 flex-1 overscroll-contain px-2 pb-1.5"
+        style={{ height: '100%' }}
+      >
+        {(e) => {
+          const line = cloneStatusLine(e.status, e.messageCount)
+          const spec = menuFor(e)
+          return (
+            <ContextMenu key={e.contactId}>
+              <ContextMenuTrigger asChild>
+                <ListItem
+                  leading={<Avatar id={e.contactId} name={e.displayName} src={servableAvatar(e.avatarPath)} />}
+                  title={e.displayName}
+                  subtitle={
+                    <span className={cn('flex min-w-0 items-center gap-1.5', TONE_CLASS[line.tone])}>
+                      {e.status.state === 'ready' || e.status.state === 'building' ? (
+                        <span
+                          aria-hidden
+                          className={cn('inline-block size-1.5 shrink-0 rounded-chip', DOT_CLASS[line.tone])}
+                        />
+                      ) : null}
+                      <span className="truncate" title={line.text}>
+                        {line.text}
+                      </span>
                     </span>
-                  </span>
-                }
-                meta={formatTime(e.lastContactAt)}
-                selected={activeObjectId === e.contactId}
-                onSelect={() => open(e)}
-                hoverActions={
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton size="sm" icon={Ellipsis} label={t('clone.list.moreActions')} />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                      <DropdownMenuItems items={spec} />
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                }
-              />
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItems items={spec} />
-            </ContextMenuContent>
-          </ContextMenu>
-        )
-      })}
+                  }
+                  meta={formatTime(e.lastContactAt)}
+                  selected={activeObjectId === e.contactId}
+                  onSelect={() => open(e)}
+                  hoverActions={
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton size="sm" icon={Ellipsis} label={t('clone.list.moreActions')} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        <DropdownMenuItems items={spec} />
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  }
+                />
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItems items={spec} />
+              </ContextMenuContent>
+            </ContextMenu>
+          )
+        }}
+      </VList>
       <DangerDialog
         open={deleteTarget !== null}
         onOpenChange={(o) => !o && setDeleteTarget(null)}

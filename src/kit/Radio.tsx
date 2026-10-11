@@ -30,9 +30,9 @@ export const Radio = forwardRef<HTMLButtonElement, RadioProps>(function Radio(
       disabled={disabled}
       className={cn(
         'peer inline-flex size-4 shrink-0 items-center justify-center rounded-chip border border-(--line-25)',
-        'transition-colors duration-(--dur-fast) hover:border-(--line-40)',
-        'data-[state=checked]:border-[5px] data-[state=checked]:border-accent',
-        'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'transition-colors enabled:hover:border-(--line-40) enabled:hover:bg-hover-7 enabled:active:bg-(--fill-13)',
+        'data-[state=checked]:border-[5px] data-[state=checked]:border-accent data-[state=checked]:enabled:hover:bg-transparent',
+        'outline-none',
         'disabled:cursor-not-allowed disabled:opacity-40',
         !label && className,
       )}

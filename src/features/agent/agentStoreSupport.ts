@@ -1,6 +1,6 @@
 /**
  * Pure helpers of agentStore.ts, kept apart so the store stays under the file ceiling (AGENTS.md §2.3):
- * thread ordering, error text, and the settings a new desktop thread starts with.
+ * thread ordering and paging, error text, and the settings a new desktop thread starts with.
  */
 import type { ThreadSettings, ThreadSummary } from '@aiwc/protocol'
 import { useConfigStore } from '@/platform/configStore'
@@ -8,6 +8,15 @@ import { useConfigStore } from '@/platform/configStore'
 /** Pinned first, then most recently updated. */
 export const sortThreads = (list: ThreadSummary[]): ThreadSummary[] =>
   [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
+
+/** Threads asked of agent:listThreads per page; a full page means there may be more. */
+export const THREAD_PAGE = 50
+
+/** Add a page of the history to what is loaded: threads already known keep their (fresher) local copy. */
+export function mergeThreadPage(loaded: ThreadSummary[], page: readonly ThreadSummary[]): ThreadSummary[] {
+  const known = new Set(loaded.map((t) => t.threadId))
+  return sortThreads([...loaded, ...page.filter((t) => !known.has(t.threadId))])
+}
 
 export const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 

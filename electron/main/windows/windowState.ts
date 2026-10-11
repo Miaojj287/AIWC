@@ -50,6 +50,17 @@ export function saveWindowState(file: string, state: WindowState): void {
 }
 
 /**
+ * The minimum window size, never larger than the work area it lives on: a 1366×768 laptop at 125% scaling has a
+ * 1093×614 work area, and a fixed 1200×720 minimum would push the window off the screen.
+ */
+export function minimumSizeFor(workArea: Pick<DisplayBounds, 'width' | 'height'>): { width: number; height: number } {
+  return {
+    width: Math.min(MIN_WINDOW_WIDTH, workArea.width),
+    height: Math.min(MIN_WINDOW_HEIGHT, workArea.height),
+  }
+}
+
+/**
  * If the remembered position is not (mostly) visible on any current display, drop x/y so the OS
  * centres the window; also shrink the size so it fits the display it lands on.
  */

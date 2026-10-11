@@ -14,6 +14,7 @@ import {
   Inbox,
   Key,
   LayoutGrid,
+  ListTodo,
   Mail,
   MessageSquare,
   NotebookPen,
@@ -22,6 +23,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  TextSearch,
   User,
   Users,
 } from 'lucide-react'
@@ -49,6 +51,8 @@ const BY_NAME: Record<string, IconComponent> = {
   key: Key,
   shield: Shield,
   'layout-grid': LayoutGrid,
+  'list-todo': ListTodo,
+  'text-search': TextSearch,
 }
 
 export const KIND_ICON: Record<TabKind, IconComponent> = {
@@ -56,11 +60,13 @@ export const KIND_ICON: Record<TabKind, IconComponent> = {
   autoreply: Reply,
   clone: Bot,
   task: CalendarClock,
+  todo: ListTodo,
   settings: Settings,
   file: FileText,
-  diary: BookOpen,
   replydesk: Inbox,
+  search: TextSearch,
   kit: Palette,
+  agentRun: Bot,
 }
 
 export function tabIcon(kind: TabKind, name?: string): IconComponent {

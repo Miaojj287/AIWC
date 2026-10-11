@@ -119,7 +119,7 @@ it('shows the failure, the manual install command and a retry', () => {
 
 it('registers cards for its tools: the connect card follows the session of its call', () => {
   register()
-  const ConnectCard = toolCardFor('office_connect')!
+  const ConnectCard = toolCardFor('office_connect')!.card
   const call: ToolCallView = {
     callId: 'call_1' as ToolCallView['callId'],
     toolName: 'office_connect',
@@ -158,7 +158,7 @@ it('registers cards for its tools: the connect card follows the session of its c
 
 it('the push card opens only links on the platform’s own hosts', () => {
   register()
-  const PushCard = toolCardFor('office_push_table')!
+  const PushCard = toolCardFor('office_push_table')!.card
   const base: ToolCallView = {
     callId: 'c2' as ToolCallView['callId'],
     toolName: 'office_push_table',

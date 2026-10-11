@@ -19,8 +19,10 @@ export type MenuCommand =
   | 'shell.toggleMode'
   | 'search.sessions'
   | 'search.inPage'
-  | 'tab.openDiary'
+  | 'tab.openSearch'
+  | 'agent.quoteActiveTab'
   | 'tab.openReplyDesk'
+  | 'app.showShortcuts'
 
 export interface MenuDeps {
   send: (command: MenuCommand, payload?: unknown) => void
@@ -69,13 +71,18 @@ export function buildMenuTemplate(deps: MenuDeps): MenuItemConstructorOptions[] 
       { type: 'separator' },
       { label: t('menu.closeTab'), accelerator: 'CmdOrCtrl+W', click: cmd('tab.closeActive') },
       { label: t('menu.reopenTab'), accelerator: 'CmdOrCtrl+Shift+T', click: cmd('tab.reopenClosed') },
+      // ⌘W closes a tab here, so the window keeps the platform's second-level shortcut.
       ...(deps.isMac
-        ? []
+        ? ([
+            { type: 'separator' },
+            { role: 'close', label: t('menu.closeWindow'), accelerator: 'Cmd+Shift+W' },
+          ] as MenuItemConstructorOptions[])
         : ([
             { type: 'separator' },
             settingsItem,
             { type: 'separator' },
-            { role: 'quit', label: t('menu.quit') },
+            // Windows and Linux say Exit, not Quit.
+            { role: 'quit', label: t('menu.exit') },
           ] as MenuItemConstructorOptions[])),
     ],
   }
@@ -89,6 +96,10 @@ export function buildMenuTemplate(deps: MenuDeps): MenuItemConstructorOptions[] 
       { role: 'cut', label: t('menu.cut') },
       { role: 'copy', label: t('menu.copy') },
       { role: 'paste', label: t('menu.paste') },
+      ...(deps.isMac
+        ? ([{ role: 'pasteAndMatchStyle', label: t('menu.pasteAndMatchStyle') }] as MenuItemConstructorOptions[])
+        : []),
+      { role: 'delete', label: t('menu.delete') },
       { role: 'selectAll', label: t('menu.selectAll') },
     ],
   }
@@ -99,15 +110,18 @@ export function buildMenuTemplate(deps: MenuDeps): MenuItemConstructorOptions[] 
       { label: t('menu.chat'), accelerator: 'CmdOrCtrl+1', click: cmd('rail.select', { fn: 'chat' }) },
       { label: t('menu.autoreply'), accelerator: 'CmdOrCtrl+2', click: cmd('rail.select', { fn: 'autoreply' }) },
       { label: t('menu.clone'), accelerator: 'CmdOrCtrl+3', click: cmd('rail.select', { fn: 'clone' }) },
+      { label: t('menu.tasks'), accelerator: 'CmdOrCtrl+4', click: cmd('rail.select', { fn: 'tasks' }) },
+      { label: t('menu.todo'), accelerator: 'CmdOrCtrl+5', click: cmd('rail.select', { fn: 'todo' }) },
       { type: 'separator' },
       { label: t('menu.searchSessions'), accelerator: 'CmdOrCtrl+K', click: cmd('search.sessions') },
       { label: t('menu.findInPage'), accelerator: 'CmdOrCtrl+F', click: cmd('search.inPage') },
+      { label: t('menu.searchHistory'), accelerator: 'CmdOrCtrl+Shift+F', click: cmd('tab.openSearch', {}) },
+      { label: t('menu.quoteToAgent'), accelerator: 'CmdOrCtrl+Shift+A', click: cmd('agent.quoteActiveTab') },
       { type: 'separator' },
       { label: t('menu.toggleObjectList'), accelerator: 'CmdOrCtrl+Shift+B', click: cmd('objectList.toggleCollapsed') },
       { label: t('menu.toggleAgentPanel'), accelerator: 'CmdOrCtrl+Shift+J', click: cmd('agent.toggleCollapsed') },
       { label: t('menu.toggleAgentWindow'), accelerator: 'CmdOrCtrl+Shift+L', click: cmd('shell.toggleMode') },
       { type: 'separator' },
-      { label: t('menu.diary'), click: cmd('tab.openDiary', {}) },
       { label: t('menu.replyDesk'), click: cmd('tab.openReplyDesk') },
       { type: 'separator' },
       ...(deps.isPackaged
@@ -117,6 +131,10 @@ export function buildMenuTemplate(deps: MenuDeps): MenuItemConstructorOptions[] 
             { role: 'toggleDevTools', label: t('menu.devTools') },
             { type: 'separator' },
           ] as MenuItemConstructorOptions[])),
+      { role: 'resetZoom', label: t('menu.resetZoom') },
+      { role: 'zoomIn', label: t('menu.zoomIn') },
+      { role: 'zoomOut', label: t('menu.zoomOut') },
+      { type: 'separator' },
       { role: 'togglefullscreen', label: t('menu.fullscreen') },
     ],
   }
@@ -137,8 +155,17 @@ export function buildMenuTemplate(deps: MenuDeps): MenuItemConstructorOptions[] 
     label: t('menu.help'),
     role: 'help',
     submenu: [
+      { label: t('menu.keyboardShortcuts'), accelerator: 'CmdOrCtrl+/', click: cmd('app.showShortcuts') },
+      { type: 'separator' },
       { label: t('menu.openDataDir'), click: () => deps.openDataDir() },
       { label: t('menu.exportLogs'), click: () => deps.exportLogs() },
+      // macOS has 关于 in the app menu; elsewhere Help owns it and opens the About page of the settings tab.
+      ...(deps.isMac
+        ? []
+        : ([
+            { type: 'separator' },
+            { label: t('menu.about', { name }), click: cmd('tab.openSettings', { page: 'about' }) },
+          ] as MenuItemConstructorOptions[])),
     ],
   }
 

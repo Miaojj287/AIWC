@@ -10,7 +10,7 @@ import type { ToolRegistry } from '../ports'
 export const SEND_TO_ORIGIN_TOOLS: readonly string[] = ['send_message', 'send_media']
 
 /** Tools that spawn sub-agents; stripped when depth > 0 so a subagent cannot recurse. */
-export const DELEGATION_TOOLS: readonly string[] = ['delegate_analysis']
+export const DELEGATION_TOOLS: readonly string[] = ['delegate_analysis', 'workflow_run']
 
 type AnyTool = AnyToolDefinition
 

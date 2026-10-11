@@ -81,8 +81,6 @@ const PushInput = z.object({
     .describe('追加到已有表格；不传则新建。缺少的列会自动补上'),
 })
 
-
-
 const errorResult = (e: unknown, extra: Record<string, JsonValue> = {}): ToolResult => {
   const err = e instanceof OfficeError ? e : undefined
   return {
@@ -191,7 +189,9 @@ export function officeTools(service: OfficeService): ToolDefinition<any, any>[] 
     description:
       '把整理好的表格推送到飞书多维表格 / 钉钉 AI 表格 / 企业微信智能表格：默认新建一张表；传 target 则追加到已有表格。执行时用户会看到并确认要推送的全部内容。成功后返回表格链接，把链接给用户。平台未连接时先调用 office_connect。',
     inputSchema: PushInput,
-    profiles: ['desktop-chat'],
+    // 'cron' too: the built-in 飞书 task template pushes unattended (its permission mode is Autopilot,
+    // which is what lets a `send` run without anyone to confirm it).
+    profiles: ['desktop-chat', 'cron'],
     risk: 'send',
     parallelSafe: false,
     timeoutMs: 10 * 60_000,
@@ -276,6 +276,3 @@ function connectResult(s: OfficeConnectSession, name: string): ToolResult {
     isError: true,
   }
 }
-
-
-

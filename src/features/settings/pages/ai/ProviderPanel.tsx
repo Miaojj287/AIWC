@@ -221,7 +221,7 @@ export function ProviderPanel({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-caption text-fg-3">{t('common.enable')}</span>
+                  {/* No 启用 caption beside every switch: the switch reads as on / off, and `label` names it. */}
                   <Toggle
                     label={t('settings.ai.panel.enableModel', { name: m.label })}
                     checked={enabled}

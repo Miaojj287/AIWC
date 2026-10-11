@@ -26,7 +26,7 @@ export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
 }
 
 /**
- * Input — 6 states (Figma 154:738): default / hover / focus (accent border, accent caret) / error / disabled / with icons.
+ * Input — 6 states (Figma 154:738): default / hover / focus (stronger neutral border; accent ring only for keyboard focus, accessibility.css) / error / disabled / with icons.
  * Content ground, 1px line-8 border, r6, text 12. Validation goes under the control (CLAUDE.md §4.6).
  */
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
@@ -71,9 +71,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         onMouseDown={focusInner}
         className={cn(
           'flex items-center gap-2 rounded-control border border-line-8 bg-content pl-2.5 pr-2 text-caption text-fg',
-          'transition-colors duration-(--dur-fast) hover:border-(--line-16) focus-within:border-accent/80 focus-within:hover:border-accent/80',
-          'data-[invalid]:border-danger/80 data-[invalid]:hover:border-danger/80 data-[invalid]:focus-within:border-danger/80',
-          'data-[disabled]:pointer-events-none data-[disabled]:opacity-45',
+          'kit-field transition-colors hover:border-(--line-16) focus-within:border-(--line-25) focus-within:hover:border-(--line-25)',
+          'data-[invalid]:border-danger data-[invalid]:hover:border-danger data-[invalid]:focus-within:border-danger',
+          'data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
           size === 'sm' ? 'h-7' : 'h-8',
           className,
         )}
@@ -88,7 +88,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-invalid={invalid || undefined}
           onMouseDown={onMouseDown}
           className={cn(
-            'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
+            'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-fg outline-none placeholder:text-fg-3',
             'disabled:cursor-not-allowed',
             mono && 'font-mono',
           )}

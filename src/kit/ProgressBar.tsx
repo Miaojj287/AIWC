@@ -24,8 +24,8 @@ export function ProgressBar({ value, label, className, ...rest }: ProgressBarPro
     >
       {determinate ? (
         <div
-          className="h-full rounded-chip bg-accent transition-[width] duration-(--dur-base) ease-out"
-          style={{ width: `${pct}%` }}
+          className="kit-progress-fill h-full w-full origin-left rounded-chip bg-accent"
+          style={{ transform: `scaleX(${(pct ?? 0) / 100})` }}
         />
       ) : (
         <div className="kit-indeterminate h-full w-[35%] rounded-chip bg-accent" />

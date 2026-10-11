@@ -10,7 +10,7 @@ afterEach(() => {
   __setBridgeForTests(undefined)
 })
 
-it('tests the current draft and opens the data service before completing onboarding', async () => {
+it('tests the current draft and opens the data service, leaving completion to the wizard', async () => {
   const order: string[] = []
   const invoke = vi.fn(async (channel: string) => {
     order.push(channel)
@@ -24,8 +24,8 @@ it('tests the current draft and opens the data service before completing onboard
   useWizardStore.setState({ wxid: 'current', dbRoot: '/current', cacheDir: '' })
   expect(await useWizardStore.getState().testAndFinish()).toBe(true)
   expect(invoke).toHaveBeenCalledWith('substrate:testConnection', { wxid: 'current', dbRoot: '/current' })
-  expect(order).toEqual(['substrate:testConnection', 'save-account', 'substrate:connect', 'complete'])
-  expect(save).toHaveBeenLastCalledWith({ onboarding: { completed: true } })
+  expect(order).toEqual(['substrate:testConnection', 'substrate:connect'])
+  expect(save).not.toHaveBeenCalled()
 })
 
 it('does not complete onboarding when opening the database fails', async () => {
@@ -41,10 +41,12 @@ it('does not complete onboarding when opening the database fails', async () => {
 it('keeps AES case intact and invalidates account verification when replacing the database key', async () => {
   const invoke = vi.fn(async () => ({ ok: true }))
   __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({ wxid: 'selected', dbRoot: '/selected' })
   expect(await useWizardStore.getState().setManualKey('image_aes', 'AbCdEfGh12345678')).toEqual({ ok: true })
   expect(invoke).toHaveBeenLastCalledWith('substrate:setManualKey', {
     kind: 'image_aes',
     hex: '41624364456647683132333435363738',
+    target: { wxid: 'selected', dbRoot: '/selected' },
   })
   useWizardStore.setState({ verifyState: 'verified' })
   await useWizardStore.getState().setManualKey('db_key', 'a'.repeat(64))
@@ -74,4 +76,42 @@ it('keeps the saved directory instead of replacing it with automatic detection',
   await useWizardStore.getState().hydrate({ ...defaultConfig(), account: { dbRoot: '/saved' } })
   expect(useWizardStore.getState().dbRoot).toBe('/saved')
   expect(invoke).not.toHaveBeenCalledWith('substrate:detectWeChat', undefined)
+})
+
+it('enters a later launch without reconnecting when the saved account is already open and nothing changed', async () => {
+  const invoke = vi.fn(async (channel: string) =>
+    channel === 'substrate:status'
+      ? { connection: 'ready', sync: {}, account: { wxid: 'me', dbRoot: '/root', verified: true } }
+      : { ok: true },
+  )
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({
+    wxid: 'me',
+    dbRoot: '/root',
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'missing' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  expect(await useWizardStore.getState().enter()).toBe(true)
+  expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(['substrate:status', 'substrate:connect'])
+})
+
+it('runs the full connection test on 进入 after a key was replaced on the page', async () => {
+  const invoke = vi.fn(async () => ({ ok: true }))
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  vi.spyOn(useConfigStore.getState(), 'set').mockResolvedValue(defaultConfig())
+  useWizardStore.setState({
+    wxid: 'me',
+    dbRoot: '/root',
+    keys: {
+      db_key: { status: 'manual', hex: 'a'.repeat(64) },
+      image_xor: { status: 'missing' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  expect(await useWizardStore.getState().enter()).toBe(true)
+  expect(invoke).toHaveBeenCalledWith('substrate:testConnection', { wxid: 'me', dbRoot: '/root' })
+  expect(invoke).not.toHaveBeenCalledWith('substrate:status', undefined)
 })

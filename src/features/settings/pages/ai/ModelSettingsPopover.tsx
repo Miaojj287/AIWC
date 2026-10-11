@@ -4,7 +4,7 @@
  */
 import { Pencil, Trash } from 'lucide-react'
 import { useState } from 'react'
-import { modelCapabilities, type ProviderConfig, type ModelEntry, type ReasoningEffort } from '@aiwc/protocol'
+import { modelCapabilities, type CapabilityProvider, type ModelEntry, type ReasoningEffort } from '@aiwc/protocol'
 import { useT, type MessageKey } from '@/i18n'
 import {
   Button,
@@ -23,7 +23,7 @@ import {
 import { CONTEXT_WINDOWS, REASONING_EFFORTS, formatContext } from '../../aiModel'
 
 export interface ModelSettingsPopoverProps {
-  provider: Pick<ProviderConfig, 'kind'>
+  provider: CapabilityProvider
   model: ModelEntry
   onPatch: (patch: Partial<ModelEntry>) => void
   onRemove: () => void
@@ -147,6 +147,15 @@ export function ModelSettingsPopover({
               align="end"
               className={COMPACT_SELECT}
               contentClassName="w-[140px]"
+            />
+          </div>
+          {/* 智能配置 fills this from the model profile; the user can override it either way. */}
+          <div className={ROW}>
+            <span className={LABEL}>{t('settings.ai.modelSettings.vision')}</span>
+            <Toggle
+              label={t('settings.ai.modelSettings.visionToggle')}
+              checked={model.supportsVision}
+              onCheckedChange={(v) => onPatch({ supportsVision: v })}
             />
           </div>
           <div className={ROW}>

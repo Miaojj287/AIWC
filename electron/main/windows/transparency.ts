@@ -42,17 +42,22 @@ export function transparencyOptionsFor(
 
 export type TransparencyTarget = Pick<BrowserWindow, 'setVibrancy' | 'setBackgroundMaterial' | 'setBackgroundColor'>
 
-/** Runtime toggle from the settings row: swaps the material in place, the window is never recreated. */
+/**
+ * Runtime toggle from the settings row: swaps the material in place, the window is never recreated. `opaqueColor`
+ * is the shell ground of the user's current palette (electron/main/windows/nativeChrome.ts), so switching the effect
+ * off never flashes the default dark base under a light theme.
+ */
 export function applyTransparency(
   win: TransparencyTarget,
   platform: NodeJS.Platform,
   enabled: boolean,
   systemVersion?: string,
+  opaqueColor: string = OPAQUE_BACKGROUND,
 ): void {
   if (!supportsTransparency(platform, systemVersion)) return
   if (platform === 'darwin') win.setVibrancy(enabled ? VIBRANCY_MATERIAL : null)
   else win.setBackgroundMaterial(enabled ? 'acrylic' : 'none')
-  win.setBackgroundColor(enabled ? TRANSPARENT_BACKGROUND : OPAQUE_BACKGROUND)
+  win.setBackgroundColor(enabled ? TRANSPARENT_BACKGROUND : opaqueColor)
 }
 
 /** `process.getSystemVersion()` exists only inside Electron; tests and plain Node get undefined. */

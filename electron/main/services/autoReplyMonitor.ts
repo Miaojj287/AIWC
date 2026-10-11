@@ -26,6 +26,37 @@ const DEFAULT_QUIET_MS = 5_000
 /** Fallback poll interval when DB change events are missed. */
 const DEFAULT_POLL_MS = 3_000
 
+/** The gateway event for a chat's last message, as the local WeChat observer sees it (also the Jev dry run). */
+export function messageEventFromWx(
+  session: WxSession,
+  last: WxMessage,
+  owner: string,
+  nickname: string | undefined,
+): MessageEvent {
+  return {
+    id: `${owner}:${session.id}:${last.id}:${last.seq}`,
+    source: {
+      channel: 'wechat-ui',
+      chatId: session.id,
+      peerId: last.senderId,
+      chatType: session.kind === 'group' ? 'group' : 'dm',
+      displayName: session.title,
+    },
+    kind: ['image', 'voice', 'file', 'video', 'sticker'].includes(last.kind)
+      ? (last.kind as MessageEvent['kind'])
+      : 'text',
+    text: last.media?.transcript || last.text || `[${last.kind}]`,
+    timestamp: last.createdAt,
+    addressed: session.kind === 'dm' || Boolean(nickname && last.text.includes(`@${nickname}`)),
+    replyTo: last.quote ? { messageId: '', text: last.quote.text, authorName: last.quote.senderName } : undefined,
+    raw: { isSelf: false, accountId: owner, localMessageId: last.id, senderName: last.senderName },
+  }
+}
+
+/** A message the monitor may answer: from the peer, and not a system line or a revoke notice. */
+export const isReplyableMessage = (m: WxMessage | undefined): m is WxMessage =>
+  Boolean(m) && !m!.isSelf && m!.kind !== 'system' && m!.kind !== 'revoke'
+
 export interface AutoReplyMonitorDeps {
   substrate: SubstrateService
   rules(): AutoReplyRule[]
@@ -60,30 +91,8 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
   let off: (() => void) | undefined
 
   const keyOf = (m: WxMessage | undefined): string => (m ? `${m.id}:${m.seq}:${m.createdAt}` : '')
-
-  const replyable = (m: WxMessage | undefined): m is WxMessage =>
-    Boolean(m) && !m!.isSelf && m!.kind !== 'system' && m!.kind !== 'revoke'
-
-  function toEvent(session: WxSession, last: WxMessage, owner: string, nickname: string | undefined): MessageEvent {
-    return {
-      id: `${owner}:${session.id}:${last.id}:${last.seq}`,
-      source: {
-        channel: 'wechat-ui',
-        chatId: session.id,
-        peerId: last.senderId,
-        chatType: session.kind === 'group' ? 'group' : 'dm',
-        displayName: session.title,
-      },
-      kind: ['image', 'voice', 'file', 'video', 'sticker'].includes(last.kind)
-        ? (last.kind as MessageEvent['kind'])
-        : 'text',
-      text: last.media?.transcript || last.text || `[${last.kind}]`,
-      timestamp: last.createdAt,
-      addressed: session.kind === 'dm' || Boolean(nickname && last.text.includes(`@${nickname}`)),
-      replyTo: last.quote ? { messageId: '', text: last.quote.text, authorName: last.quote.senderName } : undefined,
-      raw: { isSelf: false, accountId: owner, localMessageId: last.id, senderName: last.senderName },
-    }
-  }
+  const replyable = isReplyableMessage
+  const toEvent = messageEventFromWx
 
   const cancel = (id: string, reason: string) => {
     clearTimeout(timers.get(id))
@@ -106,16 +115,17 @@ export function createAutoReplyMonitor(deps: AutoReplyMonitorDeps) {
     try {
       const status = deps.substrate.status()
       const nextAccount = status.account?.wxid
+      // A reconnect temporarily loses identity; only a known different owner is an account switch.
+      if (status.connection !== 'ready' || !nextAccount) {
+        reset(t('main.autoReply.notConnected'))
+        return
+      }
       if (account && account !== nextAccount) {
         reset(t('main.autoReply.accountSwitched'))
         suppressCatchUp = true
         deps.accountChanged()
       }
       account = nextAccount
-      if (status.connection !== 'ready' || !account) {
-        reset(t('main.autoReply.notConnected'))
-        return
-      }
       const epoch = generation
       const owner = account
       const rules = deps.rules().filter((r) => r.enabled && !r.pausedReason && (!r.accountId || r.accountId === owner))

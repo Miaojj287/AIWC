@@ -10,8 +10,11 @@ import {
   DEFAULT_HISTORY_COUNT,
   DEFAULT_SEND_MODE,
   HISTORY_COUNT_OPTIONS,
+  JEV_MAX_CANDIDATES,
+  JEV_MAX_CANDIDATE_CHARS,
   MAX_HISTORY_COUNT,
   MIN_HISTORY_COUNT,
+  normaliseJevRuleConfig,
   type AutoReplyRule,
   type ReplySendMode,
   type ReplySource,
@@ -30,9 +33,11 @@ export const RULE_VARIABLE_LABELS: Record<(typeof RULE_VARIABLES)[number], Messa
 }
 /* eslint-enable aiwc/no-hardcoded-cjk */
 
+/** 回复方式: 固定文案 / AI 生成 / Jev（beta）— Jev only chooses between the candidates the user wrote. */
 export const SOURCE_OPTIONS: ReadonlyArray<{ value: ReplySource; labelKey: MessageKey }> = [
   { value: 'fixed', labelKey: 'autoreply.source.fixed' },
   { value: 'ai', labelKey: 'autoreply.source.ai' },
+  { value: 'jev', labelKey: 'autoreply.source.jev' },
 ]
 
 export const SEND_MODE_OPTIONS: ReadonlyArray<{
@@ -63,6 +68,8 @@ export function newRule(sessionId: string): AutoReplyRule {
 export interface RuleErrors {
   fixedText?: string
   historyCount?: string
+  /** source 'jev': candidates missing, too many, or one over the length limit. */
+  candidates?: string
 }
 
 /** `translate` defaults to the current language; the editor passes its `useT()` so messages follow a language switch. */
@@ -70,13 +77,22 @@ export function validateRule(rule: AutoReplyRule, translate: Translator = t): Ru
   const errors: RuleErrors = {}
   if (rule.source === 'fixed' && !(rule.fixedText ?? '').trim())
     errors.fixedText = translate('autoreply.validation.fixedTextEmpty')
-  if (rule.source === 'ai') {
+  if (rule.source === 'ai' || rule.source === 'jev') {
     const n = Number(rule.historyCount)
     if (!Number.isInteger(n) || n < MIN_HISTORY_COUNT || n > MAX_HISTORY_COUNT)
       errors.historyCount = translate('autoreply.validation.historyCountRange', {
         min: MIN_HISTORY_COUNT,
         max: MAX_HISTORY_COUNT,
       })
+  }
+  if (rule.source === 'jev') {
+    const candidates = (rule.jev?.candidates ?? []).map((c) => c.trim())
+    const filled = candidates.filter(Boolean)
+    if (filled.length === 0) errors.candidates = translate('autoreply.jev.validation.noCandidates')
+    else if (candidates.length > JEV_MAX_CANDIDATES)
+      errors.candidates = translate('autoreply.jev.validation.tooMany', { max: JEV_MAX_CANDIDATES })
+    else if (filled.some((c) => c.length > JEV_MAX_CANDIDATE_CHARS))
+      errors.candidates = translate('autoreply.jev.validation.tooLong', { max: JEV_MAX_CANDIDATE_CHARS })
   }
   return errors
 }
@@ -93,6 +109,7 @@ export function rulesEqual(a: AutoReplyRule, b: AutoReplyRule): boolean {
     prompt: r.prompt ?? '',
     historyCount: r.historyCount ?? DEFAULT_HISTORY_COUNT,
     sendMode: r.sendMode ?? 'auto',
+    jev: r.source === 'jev' ? normaliseJevRuleConfig(r.jev) : undefined,
   })
   return JSON.stringify(pick(a)) === JSON.stringify(pick(b))
 }
@@ -125,7 +142,8 @@ export function ruleStatusLine(rule: AutoReplyRule | undefined): RuleStatusLine 
     rule.sendMode === 'confirm' ? t('autoreply.status.confirmFirst') : t('autoreply.status.autoSend'),
     sourceLabel(rule.source),
   ]
-  if (rule.source === 'ai')
+  if (rule.source === 'jev') parts.push(t('autoreply.jev.status.candidates', { n: rule.jev?.candidates.length ?? 0 }))
+  if (rule.source === 'ai' || rule.source === 'jev')
     parts.push(t('autoreply.rule.historyCount', { n: rule.historyCount ?? DEFAULT_HISTORY_COUNT }))
   if (rule.todayCount) parts.push(t('autoreply.status.todayCount', { n: rule.todayCount }))
   return { kind: 'on', text: parts.join(' · ') }

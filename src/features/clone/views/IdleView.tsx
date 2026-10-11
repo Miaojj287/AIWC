@@ -1,12 +1,12 @@
 /**
- * 未克隆 confirm page (Figma 144:415, board 153:415 ②): avatar 64, title, description, stat pills,
- * privacy bar, 训练范围 / 使用模型 selects, primary 开始克隆 (+ 先看看样本对话). <300 messages → warning.
+ * 未克隆 confirm page (Figma 144:415, board 153:415 ②): avatar 64, title, description, message / span pills,
+ * 训练范围 / 使用模型 selects, primary 开始克隆 (+ 先看看样本对话). <300 messages → warning.
  */
-import { Bot, Calendar, CircleAlert, Image, MessageSquare, Mic } from 'lucide-react'
+import { Bot, Calendar, MessageSquare } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import type { ModelSelection } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Avatar, Badge, Button, ICON_STROKE, InlineHint, Select, type SelectOption } from '@/kit'
+import { Avatar, Badge, Button, Card, ICON_STROKE, InlineHint, Select, SettingRow, type SelectOption } from '@/kit'
 import { runCommand } from '@/app/commands'
 import { formatNumber } from '@/platform/format'
 import { useInvoke } from '@/platform/hooks'
@@ -53,8 +53,6 @@ export function IdleView({
   const overview = readStatsOverview(stats.data)
   const total =
     overview && overview.total > 0 ? overview.total : messageCount && messageCount > 0 ? messageCount : undefined
-  const voice = overview && overview.voiceCount > 0 ? overview.voiceCount : undefined
-  const images = overview && overview.imageCount > 0 ? overview.imageCount : undefined
   const firstAt = overview && overview.firstAt > 0 ? overview.firstAt : undefined
   const few = total !== undefined && total < MIN_RECOMMENDED_MESSAGES
 
@@ -72,11 +70,11 @@ export function IdleView({
     : undefined
 
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-8 py-10">
-      <div className="flex w-full max-w-[560px] flex-col items-center gap-4 text-center">
+    <div className="h-full min-h-0 overflow-y-auto px-6 py-8">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col items-center gap-5 text-center">
         <Avatar id={contactId} name={name} src={avatarPath} size={64} className="ring-4 ring-clone/25" />
         <div className="flex flex-col gap-2">
-          <h1 className="text-title font-medium leading-7 text-fg">{t('clone.idle.title', { name })}</h1>
+          <h1 className="text-title font-semibold leading-7 text-fg">{t('clone.idle.title', { name })}</h1>
           <p className="text-body leading-5 text-fg-2">{t('clone.idle.description')}</p>
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2">
@@ -90,24 +88,9 @@ export function IdleView({
           {spanLabel ? (
             <Stat icon={<Calendar size={12} strokeWidth={ICON_STROKE} aria-hidden />}>{spanLabel}</Stat>
           ) : null}
-          {voice !== undefined ? (
-            <Stat icon={<Mic size={12} strokeWidth={ICON_STROKE} aria-hidden />}>
-              {t('clone.idle.voice', { n: voice, count: formatNumber(voice) })}
-            </Stat>
-          ) : null}
-          {images !== undefined ? (
-            <Stat icon={<Image size={12} strokeWidth={ICON_STROKE} aria-hidden />}>
-              {t('clone.idle.images', { n: images, count: formatNumber(images) })}
-            </Stat>
-          ) : null}
         </div>
-        <div className="flex w-full items-start gap-2 rounded-item border border-accent/30 bg-accent/8 px-3 py-2.5 text-left text-caption leading-[18px] text-accent">
-          <CircleAlert size={13} strokeWidth={ICON_STROKE} aria-hidden className="mt-0.5 shrink-0" />
-          <span>{t('clone.idle.privacy')}</span>
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-          <label className="flex items-center gap-2 text-caption text-fg-2">
-            {t('clone.idle.range')}
+        <Card variant="rows" className="w-full text-left">
+          <SettingRow title={t('clone.idle.range')}>
             <Select<TrainingRange>
               aria-label={t('clone.idle.range')}
               options={RANGE_OPTIONS.map((o) => ({ value: o.value, label: t(o.label), description: t(o.description) }))}
@@ -115,9 +98,8 @@ export function IdleView({
               onValueChange={(range) => onParamsChange({ ...params, range })}
               className="min-w-[150px]"
             />
-          </label>
-          <label className="flex items-center gap-2 text-caption text-fg-2">
-            {t('clone.idle.model')}
+          </SettingRow>
+          <SettingRow title={t('clone.idle.model')}>
             <Select
               aria-label={t('clone.idle.model')}
               options={modelOptions}
@@ -136,8 +118,8 @@ export function IdleView({
               }}
               className="min-w-[140px]"
             />
-          </label>
-        </div>
+          </SettingRow>
+        </Card>
         {few ? (
           <InlineHint kind="warning">
             {t('clone.idle.fewMessages', {
@@ -147,16 +129,20 @@ export function IdleView({
             })}
           </InlineHint>
         ) : null}
+        {/* Both hints describe the page as it opens; neither answers an input, so neither interrupts as an alert. */}
         {models.data && models.data.length === 0 ? (
-          <InlineHint kind="error">{t('clone.idle.noModels')}</InlineHint>
+          <InlineHint kind="error" live={false}>
+            {t('clone.idle.noModels')}
+          </InlineHint>
         ) : null}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             variant="primary"
             icon={Bot}
             onClick={onStart}
             loading={starting}
             disabled={models.data !== undefined && models.data.length === 0}
+            disabledReason={t('clone.idle.noModels')}
           >
             {few ? t('clone.idle.cloneAnyway') : t('clone.actions.start')}
           </Button>
@@ -164,7 +150,6 @@ export function IdleView({
             {t('clone.idle.previewSamples')}
           </Button>
         </div>
-        <p className="text-micro text-fg-3">{t('clone.idle.estimate')}</p>
       </div>
       <SampleDialog
         open={samplesOpen}

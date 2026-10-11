@@ -123,7 +123,7 @@ describe('menu specs', () => {
     const byId = (id: string) => spec.find((it) => 'id' in it && it.id === id)
     expect(byId('close')).toMatchObject({ shortcut: '⌘W', disabled: false })
     expect(byId('closeRight')).toMatchObject({ disabled: true })
-    expect(byId('reopen')).toMatchObject({ disabled: true, shortcut: '⌘⇧T' })
+    expect(byId('reopen')).toMatchObject({ disabled: true, shortcut: '⇧⌘T' })
     expect(labels(tabMenuSpec({ ...tab, pinned: true }, ctx))).toContain('取消固定')
     expect(tabMenuSpec({ ...tab, pinned: true }, ctx)[0]).toMatchObject({ disabled: true })
     expect(spec.some((it) => 'danger' in it && it.danger)).toBe(false)

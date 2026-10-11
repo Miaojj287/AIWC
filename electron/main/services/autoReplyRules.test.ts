@@ -13,6 +13,43 @@ const rule = (sessionId: string, extra: Partial<AutoReplyRule> = {}): AutoReplyR
   ...extra,
 })
 
+describe('auto-reply rule helpers (Jev)', () => {
+  it('keeps the jev source, trims its candidates and drops empty ones', () => {
+    const out = normaliseRule(
+      rule('s1', { source: 'jev', jev: { candidates: [' 好的 ', '', 'x'], allowSilence: false, minConfidence: 0.7 } }),
+    )
+    expect(out.source).toBe('jev')
+    expect(out.jev).toEqual({
+      candidates: ['好的', 'x'],
+      instructions: undefined,
+      allowSilence: false,
+      minConfidence: 0.7,
+    })
+    expect(
+      normaliseRule(rule('s1', { source: 'ai', jev: { candidates: ['x'], allowSilence: true, minConfidence: 0.6 } }))
+        .jev,
+    ).toBeUndefined()
+  })
+
+  it('a jev rule needs at least one candidate and a sane history depth', () => {
+    expect(
+      validateRule(rule('s1', { source: 'jev', jev: { candidates: ['  '], allowSilence: true, minConfidence: 0.6 } })),
+    ).toMatch(/候选/)
+    expect(
+      validateRule(
+        rule('s1', {
+          source: 'jev',
+          historyCount: 0,
+          jev: { candidates: ['x'], allowSilence: true, minConfidence: 0.6 },
+        }),
+      ),
+    ).toMatch(/1 到 500/)
+    expect(
+      validateRule(rule('s1', { source: 'jev', jev: { candidates: ['x'], allowSilence: true, minConfidence: 0.6 } })),
+    ).toBeUndefined()
+  })
+})
+
 describe('auto-reply rule helpers', () => {
   it('assigns ids, trims text and stamps timestamps without mutating the input', () => {
     const input = rule('s1', { fixedText: '  ', prompt: '  你是我本人  ' })

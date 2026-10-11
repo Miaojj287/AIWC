@@ -1,8 +1,10 @@
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from 'lucide-react'
 import type { HTMLAttributes } from 'react'
 import { useT } from '@/i18n'
+import { Button } from '../Button'
 import { cn } from '../cn'
 import { ICON_SIZE, ICON_STROKE } from '../icon'
+import { IconButton } from '../IconButton'
 import { Spinner } from '../Spinner'
 import type { ToastItem, ToastKind } from './toastStore'
 
@@ -29,7 +31,7 @@ export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewPro
     <div
       role={toast.kind === 'error' || toast.kind === 'warning' ? 'alert' : 'status'}
       className={cn(
-        'kit-toast pointer-events-auto flex min-w-[200px] max-w-[420px] items-center gap-2 rounded-item border border-line-10 bg-raised py-2 pl-2.5 pr-3 text-tab text-fg shadow-toast',
+        'kit-toast pointer-events-auto flex min-w-[200px] max-w-[min(420px,calc(100vw-32px))] items-start gap-2 rounded-item border border-line-10 bg-overlay py-3 pl-3 pr-3 text-tab text-fg shadow-toast',
         className,
       )}
       {...rest}
@@ -45,27 +47,27 @@ export function ToastView({ toast, onDismiss, className, ...rest }: ToastViewPro
         <Spinner size={13} />
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate leading-4">{toast.text}</span>
-        {toast.detail ? <span className="truncate text-micro leading-4 text-fg-3">{toast.detail}</span> : null}
+        <span className="break-words leading-4.5">{toast.text}</span>
+        {toast.detail ? (
+          <span className="mt-1 break-words text-caption leading-4.5 text-fg-2">{toast.detail}</span>
+        ) : null}
       </div>
       {toast.action ? (
-        <button
-          type="button"
-          onClick={toast.action.onClick}
-          className="max-w-[120px] shrink-0 truncate rounded-sm px-0.5 text-tab text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/70"
-        >
-          {toast.action.label}
-        </button>
+        <Button variant="link" size="sm" onClick={toast.action.onClick} className="-my-1 max-w-[140px] shrink-0 px-1.5">
+          <span className="min-w-0 truncate" title={toast.action.label}>
+            {toast.action.label}
+          </span>
+        </Button>
       ) : null}
       {onDismiss ? (
-        <button
-          type="button"
-          aria-label={t('kit.close')}
+        <IconButton
+          size="sm"
+          icon={X}
+          iconSize={11}
+          label={t('kit.close')}
           onClick={onDismiss}
-          className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-fg-3 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
-        >
-          <X size={11} strokeWidth={ICON_STROKE} aria-hidden />
-        </button>
+          className="-my-0.5 ml-0.5 text-fg-3"
+        />
       ) : null}
     </div>
   )

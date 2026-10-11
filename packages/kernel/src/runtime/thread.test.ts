@@ -138,6 +138,54 @@ describe('Thread — permission mode & allow-list reach the router', () => {
     })
     expect(events.types().filter((t) => t === 'approval.requested').length).toBe(asksBefore)
   })
+
+  it('the phone thread ignores desktop global grants and keeps a global 总是允许 on itself', async () => {
+    const model = createMockModelClient([
+      { toolCalls: [{ name: 'note_write', input: { text: 'a' } }] },
+      { text: '记下了' },
+    ])
+    const writeTool: AnyTool = defineTool({
+      name: 'note_write',
+      description: 'write',
+      inputSchema: z.object({ text: z.string() }),
+      profiles: ['desktop-chat'],
+      risk: 'write',
+      parallelSafe: false,
+      execute: async () => ({ content: 'written' }),
+    })
+    const services = servicesWithRealRouter(model, [writeTool])
+    const emitter = createEmitter()
+    const config = defaultTestConfig({ allowAlways: ['note_write'] })
+    const origin: ThreadOrigin = { channel: 'wechat-remote', chatId: 'owner', peerId: 'owner' }
+    const settings = testSettings({ permissionMode: 'ask' })
+    const threadId = testThreadId()
+    await services.rollout.create({ threadId, origin, settings })
+    const globalGrants: string[] = []
+    const thread = new Thread(
+      {
+        services,
+        config: () => config,
+        systemPrompt: { stable: '你是 AIWC。' },
+        emit: emitter.emit,
+        onGlobalGrant: (key) => globalGrants.push(key),
+      },
+      { threadId, origin, settings },
+    )
+    const requested = waitForEvent(emitter.on, 'approval.requested')
+    const handle = await thread.startTurn(userInput('记一下'), 'start')
+    // the desktop's global grant does not cover the phone thread: it still asks
+    const req = await requested
+    await thread.submit({
+      type: 'approval.resolve',
+      threadId,
+      approvalId: req.approvalId,
+      decision: 'allow_always',
+      scope: 'global',
+    })
+    expect(await handle.promise).toMatchObject({ status: 'completed' })
+    expect(globalGrants).toEqual([])
+    expect(thread.settings.allowAlways).toEqual(['note_write'])
+  })
 })
 
 describe('Thread — tool output cap', () => {

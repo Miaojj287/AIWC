@@ -28,6 +28,7 @@ export interface SubstrateState {
 }
 
 export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & { state: SubstrateState } {
+  let acquireRun: AbortController | undefined
   const { data } = ctx
   const state: SubstrateState = {
     hidden: new Set(),
@@ -93,7 +94,8 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
     const end = Math.min(text.length, idx + needle.length + 24)
     let window = text.slice(start, end)
     const re = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
-    window = window.replace(re, (m) => `<b>${m}</b>`)
+    // Same markers as the real mirror (FTS5 snippet with '[' ']'), so the search tab renders mock hits the same way.
+    window = window.replace(re, (m) => `[${m}]`)
     return `${start > 0 ? '…' : ''}${window}${end < text.length ? '…' : ''}`
   }
 
@@ -245,19 +247,40 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
       await ctx.delay(500)
       return wxid === data.account.wxid ? { ok: true } : { ok: false, error: '该账号与所选数据库目录不匹配' }
     },
-    'substrate:acquireKeys': async () => {
-      const steps: KeyAcquireStep[] = [
-        { id: 'db_key', label: '数据库密钥', status: 'todo' },
-        { id: 'image_xor', label: '图片 XOR 密钥', status: 'todo' },
-        { id: 'image_aes', label: '图片 AES 密钥', status: 'todo' },
-        { id: 'verify', label: '验证账号', status: 'todo' },
-      ]
-      for (const step of steps) {
-        await ctx.delay(450)
-        step.status = 'done'
-        step.detail = step.id === 'verify' ? '目录与密钥匹配' : '演示环境：已生成占位密钥'
+    'substrate:acquireKeys': async ({ scope }) => {
+      const controller = new AbortController()
+      acquireRun?.abort()
+      acquireRun = controller
+      const ids: KeyAcquireStep['id'][] =
+        scope === 'image' ? ['image_xor', 'image_aes'] : ['db_key', 'image_xor', 'image_aes', 'verify']
+      const steps: KeyAcquireStep[] = ids.map((id) => ({ id, label: '', status: 'todo' }))
+      const PHASES: Record<KeyAcquireStep['id'], KeyAcquireStep['phase'][]> = {
+        db_key: ['reading_memory', 'reading_dumps'],
+        image_xor: ['deriving_image_key'],
+        image_aes: ['scanning_image_key'],
+        verify: ['verifying'],
+      }
+      try {
+        for (const step of steps) {
+          for (const phase of PHASES[step.id]) {
+            Object.assign(step, { status: 'doing', phase })
+            ctx.emit('substrate:keyStep', { ...step })
+            await ctx.delay(700, controller.signal)
+          }
+          Object.assign(step, { status: 'done', phase: undefined, detail: '演示环境：已生成占位密钥' })
+          ctx.emit('substrate:keyStep', { ...step })
+        }
+      } catch {
+        // Cancelled: close every open step the way the real run does.
+        for (const step of steps)
+          if (step.status !== 'done') Object.assign(step, { status: 'failed', phase: undefined, failure: 'cancelled' })
+      } finally {
+        if (acquireRun === controller) acquireRun = undefined
       }
       return steps
+    },
+    'substrate:cancelAcquireKeys': () => {
+      acquireRun?.abort()
     },
     'substrate:setManualKey': ({ kind, hex }) => validateHex(kind, hex),
     'substrate:testConnection': async () => {

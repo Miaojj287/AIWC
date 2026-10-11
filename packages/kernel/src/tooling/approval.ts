@@ -3,6 +3,7 @@
  * pending-ask registry the Op handler resolves.
  */
 import {
+  APPROVAL_REASON_MAX_CHARS,
   normalizePermissionMode,
   type ApprovalDecision,
   type ApprovalId,
@@ -11,7 +12,7 @@ import {
   type ThreadId,
   type ToolRisk,
 } from '@aiwc/protocol'
-import type { ApprovalGate, ApprovalRequest, ApprovalVerdict } from '../ports'
+import type { ApprovalAnswer, ApprovalGate, ApprovalRequest, ApprovalVerdict } from '../ports'
 import { SEND_TO_ORIGIN_TOOLS } from './registry'
 
 /** 'allow_list' = approved when the tool is in the thread's allow-always list, otherwise ask. */
@@ -111,42 +112,62 @@ export function decideApproval(input: {
 
 interface Pending {
   threadId: ThreadId
-  settle: (decision: ApprovalDecision) => void
+  settle: (answer: ApprovalAnswer) => void
+}
+
+const DENY: ApprovalAnswer = { decision: 'deny' }
+
+/** Keep only what belongs to the decision: a note only on a denial, a scope only on 总是允许. */
+function answerOf(decision: ApprovalDecision, extra?: Pick<ApprovalAnswer, 'reason' | 'scope'>): ApprovalAnswer {
+  const reason = decision === 'deny' ? extra?.reason?.trim().slice(0, APPROVAL_REASON_MAX_CHARS) : undefined
+  const scope = decision === 'allow_always' && extra?.scope === 'global' ? 'global' : undefined
+  return { decision, ...(reason ? { reason } : {}), ...(scope ? { scope } : {}) }
 }
 
 export function createApprovalGate(): ApprovalGate {
   const pending = new Map<ApprovalId, Pending>()
+  /** child thread → the thread whose user answers for it (workflow steps). */
+  const aliases = new Map<ThreadId, ThreadId>()
+  const answersFor = (entryThread: ThreadId, threadId: ThreadId): boolean =>
+    entryThread === threadId || aliases.get(entryThread) === threadId
 
   return {
     decide: decideApproval,
 
-    ask(req: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision> {
-      if (signal.aborted) return Promise.resolve('deny')
-      return new Promise<ApprovalDecision>((resolve) => {
-        const onAbort = (): void => settle('deny')
-        const settle = (decision: ApprovalDecision): void => {
+    ask(req: ApprovalRequest, signal: AbortSignal): Promise<ApprovalAnswer> {
+      if (signal.aborted) return Promise.resolve(DENY)
+      return new Promise<ApprovalAnswer>((resolve) => {
+        const onAbort = (): void => settle(DENY)
+        const settle = (answer: ApprovalAnswer): void => {
           if (!pending.has(req.approvalId)) return
           pending.delete(req.approvalId)
           signal.removeEventListener('abort', onAbort)
-          resolve(decision)
+          resolve(answer)
         }
         pending.set(req.approvalId, { threadId: req.threadId, settle })
         signal.addEventListener('abort', onAbort, { once: true })
       })
     },
 
-    resolve(approvalId, decision, threadId) {
+    resolve(approvalId, decision, threadId, extra) {
       const entry = pending.get(approvalId)
       if (!entry) return false
       // A thread may only answer its own asks; a mismatched threadId leaves the request pending.
-      if (threadId !== undefined && entry.threadId !== threadId) return false
-      entry.settle(decision)
+      if (threadId !== undefined && !answersFor(entry.threadId, threadId)) return false
+      entry.settle(answerOf(decision, extra))
       return true
     },
 
     cancelAll(threadId) {
       for (const [, entry] of [...pending]) {
-        if (entry.threadId === threadId) entry.settle('deny')
+        if (answersFor(entry.threadId, threadId)) entry.settle(DENY)
+      }
+    },
+
+    alias(childId, parentId) {
+      aliases.set(childId, parentId)
+      return () => {
+        if (aliases.get(childId) === parentId) aliases.delete(childId)
       }
     },
   }

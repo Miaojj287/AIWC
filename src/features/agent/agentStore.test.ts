@@ -19,6 +19,7 @@ import { useTabsStore } from '@/workspace/tabsStore'
 import { clearToasts, getToasts } from '@/kit'
 import { __resetAgentStoreForTests, subscribeAgentEvents, useAgentStore } from './agentStore'
 import { SCRATCH_DRAFT_KEY } from './model'
+import { __resetQueueForTests, useQueueStore } from './queuedInputs'
 
 interface FakeBridge extends AiwcBridge {
   ops: Op[]
@@ -71,8 +72,6 @@ function fakeBridge(threads: ThreadSummary[] = [], history: Record<string, Histo
           ]
         case 'agent:listSkills':
           return [{ name: 'weekly', description: '周报', command: '/周报', source: 'builtin' }]
-        case 'agent:suggestPrompts':
-          return ['建议一', '建议二', '建议三']
         case 'agent:renameThread':
         case 'agent:pinThread':
         case 'agent:deleteThread':
@@ -143,13 +142,6 @@ describe('agentStore.hydrate', () => {
     expect(store().views.thr_1?.items[0]).toEqual(expect.objectContaining({ kind: 'user' }))
     expect(store().models).toHaveLength(1)
     expect(store().skills[0]?.command).toBe('/周报')
-  })
-
-  it('loads suggestions for an empty thread', async () => {
-    __setBridgeForTests(fakeBridge([t1]))
-    await store().hydrate()
-    await flush()
-    expect(store().views.thr_1?.suggestions).toEqual(['建议一', '建议二', '建议三'])
   })
 })
 
@@ -272,6 +264,60 @@ describe('agentStore threads & ops', () => {
     store().setCollapsed(false)
     expect(useShellStore.getState().agentUnread).toBe(false)
     expect(store().views.thr_1?.isStreaming).toBe(false)
+  })
+
+  it('opens only the last generated file of a turn, once it finishes, in the thread on screen', async () => {
+    const bridge = fakeBridge([t1])
+    __setBridgeForTests(bridge)
+    subscribeAgentEvents()
+    await store().hydrate()
+    await flush()
+    const opened: string[] = []
+    const dispose = onCommand('tab.openFile', ({ path }) => {
+      opened.push(path)
+    })
+    try {
+      const threadId = t1.threadId
+      const turnId = 'trn_files' as TurnId
+      const file = (n: number, turn: TurnId = turnId): Event => ({
+        type: 'tool.call',
+        threadId,
+        turnId: turn,
+        stepId: 'stp_1' as never,
+        callId: `cal_${n}` as never,
+        toolName: 'shell',
+        summary: '$ python report.py',
+        input: {},
+        status: 'done',
+        risk: 'write',
+        startedAt: 1,
+        durationMs: 5,
+        artifacts: [{ kind: 'file', title: `周报${n}.md`, path: `/ws/周报${n}.md` }],
+      })
+      const completed = (turn: TurnId = turnId): Event => ({
+        type: 'turn.completed',
+        threadId,
+        turnId: turn,
+        finalText: '好了',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        steps: 2,
+        at: 9,
+      })
+      bridge.emit({ type: 'turn.started', threadId, turnId, at: 1 })
+      bridge.emit(file(1))
+      bridge.emit(file(2))
+      expect(opened).toEqual([])
+      expect(store().views.thr_1?.items.filter((it) => it.kind === 'artifact')).toHaveLength(2)
+      bridge.emit(completed())
+      expect(opened).toEqual(['/ws/周报2.md'])
+      // a turn finishing while the panel is collapsed only leaves its cards
+      store().setCollapsed(true)
+      bridge.emit(file(3, 'trn_bg' as TurnId))
+      bridge.emit(completed('trn_bg' as TurnId))
+      expect(opened).toEqual(['/ws/周报2.md'])
+    } finally {
+      dispose()
+    }
   })
 
   it('resolves approvals optimistically and submits the op', async () => {
@@ -501,6 +547,167 @@ describe('agent panel recovery', () => {
     fail(new Error('连接断开'))
     await pending
     expect(store().drafts[t1.threadId]?.text).toBe('第一条\n\n接着输入的补充')
+    // the copy shown while it was on its way goes away with the failure
+    expect(store().views[t1.threadId]?.pendingInputs).toBeUndefined()
+  })
+
+  it('shows a message sent mid-turn at once and swaps it for the recorded one by its id', async () => {
+    const bridge = fakeBridge([t1])
+    __setBridgeForTests(bridge)
+    await store().hydrate()
+    await flush()
+    subscribeAgentEvents()
+    await flush()
+    const turnId = 'trn_live' as TurnId
+    bridge.emit({ type: 'turn.started', threadId: t1.threadId, turnId, at: 5 })
+    store().setDraft(t1.threadId, { text: '顺便列出谁@了我' })
+    await store().send(t1.threadId)
+    const op = bridge.ops.find((o) => o.type === 'turn.start')
+    if (op?.type !== 'turn.start') throw new Error('no turn.start')
+    expect(op.mode).toBe('steer')
+    expect(op.clientInputId).toMatch(/^cin_/)
+    expect(store().views[t1.threadId]?.pendingInputs).toEqual([
+      expect.objectContaining({ clientInputId: op.clientInputId, mode: 'steer' }),
+    ])
+    bridge.emit({
+      type: 'item.user',
+      threadId: t1.threadId,
+      turnId,
+      itemId: 'itm_steer' as never,
+      content: op.input.content,
+      mentions: [],
+      clientInputId: op.clientInputId,
+    })
+    expect(store().views[t1.threadId]?.pendingInputs).toBeUndefined()
+    expect(store().views[t1.threadId]?.items.at(-1)).toMatchObject({ kind: 'user', id: 'itm_steer' })
+  })
+
+  it('puts a prompt the turn never recorded back into the composer, and 重试 sends it', async () => {
+    const bridge = fakeBridge([t1])
+    __setBridgeForTests(bridge)
+    await store().hydrate()
+    await flush()
+    subscribeAgentEvents()
+    await flush()
+    store().setDraft(t1.threadId, { text: '被拦下的问题' })
+    await store().send(t1.threadId)
+    const op = bridge.ops.find((o) => o.type === 'turn.start')
+    if (op?.type !== 'turn.start') throw new Error('no turn.start')
+    const turnId = 'trn_blocked' as TurnId
+    bridge.emit({ type: 'turn.started', threadId: t1.threadId, turnId, at: 5 })
+    store().setDraft(t1.threadId, { text: '又打了几个字' })
+    bridge.emit({
+      type: 'error',
+      threadId: t1.threadId,
+      turnId,
+      error: { code: 'hook_blocked', message: 'no', retryable: false },
+      actions: [{ action: 'retry', label: '重试' }],
+    })
+    bridge.emit({
+      type: 'turn.aborted',
+      threadId: t1.threadId,
+      turnId,
+      reason: 'error',
+      droppedClientInputIds: [op.clientInputId!],
+    })
+    const view = store().views[t1.threadId]
+    expect(view?.pendingInputs).toBeUndefined()
+    expect(store().drafts[t1.threadId]?.text).toBe('被拦下的问题\n\n又打了几个字')
+    expect(view?.items.find((it) => it.kind === 'error')).toMatchObject({ inputRestored: true })
+  })
+
+  it('a host note completing does not release a queued message; the user turn completing does', async () => {
+    __resetQueueForTests()
+    const bridge = fakeBridge([t1])
+    __setBridgeForTests(bridge)
+    await store().hydrate()
+    await flush()
+    subscribeAgentEvents()
+    await flush()
+    useQueueStore.getState().enqueue(t1.threadId, { text: '排队的话', mentions: [] })
+    const completed = (turnId: string, kind?: 'note') =>
+      bridge.emit({
+        type: 'turn.completed',
+        threadId: t1.threadId,
+        turnId: turnId as TurnId,
+        finalText: '',
+        usage: { inputTokens: 0, outputTokens: 0 },
+        steps: 0,
+        at: 1,
+        ...(kind ? { kind } : {}),
+      })
+    completed('trn_note', 'note')
+    await flush()
+    expect(useQueueStore.getState().queues[t1.threadId]).toHaveLength(1)
+    expect(bridge.ops.some((o) => o.type === 'turn.start')).toBe(false)
+    completed('trn_user')
+    await flush()
+    expect(useQueueStore.getState().queues[t1.threadId]).toHaveLength(0)
+    expect(bridge.ops.some((o) => o.type === 'turn.start')).toBe(true)
+  })
+
+  it('shows the approval and question still waiting after a reload, and keeps live questions while loading', async () => {
+    const bridge = fakeBridge([t1])
+    const turnId = 'trn_wait' as TurnId
+    __setBridgeForTests({
+      ...bridge,
+      invoke: (async (channel, req) => {
+        const res = await bridge.invoke(channel, req as never)
+        if (channel !== 'agent:getThread') return res
+        return {
+          ...(res as object),
+          running: true,
+          pendingAsks: [
+            {
+              type: 'approval.requested',
+              threadId: t1.threadId,
+              turnId,
+              approvalId: 'apr_9',
+              callId: 'cal_9',
+              toolName: 'write_file',
+              summary: '写文件',
+              input: {},
+              risk: 'write',
+              canAllowAlways: true,
+            },
+            {
+              type: 'question.requested',
+              threadId: t1.threadId,
+              turnId,
+              questionId: 'q_9',
+              callId: 'cal_q',
+              question: '哪一个？',
+              options: [],
+              allowOther: true,
+            },
+          ],
+        }
+      }) as AiwcBridge['invoke'],
+    })
+    await store().hydrate()
+    await flush()
+    const view = store().views[t1.threadId]
+    expect(view?.isStreaming).toBe(true)
+    expect(view?.pendingApprovals.map((a) => a.approvalId)).toEqual(['apr_9'])
+    expect(view?.pendingQuestions?.map((q) => q.questionId)).toEqual(['q_9'])
+    // a reload of the same thread does not show the cards twice
+    await store().loadThread(t1.threadId)
+    expect(store().views[t1.threadId]?.pendingApprovals).toHaveLength(1)
+    expect(store().views[t1.threadId]?.pendingQuestions).toHaveLength(1)
+  })
+
+  it('resumes the working state of a thread whose turn is still running after a reload', async () => {
+    const bridge = fakeBridge([t1])
+    __setBridgeForTests({
+      ...bridge,
+      invoke: (async (channel, req) => {
+        const res = await bridge.invoke(channel, req as never)
+        return channel === 'agent:getThread' ? { ...(res as object), running: true } : res
+      }) as AiwcBridge['invoke'],
+    })
+    await store().hydrate()
+    await flush()
+    expect(store().views[t1.threadId]?.isStreaming).toBe(true)
   })
 })
 
@@ -511,12 +718,22 @@ describe('commands', () => {
     await store().quote({ kind: 'session', id: 's1', label: '产品市场群', messageIds: ['m1', 'm2'] })
     const id = store().activeThreadId
     expect(id).not.toBeNull()
-    expect(store().drafts[id!]?.mentions).toEqual([{ kind: 'session', id: 's1', label: '产品市场群 · 2 条' }])
+    // the picked ids travel with the chip so the host can give the model those messages' text
+    expect(store().drafts[id!]?.mentions).toEqual([
+      { kind: 'session', id: 's1', label: '产品市场群', messageIds: ['m1', 'm2'] },
+    ])
     expect(store().focusSeq).toBeGreaterThan(0)
-    // a second quote reuses the active thread and de-duplicates
-    await store().quote({ kind: 'session', id: 's1', label: '产品市场群' })
+    // a second quote reuses the active thread and merges into the same chip
+    await store().quote({ kind: 'session', id: 's1', label: '产品市场群', messageIds: ['m2', 'm3'] })
     expect(store().openIds).toHaveLength(1)
-    expect(store().drafts[id!]?.mentions).toHaveLength(1)
+    expect(store().drafts[id!]?.mentions).toEqual([
+      { kind: 'session', id: 's1', label: '产品市场群', messageIds: ['m1', 'm2', 'm3'] },
+    ])
+    // the whole chat is a separate reference from a quote of some of its messages
+    await store().quote({ kind: 'session', id: 's1', label: '产品市场群' })
+    expect(store().drafts[id!]?.mentions).toHaveLength(2)
+    await store().quote({ kind: 'session', id: 's1', label: '产品市场群' })
+    expect(store().drafts[id!]?.mentions).toHaveLength(2)
   })
 
   it('newThread uses the active workspace tab as context', async () => {

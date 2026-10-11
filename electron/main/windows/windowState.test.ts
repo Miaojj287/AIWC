@@ -2,7 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_WINDOW_STATE, debounce, fitToDisplays, loadWindowState, saveWindowState } from './windowState'
+import {
+  debounce,
+  DEFAULT_WINDOW_STATE,
+  fitToDisplays,
+  loadWindowState,
+  minimumSizeFor,
+  saveWindowState,
+} from './windowState'
 
 let dir: string
 beforeEach(() => {
@@ -10,6 +17,13 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+})
+
+describe('minimum window size', () => {
+  it('keeps 1200×720 on a roomy display and shrinks to a small scaled work area', () => {
+    expect(minimumSizeFor({ width: 1920, height: 1040 })).toEqual({ width: 1200, height: 720 })
+    expect(minimumSizeFor({ width: 1093, height: 614 })).toEqual({ width: 1093, height: 614 })
+  })
 })
 
 describe('window state persistence', () => {

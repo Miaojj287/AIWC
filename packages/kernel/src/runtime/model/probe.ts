@@ -1,9 +1,17 @@
 /**
  * Settings-page helpers: connectivity test and remote model listing. No kernel state involved.
  */
-import { modelCapabilities, type ModelEntry, type ModelTestResult, type ProviderConfig } from '@aiwc/protocol'
+import {
+  DEFAULT_CONTEXT_BUDGET,
+  modelCapabilities,
+  ollamaCapabilities,
+  type ModelEntry,
+  type ModelTestResult,
+  type ProviderConfig,
+} from '@aiwc/protocol'
 import { generateText, jsonSchema, tool } from 'ai'
 import { toModelError } from './errors'
+import { showOllamaModels } from './ollamaShow'
 import { createLanguageModel, providerBaseUrl } from './providers'
 
 export interface TestModelInput {
@@ -11,6 +19,8 @@ export interface TestModelInput {
   modelId: string
   apiKey?: string
   signal?: AbortSignal
+  /** Proxy-aware transport (设置 › AI 接入 › 网络). */
+  fetchImpl?: typeof fetch
 }
 
 const PROBE_TOOL = tool({
@@ -28,7 +38,7 @@ export async function testModel(input: TestModelInput): Promise<ModelTestResult>
   const providerOptions = input.provider.kind === 'openai' ? { openai: { store: false } } : undefined
   let model
   try {
-    model = createLanguageModel(input.provider, input.modelId, input.apiKey)
+    model = createLanguageModel(input.provider, input.modelId, input.apiKey, input.fetchImpl)
   } catch (err) {
     return { ok: false, error: toModelError(err) }
   }
@@ -150,6 +160,15 @@ export async function discoverModels(input: ListRemoteModelsInput): Promise<Mode
         ? Date.parse(r.created_at) || 0
         : 0
   rows.sort((a, b) => created(b) - created(a))
+  const ollama =
+    input.provider.kind === 'ollama'
+      ? await showOllamaModels(
+          (providerBaseUrl(input.provider) ?? 'http://127.0.0.1:11434').replace(/\/v1$/, ''),
+          rows.map(rowId).filter((id): id is string => Boolean(id)),
+          input.fetchImpl ?? fetch,
+          input.signal,
+        )
+      : undefined
   for (const row of rows) {
     const modelId = rowId(row)
     if (!modelId) continue
@@ -162,7 +181,10 @@ export async function discoverModels(input: ListRemoteModelsInput): Promise<Mode
     )
       continue
     if (input.provider.kind === 'openai' && !/^(?:gpt-|chatgpt-|o[134](?:-|$)|codex-|ft:)/.test(modelId)) continue
-    const c = modelCapabilities(input.provider, { modelId })
+    // An Ollama too old to report capabilities answers /api/show with neither field: keep the profile guess then.
+    const shown = ollama?.get(modelId)
+    const show = shown && (shown.capabilities.length > 0 || shown.contextLength) ? shown : undefined
+    const c = show ? ollamaCapabilities(modelId, show) : modelCapabilities(input.provider, { modelId })
     const api = input.provider.kind === 'anthropic' ? record(row.capabilities) : {}
     const effort = record(api.effort)
     const thinking = record(api.thinking)
@@ -195,9 +217,9 @@ export async function discoverModels(input: ListRemoteModelsInput): Promise<Mode
     result.set(modelId, {
       modelId,
       label: typeof label === 'string' && label ? label : modelId,
-      contextWindow: Math.min(c.contextLimit ?? 128_000, 128_000),
-      supportsTools: true,
-      supportsVision: record(api.image_input).supported === true,
+      contextWindow: Math.min(c.contextLimit ?? DEFAULT_CONTEXT_BUDGET, DEFAULT_CONTEXT_BUDGET),
+      supportsTools: show ? show.capabilities.includes('tools') : true,
+      supportsVision: record(api.image_input).supported === true || c.vision === true,
       enabled: true,
       source: 'remote',
       available: true,

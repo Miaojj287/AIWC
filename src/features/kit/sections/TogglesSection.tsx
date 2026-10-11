@@ -50,6 +50,9 @@ export function TogglesSection() {
           <State name="带标签">
             <Checkbox defaultChecked label="选项名称" description="一句话说明" />
           </State>
+          <State name="圆形（清单）">
+            <Checkbox aria-label="示例" shape="round" defaultChecked />
+          </State>
         </Row>
       </Item>
       <Item label="单选">

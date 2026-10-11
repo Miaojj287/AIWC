@@ -220,17 +220,18 @@ export function findWindowsImageAesKey(data: Buffer, ciphertext: Buffer): { key:
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type KernelFn = (...args: any[]) => any
 
-interface Kernel32 {
+export interface Kernel32 {
   virtualQueryEx: KernelFn
   readProcessMemory: KernelFn
 }
 
-function loadKernel32(): {
+/** The full set, including the two calls that bracket a scan. Injectable so the scans are testable. */
+export interface Kernel32Api extends Kernel32 {
   openProcess: KernelFn
-  virtualQueryEx: KernelFn
-  readProcessMemory: KernelFn
   closeHandle: KernelFn
-} | null {
+}
+
+function loadKernel32(): Kernel32Api | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let kernel32: any
   try {
@@ -247,6 +248,34 @@ function loadKernel32(): {
       'int ReadProcessMemory(uintptr_t process, uintptr_t address, _Out_ uint8_t *buffer, size_t size, _Out_ size_t *bytesRead)',
     ),
     closeHandle: kernel32.func('int CloseHandle(uintptr_t handle)'),
+  }
+}
+
+/** The Win32 entry points for this platform. `injected` is only ever passed by tests. */
+function kernel32For(injected?: Kernel32Api): Kernel32Api | null {
+  if (injected) return injected
+  return process.platform === 'win32' ? loadKernel32() : null
+}
+
+/**
+ * Open the target process read-only, hand the handle to `use`, and close it exactly once. Every exit
+ * — early return, exception, or falling off the end — leaves through the same `finally`: Windows
+ * recycles handle values, so closing one twice can end up closing an unrelated handle that a worker
+ * thread opened in between.
+ */
+export function withProcessHandle<T>(
+  api: Kernel32Api | null,
+  pid: number,
+  fallback: T,
+  use: (k: Kernel32, handle: bigint) => T,
+): T {
+  if (!api || !Number.isInteger(pid) || pid <= 0) return fallback
+  const handle = BigInt(api.openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
+  if (!handle) return fallback
+  try {
+    return use({ virtualQueryEx: api.virtualQueryEx, readProcessMemory: api.readProcessMemory }, handle)
+  } finally {
+    api.closeHandle(handle)
   }
 }
 
@@ -413,28 +442,23 @@ function scanConfigCipherKey(
  * databases locally. One walk serves the whole account: on Windows each database has its own key, and
  * re-walking the process for every message shard would cost seconds each.
  */
-export function collectWindowsConfigCipherKeys(pid: number, deadline?: number): string[] {
-  if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return []
-  const funcs = loadKernel32()
-  if (!funcs) return []
-  const handle = BigInt(funcs.openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
-  if (!handle) return []
+export function collectWindowsConfigCipherKeys(pid: number, deadline?: number, api?: Kernel32Api): string[] {
   const keys: string[] = []
-  try {
-    walkConfigCipherRuns(
-      { virtualQueryEx: funcs.virtualQueryEx, readProcessMemory: funcs.readProcessMemory },
-      handle,
-      (hex) => {
-        keys.push(hex)
-        return false
-      },
-      deadline,
-    )
-  } catch {
-    // A mapping can change mid-walk; whatever was collected so far is still usable.
-  } finally {
-    funcs.closeHandle(handle)
-  }
+  withProcessHandle(kernel32For(api), pid, undefined, (k, handle) => {
+    try {
+      walkConfigCipherRuns(
+        k,
+        handle,
+        (hex) => {
+          keys.push(hex)
+          return false
+        },
+        deadline,
+      )
+    } catch {
+      // A mapping can change mid-walk; whatever was collected so far is still usable.
+    }
+  })
   return keys
 }
 
@@ -613,10 +637,9 @@ export function scanWindowsImageAesKey(pid: number, ciphertext: Buffer, deadline
           if (current) {
             const searchable = trailing.length ? Buffer.concat([trailing, current]) : current
             const found = findWindowsImageAesKey(searchable, ciphertext)
-            if (found.key) {
-              closeHandle(handle)
-              return found.key
-            }
+            // `finally` closes the handle; closing it here as well can shut a handle that Windows has
+            // already recycled for something else in this process.
+            if (found.key) return found.key
             trailing = Buffer.from(searchable.subarray(Math.max(0, searchable.length - IMAGE_KEY_OVERLAP_SIZE)))
           } else {
             trailing = Buffer.alloc(0)

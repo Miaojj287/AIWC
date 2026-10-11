@@ -1,6 +1,17 @@
 import { Copy, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
-import { Badge, IconButton, Input, SearchBox, SegmentedControl, Select, Textarea, type SelectOption } from '@/kit'
+import type { ReasoningEffort } from '@aiwc/protocol'
+import {
+  Badge,
+  IconButton,
+  Input,
+  ReasoningEffortSelect,
+  SearchBox,
+  SegmentedControl,
+  Select,
+  Textarea,
+  type SelectOption,
+} from '@/kit'
 import { Item, Row, Section, State } from '../gallery'
 
 const SELECT_OPTIONS: SelectOption[] = [
@@ -18,6 +29,7 @@ const THEME_OPTIONS = [
 
 export function InputsSection() {
   const [selectValue, setSelectValue] = useState<string>('a')
+  const [effort, setEffort] = useState<ReasoningEffort | null>(null)
   const [theme, setTheme] = useState<string>('dark')
   const [search, setSearch] = useState('')
   const [text, setText] = useState('')
@@ -125,6 +137,21 @@ export function InputsSection() {
               className="w-[200px]"
               aria-label="占位"
             />
+          </State>
+        </Row>
+      </Item>
+      <Item label="推理强度（输入框工具栏）">
+        <Row align="start">
+          <State name="默认">
+            <ReasoningEffortSelect
+              levels={['low', 'medium', 'high']}
+              modelDefault="medium"
+              value={effort}
+              onChange={setEffort}
+            />
+          </State>
+          <State name="禁用">
+            <ReasoningEffortSelect levels={['off', 'low', 'high']} value="high" onChange={() => {}} disabled />
           </State>
         </Row>
       </Item>

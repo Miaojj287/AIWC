@@ -4,13 +4,22 @@
     {
       "name": "aiwc-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:web"],
+      "runtimeArgs": [
+        "run",
+        "dev:web"
+      ],
       "port": 5177
     },
     {
       "name": "aiwc-web-5178",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:web", "--", "--port", "5178"],
+      "runtimeArgs": [
+        "run",
+        "dev:web",
+        "--",
+        "--port",
+        "5178"
+      ],
       "port": 5178
     },
     {
@@ -26,6 +35,20 @@
         "5180"
       ],
       "port": 5180
+    },
+    {
+      "name": "aiwc-web-static-5183",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:web",
+        "--",
+        "--config",
+        "node_modules/.cache/aiwc-preview/vite.nohmr.config.ts",
+        "--port",
+        "5183"
+      ],
+      "port": 5183
     }
   ]
 }

@@ -2,7 +2,12 @@
  * agent — the Agent panel (src/features/agent): thread tabs, history and dialogs, composer toolbar,
  * `@` / `/` popovers, message list, approvals, error cards and citation chips.
  */
+import { agentComposer } from './agentComposer'
+import { agentRender } from './agentRender'
+
 export const agent = {
+  ...agentComposer,
+  ...agentRender,
   panel: {
     unread: 'Agent 有新消息',
     expand: '展开 Agent 面板',
@@ -13,18 +18,24 @@ export const agent = {
   thread: {
     untitled: '新会话',
     attachmentTitle: '附件会话',
-    new: '新建会话',
+    new: '新会话',
     open: '打开会话',
     rename: '重命名',
     renameThread: '重命名会话',
     pin: '固定会话',
     unpin: '取消固定',
     export: '导出对话',
+    saveAsSkill: '存为技能…',
+    saveAsSkillDescription: '让 Agent 把这次的做法整理成可复用的技能',
+    /** Pre-filled into the composer by 存为技能…; the user can edit it before sending. */
+    saveAsSkillPrompt:
+      '把这次对话里的做法整理成一个可复用的技能，并用 skill_manage 保存：\n1. 起一个简短的名字（小写英文字母、数字和连字符），description 用一句话说明什么时候该用它；\n2. 把做法写成通用的步骤，去掉这次的具体人名、群名和内容；\n3. 每次运行需要填写的地方写成参数，在 frontmatter 的 arguments 里列出（name、description、required）。',
     clearContext: '清空上下文',
     delete: '删除会话',
     loading: '正在加载会话',
     loadFailed: '会话加载失败',
     quotedMessages: '{label} · {n} 条',
+    scrollToBottom: '滚动到底部',
   },
   tabs: {
     label: 'Agent 会话',
@@ -44,6 +55,14 @@ export const agent = {
     moreActions: '{title} 的更多操作',
     showRecent: '只看最近',
     showAll: '查看全部 {n} 个会话',
+    /** Searching the conversations: title matches, then matches inside the messages (agent:searchThreads). */
+    titleMatches: '标题匹配',
+    contentMatches: '内容匹配',
+    searching: '正在搜索…',
+    searchFailed: '搜索失败：{detail}',
+    searchLocal: '只在本机记录中搜索',
+    loadMore: '加载更多',
+    loadMoreFailed: '加载更多会话失败：{detail}',
   },
   dialog: {
     renameTitle: '重命名会话',
@@ -53,6 +72,7 @@ export const agent = {
     compactTitle: '压缩上下文？',
     compactDescription: '整理为摘要，保留结论、待办与引用；原始对话无法恢复。',
     compactConfirm: '压缩',
+    compactFocus: '另外会照你说的保留：{text}',
     clearTitle: '清空上下文？',
     clearDescription: '移除全部消息、工具记录与引用，不可恢复。',
     deleteTitle: '删除会话？',
@@ -90,9 +110,16 @@ export const agent = {
     compactDescription: '保留结论与引用，释放大部分上下文',
   },
   composer: {
-    placeholder: '今天帮你做些什么？ @ 引用对话，/ 调用技能',
+    placeholder: '今天帮你做些什么？@ 引用会话，/ 调用技能',
+    placeholderFollowUp: '提出后续要求，@ 引用会话，/ 调用技能',
+    placeholderRunning: '继续输入，发送后引导当前任务',
     inputLabel: '给 Agent 的消息',
     typeToSend: '输入内容后发送',
+    steer: '发送并引导当前任务',
+    addContext: '添加上下文',
+    add: '添加上下文或附件',
+    /** Read out (visually hidden) when the `@` / `/` list changes. */
+    suggestionCount: '{n} 个候选项',
   },
   mention: {
     tabs: { session: '会话', file: '文件', contact: '联系人', memory: '记忆' },
@@ -103,7 +130,7 @@ export const agent = {
     noMatches: '没有匹配项',
     empty: {
       session: '没有可引用的会话',
-      file: '中间还没有打开文件',
+      file: '工作区还没有打开文件',
       contact: '没有可引用的联系人',
       memory: '没有记忆文件',
     },
@@ -111,8 +138,8 @@ export const agent = {
     sessionKind: { dm: '单聊', group: '群聊', official: '公众号', system: '系统' },
     contactKind: { friend: '好友', group: '群聊', official: '公众号', stranger: '非好友' },
     indexedCount: '已索引 {n} 条',
-    openTab: '中间标签页',
-    openTabModified: '中间标签页 · 已修改',
+    openTab: '工作区标签页',
+    openTabModified: '工作区标签页 · 已修改',
     hintSelect: '选择',
     hintInsert: '插入',
   },
@@ -121,8 +148,19 @@ export const agent = {
     label: '技能',
     noMatches: '没有匹配的技能',
     custom: '自定义',
+    agentMade: 'Agent',
+    command: '指令',
+  },
+  /** Local `/` commands handled without a model turn (slashCommands.ts). */
+  slash: {
+    compact: '压缩上下文；后面可写要保留的内容，如 /compact 保留报价',
+    new: '新建会话；后面的文字会放进新会话的输入框',
+    export: '把这个会话导出为 Markdown',
+    clear: '清空这个会话的上下文',
+    nothingYet: '这个会话还没有内容',
   },
   approval: {
+    heading: '需要确认',
     request: 'Agent 请求：{summary}',
     risk: {
       read: '将读取本机的微信数据，不会上传。',
@@ -131,9 +169,73 @@ export const agent = {
       destructive: '此操作不可恢复，请确认。',
     },
     deny: '拒绝',
+    denyHint: '这次先拒绝',
     allowAlways: '总是允许',
     allowAlwaysHint: '此工具以后不再询问',
     allowOnce: '允许一次',
+    allowOnceHint: '仅允许这一次',
+    options: '确认选项',
+    keyHint: '按数字直接选择，或用 ↑↓ 切换后回车',
+    confirm: '确认',
+    queued: '还有 {n} 个待确认',
+    allowAlwaysFor: '{target}以后不再询问',
+    scopeLabel: '放行范围',
+    scope: { thread: '本会话', global: '所有会话' },
+    scopeKeyHint: '←→ 切换放行范围',
+    denyWithReason: '拒绝并说明',
+    denyWithReasonHint: '告诉 Agent 应该怎么做',
+    reasonLabel: '拒绝说明',
+    reasonPlaceholder: '比如：先列出文件，不要覆盖原文件',
+    reasonKeyHint: '回车提交，Esc 返回选项',
+    reasonRequired: '先写一句说明',
+    grantedToast: '已放行：{target}（{scope}）',
+    manageGrants: '管理',
+  },
+  /** 本轮改动: what a finished turn changed, listed under it, with 撤销 where it can be reversed. */
+  changes: {
+    summary: '{n} 项改动',
+    toggle: '查看本轮改动',
+    kind: { file: '文件', memory: '记忆', skill: '技能', message: '消息' },
+    action: {
+      created: '新建',
+      modified: '修改',
+      deleted: '删除',
+      added: '写入',
+      removed: '删除',
+      sent: '已发送',
+    },
+    undo: '撤销',
+    undone: '已撤销',
+    notUndoable: '发出的消息无法撤回',
+    tooLarge: '文件太大，没有保留原内容，无法撤销',
+    undoTitle: '撤销这项改动？',
+    undoDescription: '会把「{target}」恢复成 Agent 改动之前的样子；新建的文件会移到废纸篓。',
+    undoMemoryDescription: '会撤销对 {target} 的这条改动：「{excerpt}」',
+    undoConfirm: '撤销',
+    undoneToast: '已撤销',
+    undoFailed: {
+      conflict: '之后又被改过，为免覆盖新内容，没有撤销',
+      already_undone: '这项改动已经撤销过了',
+      not_found: '找不到这项改动的记录',
+      not_undoable: '这项改动无法撤销',
+      failed: '撤销失败，请重试',
+    },
+    loadFailed: '读取本轮改动失败',
+  },
+  /** 导出会话 dialog: what goes into the file. Every default is the privacy-safe choice. */
+  exportDialog: {
+    title: '导出会话',
+    description: '导出文件保存在本机，默认不含聊天原文与标识信息。',
+    format: '格式',
+    formatMarkdown: 'Markdown',
+    formatJson: 'JSON',
+    includeToolOutputs: '包含工具的输入与结果',
+    includeToolOutputsHint: '可能含微信聊天原文',
+    includeReasoning: '包含思考过程',
+    includeReasoningHint: '模型返回的推理文字',
+    redactIdentifiers: '脱敏标识信息',
+    redactIdentifiersHint: '微信号、群号、手机号、邮箱、路径与密钥',
+    confirm: '导出',
   },
   shell: {
     exitCode: '退出码 {code}',
@@ -142,16 +244,51 @@ export const agent = {
     truncated: '输出已截断',
     unsandboxed: '沙箱外运行：{reason}',
   },
+  /**
+   * The WeChat send tools (send_message / send_media / draft_reply) in the approval card and the expanded tool row:
+   * who receives it, the bubbles exactly as the sender splits them, and what happened.
+   */
+  wechatSend: {
+    content: '消息内容',
+    willSend: '将发送 {n} 条',
+    count: '共 {n} 条',
+    members: '{n} 人',
+    noRecipient: '没有指定接收会话，无法确认发给谁。',
+    notFound: '本机记录里没有这个会话，请核对 ID。',
+    lookupFailed: '暂时读不到本机的会话信息，请核对 ID。',
+    noText: '没有可发送的文字。',
+    media: { image: '图片', file: '文件', voice: '语音' },
+    status: {
+      sent: '已发送',
+      verified: '已在聊天记录里核对',
+      failed: '发送失败',
+      denied: '已拒绝，没有发送',
+      timeout: '发送超时，请到微信里确认是否已发出。',
+      drafted: '已放入回复台',
+      draftedHint: '在回复台确认后才会发出。',
+      draftFailed: '没能放入回复台',
+    },
+    openReplyDesk: '打开回复台',
+  },
   tool: {
-    running: '进行中',
     awaitingApproval: '等待确认',
-    status: { error: '失败', denied: '已拒绝', timeout: '超时', pending: '等待中' },
+    /** One word per tool-row / plan-step status: shown on the right, or visually hidden next to the status icon. */
+    status: { error: '失败', denied: '已拒绝', timeout: '超时', pending: '等待中', running: '进行中', done: '已完成' },
     input: '输入',
     output: '输出',
     generatedFiles: '生成 {n} 个文件',
     imageOutput: '[图片 {mediaType}]',
+    /** Two or more read-only calls in a row fold into one line. */
+    group: {
+      exploring: '正在查阅',
+      explored: '查阅',
+      steps: '{n} 个步骤',
+      stepsFailed: '{n} 个步骤，{failed} 个失败',
+    },
   },
   message: {
+    thought: '已思考',
+    user: '你',
     copied: '已复制',
     resend: '重新发送',
     regenerate: '重新生成',
@@ -160,6 +297,20 @@ export const agent = {
     image: '[图片]',
     imageNamed: '[图片 {name}]',
     file: '[文件 {name}]',
+    expand: '展开',
+    collapse: '收起',
+    yesterdayAt: '昨天 {time}',
+  },
+  /** A message sent while the agent works waits until the current step ends; until then it shows as pending. */
+  pending: {
+    label: '待并入的消息',
+    steer: '将在当前步骤结束后并入',
+    awaitingApproval: '处理完确认后并入',
+  },
+  /** The last prompt got no reply (the app quit or crashed mid-turn). */
+  unanswered: {
+    title: '这条消息没有得到回复',
+    dismiss: '忽略',
   },
   error: {
     title: {
@@ -169,6 +320,10 @@ export const agent = {
       network: '网络连接失败',
       invalidRequest: '请求无效',
       unsupportedTools: '模型不支持工具调用',
+      streamStalled: '模型长时间没有输出',
+      contentFilter: '回答被内容过滤拦下',
+      emptyResponse: '模型没有返回内容',
+      outputTruncated: '回答超出输出上限',
       unknown: '出错了',
     },
     action: {
@@ -178,9 +333,20 @@ export const agent = {
     },
   },
   turn: {
+    thinking: '正在思考',
+    executing: '正在执行工具',
+    replying: '正在回复',
     generating: '正在生成',
-    generatingElapsed: '正在生成 · 已用 {elapsed}',
-    awaitingApproval: '已暂停，等待你确认上面的操作',
+    awaitingApproval: '已暂停，等待你在下方确认操作',
+    /** The turn header: live while the agent works, then how long the turn took. */
+    working: '工作中 {duration}',
+    workingNoTime: '工作中',
+    worked: '已工作 {duration}',
+    workedNoTime: '已处理',
+    stopped: '已停止',
+    /** Marker inside the folded work: the answer was rewritten after the citation check found a problem. */
+    revised: '核对原文后重写了答复',
+    duration: { s: '{s} 秒', m: '{m} 分', ms: '{m} 分 {s} 秒', h: '{h} 小时', hm: '{h} 小时 {m} 分' },
     stop: '停止生成',
     aborted: {
       interrupted: '已停止生成',
@@ -199,23 +365,87 @@ export const agent = {
   },
   plan: {
     title: '计划',
-    doing: '进行中',
+  },
+  /** One-off sentences of the conversation's visually hidden live region (TurnAnnouncer). */
+  live: {
+    approvalRequested: 'Agent 需要你确认：{summary}',
+    turnFinished: 'Agent 已回复完毕',
   },
   empty: {
-    hint: '问我关于微信数据的任何问题。',
-    hintWithSuggestions: '问我关于微信数据的任何问题，或试试：',
+    noModel: {
+      title: '先接入一个模型',
+      description: 'Agent 需要模型才能回答。可以用在线服务商，也可以用本机的 Ollama。',
+      action: '去接入模型',
+    },
   },
+  /** Minimap rail of a wide conversation: one tick per prompt. */
+  /** Rewinding, forking and archiving a conversation; find in the conversation; quoting a selection. */
+  stream: {
+    quoteSelection: '引用到 Agent',
+    edit: {
+      label: '编辑提问',
+      hint: '发送后从这一轮重新开始，之后的回答不再保留在上下文里。',
+      send: '发送',
+      empty: '提问不能为空',
+    },
+    rewind: {
+      confirmTitle: '从这一轮重新开始？',
+      confirmDescription: '之后的 {n} 轮对话会一并丢弃，不再保留在上下文里。',
+      confirm: '重新开始',
+      failed: '无法回退到这一轮：{detail}',
+      busy: '正在发送或生成回复，等它结束或先停止再试。',
+    },
+    fork: {
+      action: '从这一轮分出新会话',
+      title: '{title} · 分支',
+      done: '已分出新会话',
+      failed: '分出新会话失败：{detail}',
+    },
+    archive: {
+      archive: '归档',
+      unarchive: '取消归档',
+      section: '已归档',
+      back: '返回最近会话',
+      done: '已归档「{title}」',
+      undo: '撤销',
+      restored: '已取消归档「{title}」',
+      empty: '没有归档的会话',
+      loading: '正在读取归档…',
+      loadFailed: '读取归档失败：{detail}',
+    },
+    find: {
+      label: '在对话中查找',
+      placeholder: '在对话中查找',
+      position: '{current}/{total}',
+      noResults: '无结果',
+      previous: '上一个',
+      next: '下一个',
+    },
+  },
+  navigator: {
+    label: '轮次导航',
+    jump: '跳到第 {n} 轮：{prompt}',
+    working: 'Agent 仍在工作',
+    noReply: '暂无回复',
+  },
+  /** A file the agent produced: a card under the reply; one per turn also opens by itself when the turn ends. */
   artifact: {
-    openedInTab: '已在中间标签页打开 · 可直接编辑',
+    clickToOpen: '点按在工作区打开',
     notSaved: '内容已生成 · 未保存为文件',
     generated: '已生成',
+    open: '在工作区打开',
+    reveal: '在文件夹中显示',
+    copyPath: '复制路径',
   },
+  /** Reply tables: the kit renders the `···` menu and copies; saving CSV goes through file:saveExport. */
   markdown: {
-    copyCode: '复制代码',
-    copied: '已复制',
+    tableFileName: '表格',
+    csvSaved: 'CSV 已保存',
+    csvSaveFailed: '保存 CSV 失败：{detail}',
   },
   citation: {
     mismatch: '引用的原文和这条消息对不上，请核对',
+    notInMessage: '这条消息里没有「{quote}」，请核对',
     locate: '点击在聊天记录里定位这条消息',
     missing: '本地记录里没有这条消息',
     missingDetail: '可能已被撤回、尚未同步，或引用有误',
@@ -237,7 +467,7 @@ export const agent = {
       newThread: '新会话',
       searchThreads: '搜索会话…',
       searchTasks: '搜索定时任务…',
-      views: { threads: '会话', tasks: '定时任务' },
+      views: { tasks: '定时任务' },
       groups: { pinned: '固定', today: '今天', yesterday: '昨天', week: '近 7 天', earlier: '更早' },
       list: '会话列表',
       draft: '未发送',
@@ -259,8 +489,63 @@ export const agent = {
       newThread: '新会话',
       showPane: '显示工作区',
       hidePane: '隐藏工作区',
-      noPane: '还没有打开的标签：引用、生成的文件与设置会在这里打开',
+      noPane: '引用、生成的文件与设置会在这里打开',
       context: '引用：{label}',
+    },
+  },
+  question: {
+    heading: 'Agent 想问你',
+    queued: '还有 {n} 个问题',
+    options: '回答选项',
+    other: '其他',
+    otherHint: '自己输入回答',
+    otherPlaceholder: '输入你的回答，回车发送',
+    otherEmpty: '先输入回答',
+    keyHint: '数字键直选 · ↑↓ 切换 · ⏎ 确认 · Esc 不回答',
+    skip: '不回答',
+    confirm: '确认',
+    answerFailed: '回答没有送达：{error}',
+  },
+  turnSignal: {
+    reconnecting: '重新连接中 {n}/{m} · {reason}',
+    continuing: '回答被长度上限截断，继续生成 {n}/{m}',
+    reason: {
+      stalled: '模型长时间没有输出',
+      rateLimit: '服务商限流',
+      network: '网络中断',
+      server: '服务商出错',
+    },
+  },
+  attention: {
+    unread: '已完成，未查看',
+    failed: '运行失败',
+    question: 'Agent 在等你回答',
+  },
+  taskCard: {
+    next: '下次运行：{time}',
+    noNext: '没有下次运行时间',
+    paused: '已暂停',
+    open: '打开任务',
+  },
+  workflow: {
+    label: '工作流步骤',
+    progress: '{done}/{total} 步完成',
+    write: '可写入',
+    status: {
+      pending: '等待',
+      running: '进行中',
+      done: '完成',
+      failed: '失败',
+      skipped: '已跳过',
+      cancelled: '已取消',
+    },
+    error: {
+      failed: '失败',
+      timeout: '超时',
+      step_cap: '步数用完',
+      invalid_json: '没有输出有效的 JSON',
+      dependency_failed: '前置步骤没有完成',
+      cancelled: '已取消',
     },
   },
 }

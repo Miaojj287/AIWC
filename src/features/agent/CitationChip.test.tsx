@@ -101,4 +101,25 @@ describe('citation chips in Agent replies', () => {
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.getByText('文档').getAttribute('title')).toBe('https://example.com/doc')
   })
+
+  it('checks each quote of a 「A」「B」 [a] [b] run against its own message, so neither chip is flagged', async () => {
+    const other: WxMessage = {
+      ...message,
+      id: 'wx:2:2',
+      text: '喝太多导致睡不着',
+      anchor: { ...message.anchor, messageId: 'wx:2:2' },
+    }
+    invokeMock.mockImplementation(async (channel, req) => {
+      if (channel === 'substrate:getSession') return session
+      if (channel !== 'substrate:getMessage') return undefined
+      return (req as { messageId: string }).messageId === 'wx:2:2' ? other : message
+    })
+    renderMd(
+      `你接话：「你会和小吴纠缠一阵子」「喝太多导致睡不着」 [02-14 19:28](${href}) [02-14 19:29](wx://wxid_xw/wx:2:2)`,
+    )
+    await flush()
+    await flush()
+    const chips = screen.getAllByRole('button', { name: /小吴 · / })
+    expect(chips.map((c) => c.getAttribute('data-verdict'))).toEqual(['verbatim', 'verbatim'])
+  })
 })

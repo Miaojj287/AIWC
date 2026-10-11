@@ -103,6 +103,22 @@ describe('get_context', () => {
     expect(out.messages[0].isAnchor).toBeUndefined()
     expect(res.meta?.anchors).toHaveLength(5)
   })
+  it('flags clipped neighbours and returns the anchor message in full', async () => {
+    const long = '长'.repeat(500)
+    const sub = sampleWorld({
+      messages: [
+        msg({ id: 'L1', sessionId: 'long_s', seq: 1, text: long }),
+        msg({ id: 'L2', sessionId: 'long_s', seq: 2, text: long }),
+      ],
+    })
+    const anchor = { sessionId: 'long_s', messageId: 'L2', seq: 2, createdAt: T0 + 2 * 60_000 }
+    const out = body(await runTool(getContext, { anchor, radius: 1 }, sub))
+    const [before, target] = out.messages
+    expect(before).toMatchObject({ truncated: true, fullChars: 500 })
+    expect(before.text.length).toBeLessThan(500)
+    expect(target).toMatchObject({ isAnchor: true, text: long })
+    expect(target.truncated).toBeUndefined()
+  })
   it('errors when the anchor cannot be resolved', async () => {
     const sub = sampleWorld()
     const res = await runTool(

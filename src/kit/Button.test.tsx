@@ -24,7 +24,7 @@ describe('Button', () => {
     const link = screen.getByRole('button', { name: '链接' })
 
     expect(primary.className).toContain('bg-accent')
-    expect(ghost.className).toContain('bg-line-8')
+    expect(ghost.className).toContain('bg-hover-7')
     expect(outline.className).toContain('border-(--line-16)')
     expect(danger.className).toContain('bg-danger')
     expect(link.className).toContain('text-accent')
@@ -54,9 +54,10 @@ describe('Button', () => {
       </Button>,
     )
     const btn = screen.getByRole('button', { name: /保存/ })
-    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    expect((btn as HTMLButtonElement).disabled).toBe(false)
     expect(btn.getAttribute('aria-busy')).toBe('true')
-    expect(screen.getByRole('status', { name: '加载中' })).toBeTruthy()
+    // The button announces its own busy state; the spinner glyph is decorative.
+    expect(screen.queryByRole('status')).toBeNull()
     fireEvent.click(btn)
     expect(onClick).not.toHaveBeenCalled()
   })

@@ -277,6 +277,7 @@ describe('createRolloutStore', () => {
     list = await store.list()
     expect(list.map((r) => r.threadId)).toEqual(['thr_3', 'thr_1'])
     expect((await store.list({ includeArchived: true })).find((r) => r.threadId === 'thr_2')?.title).toBe('归档了')
+    expect((await store.list({ archivedOnly: true })).map((r) => r.threadId)).toEqual(['thr_2'])
     expect(await store.list({ limit: 1 })).toHaveLength(1)
   })
 
@@ -323,6 +324,47 @@ describe('createRolloutStore', () => {
     expect(await store.search('不存在的词')).toEqual([])
     expect(await store.search('a"b(')).toEqual([])
     expect(await store.search('')).toEqual([])
+  })
+
+  it('list: pages with offset after the order, and nonEmpty leaves out threads nothing was recorded in', async () => {
+    for (const n of [1, 2, 3, 4])
+      await store.create({ threadId: asThreadId(`thr_${n}`), origin, settings, title: `t${n}` })
+    for (const n of [1, 2, 3])
+      await store.append(asThreadId(`thr_${n}`), [{ ts: n, type: 'item', item: user(`u${n}`, `第${n}个`) }])
+    const all = (await store.list({ nonEmpty: true })).map((r) => r.threadId)
+    expect(all).toHaveLength(3)
+    expect(all).not.toContain('thr_4')
+    const first = (await store.list({ nonEmpty: true, limit: 2 })).map((r) => r.threadId)
+    const second = (await store.list({ nonEmpty: true, limit: 2, offset: 2 })).map((r) => r.threadId)
+    expect([...first, ...second]).toEqual(all)
+    expect(await store.list({ nonEmpty: true, limit: 2, offset: 3 })).toEqual([])
+  })
+
+  it('search: scoped to a channel and to listed profiles, archived left out, custom marks, thread title returned', async () => {
+    const desk = asThreadId('thr_desk')
+    const bot = asThreadId('thr_bot')
+    const child = asThreadId('thr_child')
+    await store.create({ threadId: desk, origin, settings, title: '报价会话' })
+    await store.create({ threadId: bot, origin: { channel: 'wechat-ilink', chatId: 'g' }, settings, title: '机器人' })
+    await store.create({ threadId: child, origin, settings: { ...settings, profile: 'subagent' }, title: '子任务' })
+    for (const id of [desk, bot, child])
+      await store.append(id, [{ ts: 1, type: 'item', item: user(`u_${id}`, '项目群报价讨论') }])
+    const hits = await store.search('报价讨论', {
+      channel: 'desktop',
+      excludeProfiles: ['subagent'],
+      marks: ['<<', '>>'],
+    })
+    expect(hits.map((h) => h.threadId)).toEqual(['thr_desk'])
+    expect(hits[0]).toMatchObject({ title: '报价会话' })
+    expect(hits[0]?.snippet).toContain('<<报价讨论>>')
+    // the short-query LIKE path uses the same marks
+    expect((await store.search('报价', { channel: 'desktop', marks: ['<<', '>>'] }))[0]?.snippet).toContain('<<报价>>')
+    await store.updateMeta(desk, { archived: true })
+    const scoped = { channel: 'desktop' as const, excludeProfiles: ['subagent' as const] }
+    expect(await store.search('报价讨论', scoped)).toEqual([])
+    expect((await store.search('报价讨论', { ...scoped, includeArchived: true })).map((h) => h.threadId)).toEqual([
+      'thr_desk',
+    ])
   })
 
   it('remove deletes file and rows', async () => {

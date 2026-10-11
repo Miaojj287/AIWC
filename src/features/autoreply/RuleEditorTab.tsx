@@ -1,6 +1,7 @@
 /**
  * 自动回复规则 Tab (kind 'autoreply', objectId = sessionId): header · 状态 · 回复方式 · 最近记录 ·
- * sticky save bar with dirty state.
+ * sticky save bar with dirty state. With 回复方式 = Jev（beta） the page also carries the data-flow
+ * note and the 试一下 dry run (DESIGN-SPEC §3.1).
  */
 import { AutoReplyControl } from './AutoReplyControl'
 import { runCommand } from '@/app/commands'
@@ -9,7 +10,6 @@ import { useEffect, useState } from 'react'
 import { useT } from '@/i18n'
 import {
   Avatar,
-  Badge,
   Button,
   ConfirmDialog,
   DangerDialog,
@@ -21,15 +21,19 @@ import {
   IconButton,
   ScrollArea,
   Toggle,
+  Tooltip,
   toast,
   type MenuSpec,
 } from '@/kit'
+import { useConfig } from '@/platform/configStore'
 import { formatTime } from '@/platform/format'
 import { invoke, useInvoke } from '@/platform/hooks'
 import type { TabRendererProps } from '@/workspace/tabRegistry'
 import { CopyRuleDialog } from './editor/CopyRuleDialog'
 import { RecordsCard, ViewAllLink } from './editor/RecordsCard'
 import { ReplyCard } from './editor/ReplyCard'
+import { JevPreviewCard } from './jev/JevPreviewCard'
+import { jevConfigOf } from './jev/jevModel'
 import { ruleStatusLine } from './ruleModel'
 import { useRuleEditor } from './useRuleEditor'
 
@@ -42,6 +46,7 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
   const [dialog, setDialog] = useState<'copy' | 'delete' | 'discard' | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [triggering, setTriggering] = useState(false)
+  const jevConfigured = Boolean(useConfig((c) => c.ai.jev.apiKeyRef))
 
   /** Debug affordance: run the rule against this chat's last message without waiting for a new one. */
   const triggerOnce = async () => {
@@ -84,11 +89,13 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
   const meta = [
     kindLabel,
     session.data?.memberCount ? t('autoreply.editor.members', { n: session.data.memberCount }) : '',
-    saved?.todayCount
-      ? t('autoreply.editor.repliedToday', { n: saved.todayCount })
-      : editor.exists
-        ? t('autoreply.editor.notTriggeredToday')
-        : t('autoreply.editor.noRuleYet'),
+    !editor.exists
+      ? t('autoreply.editor.noRuleYet')
+      : status.kind === 'paused'
+        ? status.text
+        : saved?.todayCount
+          ? t('autoreply.editor.repliedToday', { n: saved.todayCount })
+          : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -133,23 +140,29 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
     : !editor.dirty
       ? t('autoreply.editor.nothingToSave')
       : undefined
+  const triggerReason = !editor.exists
+    ? t('autoreply.editor.triggerNeedsSave')
+    : !draft.enabled
+      ? t('autoreply.editor.triggerNeedsEnable')
+      : undefined
+  const isJev = draft.source === 'jev'
+  const hasCandidates = isJev && jevConfigOf(draft).candidates.some((c) => c.trim())
+  // The dry run needs a key, at least one candidate and a valid draft; it runs the draft, not the saved rule.
+  const previewReason = !jevConfigured
+    ? t('autoreply.jev.preview.disabledNoKey')
+    : !hasCandidates
+      ? t('autoreply.jev.preview.disabledNoCandidates')
+      : !editor.valid
+        ? t('autoreply.jev.preview.disabledInvalid')
+        : undefined
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-content">
-      <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line-6 px-5">
+      <header className="flex min-h-18 shrink-0 items-center gap-3 border-b border-line-6 px-5 py-3">
         <Avatar id={sessionId} name={title} src={session.data?.avatarPath} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-bubble font-medium leading-5 text-fg">{title}</span>
-            <Badge tone={status.kind === 'on' ? 'ok' : status.kind === 'paused' ? 'neutral' : 'neutral'}>
-              {status.kind === 'on'
-                ? t('autoreply.editor.badgeOn')
-                : status.kind === 'paused'
-                  ? t('autoreply.status.paused')
-                  : t('autoreply.status.unset')}
-            </Badge>
-          </div>
-          <span className="truncate text-caption text-fg-3">{meta}</span>
+          <span className="min-w-0 truncate text-bubble font-semibold leading-5 text-fg">{title}</span>
+          {meta ? <span className="truncate text-caption text-fg-3">{meta}</span> : null}
         </div>
         <label className="flex items-center gap-2 text-caption text-fg-2">
           {t('common.enable')}
@@ -170,33 +183,31 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
       </header>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex w-full max-w-[880px] flex-col gap-4 px-5 pb-6 pt-4">
+        <div className="mx-auto flex w-full max-w-[880px] flex-col gap-6 px-5 pb-8 pt-5">
           <AutoReplyControl />
           <section className="flex flex-col gap-2">
-            <h2 className="text-caption text-fg-3">{t('autoreply.editor.replySection')}</h2>
-            <ReplyCard draft={draft} errors={editor.errors} patch={editor.patch} />
+            <h2 className="text-body font-semibold text-fg">{t('autoreply.editor.replySection')}</h2>
+            <ReplyCard draft={draft} errors={editor.errors} patch={editor.patch} jevConfigured={jevConfigured} />
           </section>
+          {isJev ? <JevPreviewCard sessionId={sessionId} draft={draft} disabledReason={previewReason} /> : null}
           <section className="flex flex-col gap-2">
-            <div className="flex items-center">
-              <h2 className="text-caption text-fg-3">{t('autoreply.editor.recentSection')}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-body font-semibold text-fg">{t('autoreply.editor.recentSection')}</h2>
               <span className="ml-auto flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={Zap}
-                  loading={triggering}
-                  disabled={!editor.exists || !draft.enabled}
-                  title={
-                    !editor.exists
-                      ? t('autoreply.editor.triggerNeedsSave')
-                      : !draft.enabled
-                        ? t('autoreply.editor.triggerNeedsEnable')
-                        : t('autoreply.editor.triggerHint')
-                  }
-                  onClick={() => void triggerOnce()}
-                >
-                  {t('autoreply.editor.triggerNow')}
-                </Button>
+                {/* Enabled: the hint says what one run does. Disabled: the button explains itself instead. */}
+                <Tooltip content={t('autoreply.editor.triggerHint')} disabled={Boolean(triggerReason)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Zap}
+                    loading={triggering}
+                    disabled={Boolean(triggerReason)}
+                    disabledReason={triggerReason}
+                    onClick={() => void triggerOnce()}
+                  >
+                    {t('autoreply.editor.triggerNow')}
+                  </Button>
+                </Tooltip>
                 <ViewAllLink onClick={() => setDrawerOpen(true)} />
               </span>
             </div>
@@ -212,10 +223,11 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
 
       <footer className="flex h-12 shrink-0 items-center gap-3 border-t border-line-6 px-5">
         <span className="min-w-0 flex-1 truncate text-caption text-fg-3">
-          {editor.exists && saved?.updatedAt
-            ? t('autoreply.editor.lastSaved', { time: formatTime(saved.updatedAt) })
-            : t('autoreply.editor.notSaved')}
-          {editor.dirty ? ` · ${t('autoreply.editor.unsaved')}` : ''}
+          {editor.dirty
+            ? t('autoreply.editor.unsaved')
+            : editor.exists && saved?.updatedAt
+              ? t('autoreply.editor.lastSaved', { time: formatTime(saved.updatedAt) })
+              : ''}
         </span>
         <Button variant="ghost" disabled={!editor.dirty} onClick={() => setDialog('discard')}>
           {t('common.cancel')}
@@ -223,8 +235,8 @@ export function RuleEditorTab({ tab, update }: TabRendererProps) {
         <Button
           variant="primary"
           disabled={!editor.dirty || !editor.valid}
+          disabledReason={saveReason}
           loading={editor.saving}
-          title={saveReason}
           onClick={() => void editor.save()}
         >
           {t('autoreply.editor.saveRule')}

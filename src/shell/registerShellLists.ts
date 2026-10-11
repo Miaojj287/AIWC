@@ -2,6 +2,7 @@
  * Object lists the shell itself provides. The chat function's session list lives here because it is
  * the default view of the workbench; 自动回复 / AI 克隆 register theirs from their feature packages.
  */
+import { runCommand } from '@/app/commands'
 import { t } from '@/i18n'
 import { registerObjectList } from './objectListRegistry'
 import { SessionList } from './objectList/SessionList'
@@ -18,6 +19,11 @@ export function registerShellLists(): void {
     get title() {
       return t('shell.sessions.title')
     },
+    get searchPlaceholder() {
+      return t('shell.sessions.search')
+    },
+    // The box matches chat names; Enter looks for the same text in every chat's messages.
+    onSearchSubmit: (query) => runCommand('tab.openSearch', { query }),
     component: SessionList,
     segments: SESSION_SEGMENTS.map((s) => ({
       id: s.id,

@@ -19,9 +19,9 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(function Toggle
       aria-label={label}
       className={cn(
         'group relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-chip p-0.5',
-        'bg-(--fill-20) transition-colors duration-(--dur-fast) hover:bg-(--fill-28)',
-        'data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent-hover',
-        'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'bg-(--fill-20) transition-colors enabled:hover:bg-(--fill-28) enabled:active:bg-(--line-40)',
+        'data-[state=checked]:bg-accent data-[state=checked]:enabled:hover:bg-accent-hover data-[state=checked]:enabled:active:bg-accent-active',
+        'outline-none',
         'disabled:cursor-not-allowed disabled:opacity-40',
         className,
       )}
@@ -30,7 +30,7 @@ export const Toggle = forwardRef<HTMLButtonElement, ToggleProps>(function Toggle
       <Switch.Thumb
         className={cn(
           'block size-4 rounded-chip bg-(--fg-on-accent)',
-          'transition-transform duration-(--dur-fast) data-[state=checked]:translate-x-4',
+          'transition-transform data-[state=checked]:translate-x-4',
         )}
       />
     </Switch.Root>

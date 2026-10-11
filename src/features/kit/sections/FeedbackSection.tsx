@@ -1,10 +1,12 @@
-import { Plus, RefreshCw } from 'lucide-react'
+import { Plus, RefreshCw, TextQuote } from 'lucide-react'
+import { useRef } from 'react'
 import {
   Badge,
   Button,
   IconButton,
   InlineHint,
   ProgressBar,
+  SelectionAction,
   SkeletonListRows,
   Spinner,
   ToastView,
@@ -14,9 +16,10 @@ import {
 import { Item, Row, Section, State } from '../gallery'
 
 export function FeedbackSection() {
+  const quotable = useRef<HTMLParagraphElement>(null)
   return (
     <Section id="feedback" title="④ 反馈" description="Toast 五种；行内提示；tooltip；徽标；进度；加载">
-      <Item label="Toast · 右下角出现，4s 自动消失，带操作时不自动消失">
+      <Item label="Toast · 顶部居中出现，4s 自动消失，带操作时不自动消失">
         <div className="flex flex-col items-start gap-2">
           <ToastView toast={{ kind: 'success', text: '已保存' }} onDismiss={() => {}} />
           <ToastView
@@ -90,6 +93,17 @@ export function FeedbackSection() {
             </Button>
           </Tooltip>
         </Row>
+      </Item>
+      <Item label="SelectionAction · 选中下面这段文字">
+        <p ref={quotable} className="m-0 max-w-[420px] select-text text-body text-fg-2">
+          选中这段文字后，选区上方会浮出一个「引用到 Agent」按钮；点按不会丢掉选区。
+        </p>
+        <SelectionAction
+          containerRef={quotable}
+          icon={TextQuote}
+          label="引用到 Agent"
+          onAction={(text) => toast.success(`已引用 ${text.length} 个字`)}
+        />
       </Item>
       <Item label="徽标 · 语义色">
         <Row className="gap-2">

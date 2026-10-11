@@ -11,6 +11,7 @@ import {
   Input,
   Kbd,
   ListItem,
+  Markdown,
   ScrollArea,
   SegmentedControl,
   Select,
@@ -34,7 +35,7 @@ export function StructureSection() {
     <Section
       id="structure"
       title="⑦ 结构组件"
-      description="头像 / 列表项 / 设置行 / Tab / 卡片 / chip / kbd / 分隔线 / 滚动区 / 字段标签 —— 与各功能看板一致"
+      description="头像 / 列表项 / 设置行 / Tab / 卡片 / chip / kbd / 分隔线 / 滚动区 / 字段标签 / Markdown —— 与各功能看板一致"
     >
       <Item label="头像 · 36 / 28 / 20，首字 + 哈希渐变；群九宫格（仅色块 / 图片）；图片回退">
         <Row>
@@ -104,6 +105,33 @@ export function StructureSection() {
             title="dense 行"
             trailing={<Badge tone="neutral">12</Badge>}
             onSelect={() => {}}
+          />
+        </div>
+      </Item>
+      <Item label="列表项 · compact（Agent 窗口侧栏）：32px 单行、16px 状态槽、中性选中">
+        <div className="flex w-[260px] flex-col gap-px rounded-card border border-line-6 bg-panel p-1.5">
+          <ListItem
+            compact
+            leading={<MessageCircle size={16} strokeWidth={1.75} aria-hidden className="text-fg-2" />}
+            title="导航行"
+            meta={<Kbd keys="⌘N" />}
+            onSelect={() => {}}
+          />
+          <ListItem
+            compact
+            title="选中的会话"
+            meta="12:30"
+            selected={row === 'c1'}
+            onSelect={() => setRow('c1')}
+            hoverActions={<IconButton size="sm" icon={Ellipsis} label="更多" />}
+          />
+          <ListItem
+            compact
+            title="另一个会话"
+            meta="昨天"
+            selected={row === 'c2'}
+            onSelect={() => setRow('c2')}
+            hoverActions={<IconButton size="sm" icon={Ellipsis} label="更多" />}
           />
         </div>
       </Item>
@@ -223,7 +251,7 @@ export function StructureSection() {
         <Row align="start" className="gap-6">
           <Row className="gap-2">
             <Kbd keys="⌘K" />
-            <Kbd keys="⌘⇧T" />
+            <Kbd keys="⇧⌘T" />
             <Kbd keys="Esc" />
           </Row>
           <div className="flex w-[200px] flex-col gap-3">
@@ -278,6 +306,32 @@ export function StructureSection() {
           </State>
         </div>
       </Item>
+      <Item label="Markdown · 360 宽（Agent 面板）：标题 / 列表 / 引用 / 代码（hover 复制）/ 表格（横向滚动 + hover ···）">
+        <div className="w-[360px] rounded-card border border-line-6 bg-panel p-4">
+          <Markdown source={MARKDOWN_SAMPLE} preserveLineBreaks tableActions={{ copy: true }} />
+        </div>
+      </Item>
     </Section>
   )
 }
+
+const MARKDOWN_SAMPLE = [
+  '### 本周要点',
+  '',
+  '共 **3** 个议题，详见 `周报草稿.md`：',
+  '',
+  '1. 预算',
+  '   - 已批准',
+  '2. 排期',
+  '',
+  '> 引用的原话放在引用块里',
+  '',
+  '| 议题 | 负责人 | 进度 | 截止 | 备注 |',
+  '|:--|:--|--:|:-:|:--|',
+  '| 预算 | 张三 | 80% | 10-15 | 等财务确认，确认后同步到群里 |',
+  '| 排期 | 李四 | 30% | 10-20 | `v2.1` 延期 |',
+  '',
+  '```ts',
+  'const total = 3',
+  '```',
+].join('\n')

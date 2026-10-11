@@ -50,11 +50,15 @@ function setup(
   }
   const clone = { start: vi.fn(async () => undefined), cancel: vi.fn() }
   const kernel = { ensureThread: vi.fn(), submit: vi.fn(), getThread: vi.fn() }
+  const resolveAuxiliary = vi.fn(async () => {
+    throw new Error('no model in this test')
+  })
+  const models = { forFeature: vi.fn(() => ({ resolveAuxiliary })) }
   const toast = vi.fn()
   const ipc = createHandlerHarness()
   const logger = { child: () => logger, warn: vi.fn() }
   registerCloneIpc(
-    { logger, relationships, substrate, clone, kernel, toast, records: {}, models: {} } as unknown as AppContext,
+    { logger, relationships, substrate, clone, kernel, toast, records: {}, models } as unknown as AppContext,
     {} as HostBridge,
     ipc.handle,
   )
@@ -63,7 +67,7 @@ function setup(
   /** Renderer input as it may arrive: untyped, and possibly thrown synchronously by the handler. */
   const invokeRaw = (channel: InvokeChannel, req: unknown): Promise<unknown> =>
     Promise.resolve().then(() => ipc.invokeRaw(channel, req))
-  return { invoke, invokeRaw, substrate, relationships, clone, kernel, toast }
+  return { invoke, invokeRaw, substrate, relationships, clone, kernel, toast, resolveAuxiliary }
 }
 
 const profileFixture = (): RelationshipProfile => ({
@@ -240,5 +244,23 @@ describe('contact id validation', () => {
       'abc@openim',
       'gh_0a1b2c',
     ])
+  })
+})
+
+describe('clone:reflect', () => {
+  it('keeps the thread on its own model: a local clone thread is never reflected by the online default', async () => {
+    const { invoke, kernel, resolveAuxiliary } = setup({ profiles: [profileFixture()] })
+    const local = { providerId: 'ollama', modelId: 'qwen3:8b' }
+    const items = Array.from({ length: 8 }, (_, i) =>
+      i % 2 === 0
+        ? { type: 'user_message', id: `u${i}`, content: [{ type: 'text', text: `问 ${i}` }], mentions: [] }
+        : { type: 'assistant_message', id: `a${i}`, text: `答 ${i}` },
+    )
+    kernel.getThread.mockResolvedValue({ record: { settings: { model: local } }, items })
+    expect(await invoke('clone:reflect', { contactId: 'wxid_a', threadId: 'thr_1' as never })).toEqual({
+      ok: false,
+      corrections: 0,
+    })
+    expect(resolveAuxiliary).toHaveBeenCalledWith(local)
   })
 })

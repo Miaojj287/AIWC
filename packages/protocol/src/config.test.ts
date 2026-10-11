@@ -8,7 +8,29 @@ describe('AppConfig', () => {
     expect(cfg.agent.permissionMode).toBe('ask')
     expect(cfg.agent.maxStepsPerTurn).toBe(40)
     expect(cfg.ui.agentPanelWidth).toBe(360)
-    expect(cfg.diary.hour).toBe(2)
+    // 每日待办 is opt-in: nothing is scanned or sent until the user turns it on and picks chats.
+    expect(cfg.todo).toEqual({
+      enabled: false,
+      sources: [],
+      schedule: { kind: 'daily', time: '09:00' },
+      maxMessagesPerSource: 200,
+    })
+  })
+  it('drops the retired diary section and repairs a bad todo schedule without dropping the rest', () => {
+    const cfg = AppConfigSchema.parse({
+      diary: { enabled: true, hour: 2 },
+      todo: { enabled: true, schedule: { kind: 'hourly', everyHours: 5 }, sources: [{ id: 'g@chatroom', title: 'G' }] },
+      agent: { maxStepsPerTurn: 7 },
+    })
+    expect('diary' in cfg).toBe(false)
+    expect(cfg.todo.enabled).toBe(true)
+    expect(cfg.todo.schedule).toEqual({ kind: 'daily', time: '09:00' })
+    expect(cfg.todo.sources).toEqual([{ id: 'g@chatroom', title: 'G' }])
+    expect(cfg.agent.maxStepsPerTurn).toBe(7)
+    expect(AppConfigSchema.parse({ todo: { schedule: { kind: 'hourly', everyHours: 6 } } }).todo.schedule).toEqual({
+      kind: 'hourly',
+      everyHours: 6,
+    })
   })
   it('accepts partial nested input', () => {
     const cfg = AppConfigSchema.parse({ agent: { permissionMode: 'bypass' } })
@@ -26,12 +48,21 @@ describe('AppConfig', () => {
     expect(cfg.ai.defaultModel).toEqual({ providerId: 'p', modelId: 'm' })
   })
   it('defaults the pet on and repairs a bad pet selection without dropping the rest', () => {
-    expect(defaultConfig().pet).toEqual({ enabled: true, bubbles: true, motion: true, idleFlair: true, size: 'md' })
+    expect(defaultConfig().pet).toEqual({
+      enabled: true,
+      bubbles: true,
+      motion: true,
+      idleFlair: true,
+      size: 'md',
+      showRunning: true,
+      showDone: true,
+      showUnread: true,
+    })
     const cfg = AppConfigSchema.parse({
       pet: { current: '../../etc', size: 'huge', bubbles: false },
       agent: { maxStepsPerTurn: 9 },
     })
-    expect(cfg.pet).toEqual({ enabled: true, bubbles: false, motion: true, idleFlair: true, size: 'md' })
+    expect(cfg.pet).toMatchObject({ enabled: true, bubbles: false, motion: true, idleFlair: true, size: 'md' })
     expect(cfg.agent.maxStepsPerTurn).toBe(9)
     expect(AppConfigSchema.parse({ pet: { current: 'apex-nessie' } }).pet.current).toBe('apex-nessie')
   })

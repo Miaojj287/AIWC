@@ -6,7 +6,9 @@
 import { AtSign, Brain, FileText, User } from 'lucide-react'
 import type { Mention } from '@aiwc/protocol'
 import { runCommand } from '@/app/commands'
+import { t } from '@/i18n'
 import { Chip, type IconComponent } from '@/kit'
+import { mentionKey } from '../mentions'
 
 export const MENTION_ICON: Record<Mention['kind'], IconComponent> = {
   session: AtSign,
@@ -18,7 +20,7 @@ export const MENTION_ICON: Record<Mention['kind'], IconComponent> = {
 export function openMention(m: Mention): void {
   switch (m.kind) {
     case 'session':
-      runCommand('tab.openChat', { sessionId: m.id, title: m.label })
+      runCommand('tab.openChat', { sessionId: m.id, title: m.label, focusMessageId: m.messageIds?.[0] })
       return
     case 'file':
       runCommand('tab.openFile', { path: m.id, title: m.label })
@@ -31,6 +33,10 @@ export function openMention(m: Mention): void {
       return
   }
 }
+
+/** A quote shows how many messages it carries: 「产品群 · 3 条」. */
+export const mentionLabel = (m: Mention): string =>
+  m.messageIds?.length ? t('agent.thread.quotedMessages', { label: m.label, n: m.messageIds.length }) : m.label
 
 export interface MentionChipsProps {
   mentions: Mention[]
@@ -45,11 +51,11 @@ export function MentionChips({ mentions, onRemove, className }: MentionChipsProp
     <div className={className}>
       {mentions.map((m) => (
         <Chip
-          key={`${m.kind}:${m.id}`}
+          key={mentionKey(m)}
           variant="mention"
           icon={MENTION_ICON[m.kind]}
-          label={m.label}
-          title={m.label}
+          label={mentionLabel(m)}
+          title={mentionLabel(m)}
           onRemove={onRemove ? () => onRemove(m) : undefined}
           onClick={onRemove ? undefined : () => openMention(m)}
           className="h-5 max-w-[180px] text-micro"

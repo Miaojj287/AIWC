@@ -11,12 +11,13 @@ import { wechatEmoji } from './wechatEmoji'
 import { RichCard } from './RichCard'
 import { segmentText } from './linkify'
 import { FileBody, ImageBody, VideoBody, VoiceBody } from './MessageMedia'
+import type { LightboxItem } from './Lightbox'
 
 export interface MessageBodyProps {
   message: WxMessage
   self: boolean
   highlight?: string
-  onOpenImage(src: string, alt: string): void
+  onOpenImage(item: LightboxItem): void
 }
 
 function openExternal(href: string, what: string) {
@@ -41,7 +42,7 @@ export function RichText({
     <span className={cn('select-text whitespace-pre-wrap break-words', className)}>
       {segments.map((seg, i) => {
         const display = seg.href ? seg.text : wechatEmoji(seg.text)
-        const content = seg.mark ? <mark className="rounded-[4px] bg-accent-30 px-px text-fg">{display}</mark> : display
+        const content = seg.mark ? <mark className="rounded-sm bg-accent-30 px-px text-fg">{display}</mark> : display
         if (seg.href) {
           const href = seg.href
           return (
@@ -79,7 +80,7 @@ export function MessageBody({ message, self, highlight, onOpenImage }: MessageBo
           {message.quote ? (
             <div
               className={cn(
-                'rounded-control border-l-2 px-2 py-1 text-caption leading-[18px]',
+                'rounded-control border-l-2 px-2 py-1 text-caption leading-4.5',
                 self ? 'border-white/40 bg-white/10 text-white/80' : 'border-(--line-25) bg-hover-5 text-fg-2',
               )}
             >

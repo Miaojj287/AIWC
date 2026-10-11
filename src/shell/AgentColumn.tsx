@@ -76,9 +76,10 @@ export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentC
           ) : null}
         </div>
       ) : null}
-      <div
+      <aside
         hidden={collapsed}
         aria-hidden={collapsed || undefined}
+        aria-label={t('shell.agent.panel')}
         style={collapsed ? undefined : { width }}
         className={cn(
           'shell-agent-panel h-full shrink-0 border-l border-line-6 bg-panel',
@@ -89,7 +90,7 @@ export function AgentColumn({ collapsed, width, onToggleCollapsed, mac }: AgentC
         <ErrorBoundary compact>
           <AgentPanel collapsed={collapsed} onToggleCollapsed={onToggleCollapsed} />
         </ErrorBoundary>
-      </div>
+      </aside>
     </>
   )
 }

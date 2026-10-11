@@ -10,14 +10,16 @@ export interface CheckboxProps extends ComponentPropsWithoutRef<typeof RadixChec
   label?: ReactNode
   /** Secondary text under the label (12px, weak). */
   description?: ReactNode
+  /** 'round' = the 18px circle of a notes-style checklist (每日待办); default the 16px r4 square. */
+  shape?: 'square' | 'round'
 }
 
 /**
  * Checkbox — 16×16 r4; unchecked / hover / checked / indeterminate / disabled.
- * Figma 154:678. `checked` accepts `true | false | 'indeterminate'`.
+ * Figma 154:678. `checked` accepts `true | false | 'indeterminate'`. `shape="round"` is the checklist circle.
  */
 export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(function Checkbox(
-  { className, label, description, id, disabled, ...rest },
+  { className, label, description, id, disabled, shape = 'square', ...rest },
   ref,
 ) {
   const box = (
@@ -26,11 +28,12 @@ export const Checkbox = forwardRef<HTMLButtonElement, CheckboxProps>(function Ch
       id={id}
       disabled={disabled}
       className={cn(
-        'peer inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-(--line-25)',
-        'transition-colors duration-(--dur-fast) hover:border-(--line-40) hover:bg-line-8',
-        'data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent',
-        'data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent data-[state=indeterminate]:hover:bg-accent',
-        'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'peer inline-flex shrink-0 items-center justify-center border border-(--line-25)',
+        shape === 'round' ? 'size-4.5 rounded-chip' : 'size-4 rounded-sm',
+        'transition-colors enabled:hover:border-(--line-40) enabled:hover:bg-hover-7 enabled:active:bg-(--fill-13)',
+        'data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=checked]:enabled:hover:bg-accent-hover data-[state=checked]:enabled:active:bg-accent-active',
+        'data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent data-[state=indeterminate]:enabled:hover:bg-accent-hover',
+        'outline-none',
         'disabled:cursor-not-allowed disabled:opacity-40',
         !label && className,
       )}

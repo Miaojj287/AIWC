@@ -24,9 +24,12 @@ export const isBotChannel = (channel: ChannelKind | string | undefined): boolean
 /** 'observed' has no adapter of its own: replies go back through the UI-injection leg of the same local client. */
 export const OBSERVED_SEND_CHANNEL: ChannelKind = 'wechat-ui'
 
+/** 'wechat-remote' (the owner's phone) is reached through the owner's own iLink bot. */
+export const REMOTE_SEND_CHANNEL: ChannelKind = 'wechat-ilink'
+
 /** The channel a bot thread's reply travels on for a given origin channel. */
 export const sendChannelForOrigin = (channel: ChannelKind): ChannelKind =>
-  channel === 'observed' ? OBSERVED_SEND_CHANNEL : channel
+  channel === 'observed' ? OBSERVED_SEND_CHANNEL : channel === 'wechat-remote' ? REMOTE_SEND_CHANNEL : channel
 
 export const inferChatType = (chatId: string): SessionSource['chatType'] =>
   chatId.endsWith('@chatroom') ? 'group' : 'dm'

@@ -1,12 +1,12 @@
 /**
- * 已克隆 page (Figma 145:415): header (分身名 + version badge + meta + 重新克隆 / 删除) over two columns —
+ * 已克隆 page (Figma 145:415): header (分身名 + meta + 重新克隆 / 删除) over two columns —
  * persona test chat (left) and the editable profile (right).
  */
 import { RefreshCw, Trash } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { CloneStatus, RelationshipProfile, ThreadId } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Avatar, Badge, Button, EmptyState, toast } from '@/kit'
+import { Avatar, Button, EmptyState, toast } from '@/kit'
 import { formatRelative } from '@/platform/format'
 import { invoke, useInvoke } from '@/platform/hooks'
 import { appendSample, profileMeta } from '../profileModel'
@@ -101,6 +101,7 @@ export function ReadyView({
     try {
       await invoke('clone:deleteNote', { contactId, at })
       notes.reload()
+      toast.success(t('clone.ready.noteDeleted'))
     } catch (e) {
       toast.error(t('clone.ready.deleteNoteFailed'), { detail: message(e) })
     }
@@ -120,16 +121,14 @@ export function ReadyView({
   const meta = `${messageCount !== undefined ? `${t('clone.ready.basedOn', { n: messageCount, count: messageCount.toLocaleString('en-US') })} · ` : ''}${t('clone.ready.built', { when: formatRelative(status.builtAt) })}${profile ? ` · ${profileMeta(profile, status, modelLabel)}` : ''}`
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line-6 px-5">
+    // A container, not the viewport: the workspace can be 400px wide while the window is 1400px.
+    <div className="@container flex h-full min-h-0 flex-col">
+      <header className="flex min-h-18 shrink-0 items-center gap-3 border-b border-line-6 px-5 py-3">
         <Avatar id={contactId} name={name} src={avatarPath} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-bubble font-medium leading-5 text-fg">
-              {t('clone.ready.title', { name })}
-            </span>
-            <Badge tone="ok">{t('clone.ready.badge', { version: status.version })}</Badge>
-          </div>
+          <span className="min-w-0 truncate text-bubble font-semibold leading-5 text-fg">
+            {t('clone.ready.title', { name })}
+          </span>
           <span className="truncate text-caption text-fg-3" title={meta}>
             {meta}
           </span>
@@ -137,16 +136,11 @@ export function ReadyView({
         <Button variant="ghost" icon={RefreshCw} onClick={() => setDialog('reclone')}>
           {t('clone.actions.reclone')}
         </Button>
-        <Button
-          variant="ghost"
-          icon={Trash}
-          className="text-danger hover:text-danger"
-          onClick={() => setDialog('delete')}
-        >
+        <Button variant="ghost" icon={Trash} onClick={() => setDialog('delete')}>
           {t('common.delete')}
         </Button>
       </header>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 @max-[720px]:flex-col">
         <PersonaChat
           contactId={contactId}
           name={name}
@@ -160,7 +154,6 @@ export function ReadyView({
         {profile ? (
           <ProfileEditor
             profile={profile}
-            messageCount={messageCount}
             onPatch={patch}
             onRefine={refine}
             refining={refining}
@@ -168,7 +161,7 @@ export function ReadyView({
             onDeleteNote={deleteNote}
           />
         ) : (
-          <aside className="flex w-[260px] shrink-0 items-center justify-center border-l border-line-6">
+          <aside className="flex w-[260px] shrink-0 items-center justify-center border-l border-line-6 @max-[720px]:w-full @max-[720px]:border-l-0 @max-[720px]:border-t">
             {loaded.error ? (
               <EmptyState
                 compact

@@ -19,7 +19,7 @@ describe('<RichText> search highlight', () => {
       const mark = container.querySelector('mark')
       expect(mark).not.toBeNull()
       expect(mark!.textContent).toBe('周报')
-      expect(mark!.className).toContain('rounded-[4px]')
+      expect(mark!.className).toContain('rounded-sm')
       expect(mark!.className).toContain('bg-accent-30')
       expect(mark!.className).toContain('text-fg')
       expect(mark!.className).not.toContain('rounded-[2px]')

@@ -33,7 +33,6 @@ const renderEditor = (p: RelationshipProfile) =>
   render(
     <ProfileEditor
       profile={p}
-      messageCount={undefined}
       onPatch={async () => {}}
       onRefine={async () => {}}
       refining={false}
@@ -54,7 +53,6 @@ describe('ProfileEditor empty states', () => {
       expect(root?.querySelector('.size-9')).not.toBeNull()
       expect(root?.querySelector('svg')).not.toBeNull()
     }
-    expect(screen.getAllByText('点右侧 + 添加')).toHaveLength(4)
     expect(screen.getByText('在试聊里把好的回复保存为样本')).toBeTruthy()
     expect(screen.queryByText('暂无 · 点右侧 + 添加')).toBeNull()
   })

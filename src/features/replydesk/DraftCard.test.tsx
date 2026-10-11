@@ -47,7 +47,7 @@ describe('DraftCard buttons', () => {
     expect(primary.className).toContain('bg-accent')
     // the other actions never become primary
     expect(screen.getByRole('button', { name: '修改后发送' }).className).toContain('border-(--line-16)')
-    expect(screen.getByRole('button', { name: '拒绝' }).className).toContain('bg-line-8')
+    expect(screen.getByRole('button', { name: '拒绝' }).className).toContain('bg-hover-7')
   })
 
   it('applies the same rule to 重试发送 on a failed draft', () => {

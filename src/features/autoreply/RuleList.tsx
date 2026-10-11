@@ -32,13 +32,15 @@ import { startReplyDesk, useReplyDeskStore } from '@/features/replydesk/store'
 import { useT, type MessageKey } from '@/i18n'
 import { formatTime } from '@/platform/format'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
+import { listKeyNav } from '@/platform/listNavigation'
 import type { ObjectListProps } from '@/shell/objectListRegistry'
 import { servableAvatar } from '@/shell/objectList/sessionListModel'
 import { useShellStore } from '@/shell/shellStore'
 import { CopyRuleDialog } from './editor/CopyRuleDialog'
+import { warnIfAutoSendBlocked } from './autoSendPermissions'
 import { buildRuleRows, type RuleRow } from './ruleListModel'
 import { ruleStatusLine, type RuleSegment } from './ruleModel'
-import { usePagedSessions, useSessionsById } from './sessionPaging'
+import { usePagedSessions, useSessionsById } from '@/platform/sessionPaging'
 
 export const RULE_SEGMENTS: ReadonlyArray<{ id: RuleSegment; labelKey: MessageKey }> = [
   { id: 'all', labelKey: 'common.all' },
@@ -137,6 +139,7 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
           detail: enabled ? t('autoreply.rule.enabledToastDetail') : undefined,
         },
       )
+      if (enabled) void warnIfAutoSendBlocked()
     } catch (e) {
       toast.error(t('autoreply.rule.toggleFailed'), { detail: e instanceof Error ? e.message : String(e) })
     } finally {
@@ -198,7 +201,7 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
   }
 
   const loading = page.loading || (rules.loading && !rulesKnown) || (rulesKnown && ruleSessions.loading)
-  if (loading) return <SkeletonListRows rows={6} className="px-2.5 py-2" />
+  if (loading) return <SkeletonListRows rows={6} className="px-5 pt-2" />
   const loadError = rules.error ?? ruleSessions.error ?? (rows.length === 0 ? page.error : undefined)
   if (loadError) {
     return (
@@ -219,7 +222,7 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
   }
   if (rows.length === 0) {
     // 全部 may still be paging past chats that cannot carry a rule (official accounts).
-    if (segment === 'all' && (hasMore || page.loadingMore)) return <SkeletonListRows rows={6} className="px-2.5 py-2" />
+    if (segment === 'all' && (hasMore || page.loadingMore)) return <SkeletonListRows rows={6} className="px-5 pt-2" />
     if (segment === 'all' && !query.trim())
       return (
         <EmptyState
@@ -236,7 +239,6 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
         title={
           query.trim() ? t('autoreply.list.noMatch', { query }) : t('autoreply.list.noRulesInSegment', { segment })
         }
-        description={segment !== 'all' ? t('autoreply.list.switchToAllHint') : undefined}
         action={segment !== 'all' ? { label: t('autoreply.list.viewAll'), onClick: () => setSegment(null) } : undefined}
       />
     )
@@ -247,44 +249,46 @@ export function RuleList({ query, activeObjectId }: ObjectListProps) {
 
   return (
     <>
-      <VList
-        ref={listRef}
-        data={data}
-        onScroll={loadMoreNearEnd}
-        onScrollEnd={loadMoreNearEnd}
-        role="list"
-        aria-label={t('autoreply.list.ariaLabel')}
-        className="h-full overscroll-contain px-2 py-1.5"
-        style={{ height: '100%' }}
-      >
-        {(item) =>
-          item === FOOTER ? (
-            <div key={FOOTER} className="py-1">
-              {page.error ? (
-                <EmptyState
-                  compact
-                  variant="error"
-                  title={t('autoreply.list.loadFailed')}
-                  description={page.error.message}
-                  action={{ label: t('common.retry'), onClick: reloadPages }}
-                />
-              ) : (
-                <SkeletonListRows rows={2} className="px-0.5" />
-              )}
-            </div>
-          ) : (
-            <RuleListRow
-              key={item.session.id}
-              row={item}
-              parked={parkedBySession.get(item.session.id) ?? 0}
-              selected={activeObjectId === item.session.id}
-              menu={menuFor(item)}
-              onOpen={() => open(item)}
-              onToggle={(enabled) => void toggle(item, enabled)}
-            />
-          )
-        }
-      </VList>
+      <div className="h-full" onKeyDown={listKeyNav}>
+        <VList
+          ref={listRef}
+          data={data}
+          onScroll={loadMoreNearEnd}
+          onScrollEnd={loadMoreNearEnd}
+          role="group"
+          aria-label={t('autoreply.list.ariaLabel')}
+          className="h-full overscroll-contain px-2 py-1.5"
+          style={{ height: '100%' }}
+        >
+          {(item) =>
+            item === FOOTER ? (
+              <div key={FOOTER} className="py-1">
+                {page.error ? (
+                  <EmptyState
+                    compact
+                    variant="error"
+                    title={t('autoreply.list.loadFailed')}
+                    description={page.error.message}
+                    action={{ label: t('common.retry'), onClick: reloadPages }}
+                  />
+                ) : (
+                  <SkeletonListRows rows={2} className="px-0.5" />
+                )}
+              </div>
+            ) : (
+              <RuleListRow
+                key={item.session.id}
+                row={item}
+                parked={parkedBySession.get(item.session.id) ?? 0}
+                selected={activeObjectId === item.session.id}
+                menu={menuFor(item)}
+                onOpen={() => open(item)}
+                onToggle={(enabled) => void toggle(item, enabled)}
+              />
+            )
+          }
+        </VList>
+      </div>
       {copyTarget?.rule ? (
         <CopyRuleDialog
           open
@@ -327,7 +331,6 @@ function RuleListRow({ row, parked, selected, menu, onOpen, onToggle }: RuleList
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <ListItem
-          role="listitem"
           leading={<Avatar id={row.session.id} name={row.session.title} src={servableAvatar(row.session.avatarPath)} />}
           title={row.session.title}
           subtitle={

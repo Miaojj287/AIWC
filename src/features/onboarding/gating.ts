@@ -4,6 +4,7 @@
  */
 import { validateWechatKey, type KeyAcquireStep } from '@aiwc/protocol'
 import { localizeKnownText, t, type MessageKey } from '@/i18n'
+import { keyStepFailureText } from '@/platform/wechatKeys'
 
 export type KeyKind = KeyAcquireStep['id'] extends infer T ? Exclude<T, 'verify'> : never
 
@@ -78,14 +79,9 @@ export function nextStepGate(input: GateInput): GateResult {
   return { ok: false, missing, reason: t('onboarding.gate.reason', { n: missing.length, a, b, c }) }
 }
 
-/** Replace a step by id (or append) — used while `substrate:keyStep` events stream in. */
-export function mergeKeyStep(steps: readonly KeyAcquireStep[], step: KeyAcquireStep): KeyAcquireStep[] {
-  const idx = steps.findIndex((s) => s.id === step.id)
-  if (idx < 0) return [...steps, step]
-  return steps.map((s, i) => (i === idx ? { ...s, ...step } : s))
-}
+export { mergeKeyStep } from '@/platform/wechatKeys'
 
-/** Placeholder rows until `substrate:keyStep` streams the real ones; an empty label renders KEY_STEP_LABELS[id]. */
+/** Placeholder rows for the initial store state (a run starts from `initialKeySteps()`). */
 export const DEFAULT_KEY_STEPS: readonly KeyAcquireStep[] = [
   { id: 'db_key', label: '', status: 'todo' },
   { id: 'image_xor', label: '', status: 'todo' },
@@ -93,35 +89,36 @@ export const DEFAULT_KEY_STEPS: readonly KeyAcquireStep[] = [
   { id: 'verify', label: '', status: 'todo' },
 ]
 
-export const KEY_STEP_LABELS: Record<KeyAcquireStep['id'], MessageKey> = {
-  db_key: 'onboarding.keys.steps.dbKey',
-  image_xor: 'onboarding.keys.steps.imageXor',
-  image_aes: 'onboarding.keys.steps.imageAes',
-  verify: 'onboarding.keys.steps.verify',
-}
-
 // Matches failure details from the OS / main process (either UI language) — detection, not UI copy.
 const PERMISSION_RE = /权限|permission|full disk|完全磁盘|eperm|eacces|operation not permitted|administrator rights/i
 
-/** Does a failed step point at a missing system permission (→ guidance dialog)? */
+// The guidance dialog is about Full Disk Access (reading WeChat's files). A coded 'needs_authorization'
+// is the Developer Tools grant instead — the progress panel explains that one and links to it.
+const isPermissionFailure = (s: KeyAcquireStep): boolean =>
+  s.status === 'failed' && s.failure !== 'needs_authorization' && PERMISSION_RE.test(s.detail ?? '')
+
+/** Does a failed step point at a missing file-access permission (→ Full Disk Access guidance dialog)? */
 export function needsPermission(steps: readonly KeyAcquireStep[]): boolean {
-  return steps.some((s) => s.status === 'failed' && PERMISSION_RE.test(s.detail ?? ''))
+  return steps.some(isPermissionFailure)
 }
 
-/** Fold the final step list into per-key states; untouched keys keep their previous state. */
+/**
+ * Fold the final step list into per-key states; untouched keys keep their previous state, and so do
+ * steps a cancel or an earlier failure left unrun. A db key that failed verification is not stored
+ * by the main process, so it shows as failed rather than acquired.
+ */
 export function applyKeySteps(prev: KeyStates, steps: readonly KeyAcquireStep[]): KeyStates {
   const next: KeyStates = { ...prev }
-  const permission = needsPermission(steps)
   for (const s of steps) {
     if (s.id === 'verify') continue
     if (s.status === 'done') next[s.id] = { status: 'acquired', source: 'auto' }
-    else if (s.status === 'failed')
-      next[s.id] = {
-        status: 'failed',
-        error: s.detail ?? t('onboarding.keys.acquireFailed'),
-        needsPermission: permission && PERMISSION_RE.test(s.detail ?? ''),
-      }
+    else if (s.status === 'failed' && s.failure !== 'cancelled' && s.failure !== 'skipped')
+      next[s.id] = { status: 'failed', error: keyStepFailureText(s), needsPermission: isPermissionFailure(s) }
   }
+  const verify = steps.find((s) => s.id === 'verify')
+  const dbKey = steps.find((s) => s.id === 'db_key')
+  if (dbKey?.status === 'done' && verify?.status === 'failed' && verify.failure !== 'cancelled')
+    next.db_key = { status: 'failed', error: keyStepFailureText(verify) }
   return next
 }
 
@@ -139,21 +136,22 @@ export function summariseKeys(keys: KeyStates): AcquireSummary {
   return { done, total: KEY_KINDS.length, failed, complete: done === KEY_KINDS.length }
 }
 
-export type WizardPage = 'welcome' | 'connect'
+export type WizardPage = 'welcome' | 'connect' | 'model'
 
 export const STEP_LABELS: readonly MessageKey[] = [
   'onboarding.steps.welcome',
   'onboarding.steps.connect',
   'onboarding.steps.unlock',
+  'onboarding.steps.model',
   'onboarding.steps.done',
 ]
 
 /**
  * Steps bar (Figma 91:417 bottom): 0 welcome → 1 connect (path + account) → 2 unlock (keys, once the
- * account is verified) → 3 done (while testing the connection).
+ * account is verified) → 3 model (接入模型, also while testing the connection) → 4 done.
  */
 export function activeStepIndex(page: WizardPage, verified: boolean, testing: boolean): number {
   if (page === 'welcome') return 0
-  if (testing) return 3
+  if (page === 'model' || testing) return 3
   return verified ? 2 : 1
 }

@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, MessageSquare, Reply, TriangleAlert } from 'lucide-react'
+import { Bot, CalendarClock, ListTodo, MessageSquare, Reply, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { installTabCommands } from '@/app/tabCommands'
 import { detectMac } from '@/app/shortcuts'
@@ -7,7 +7,7 @@ import { ConfirmDialog, EmptyState, ErrorBoundary, Kbd, type IconComponent } fro
 import { getObjectList } from '@/shell/objectListRegistry'
 import { useShellStore, type RailFunction } from '@/shell/shellStore'
 import { getTabRegistration, tabTitle, type TabDescriptor } from './tabRegistry'
-import { TabStrip } from './TabStrip'
+import { tabDomId, tabPanelDomId, TabStrip } from './TabStrip'
 import { useTabsStore } from './tabsStore'
 
 /** Tabs kept mounted (hidden) after the active one so switching back restores scroll / drafts. */
@@ -36,7 +36,7 @@ export function Workspace({ mac = detectMac() }: WorkspaceProps) {
   const active = activeId ? tabs.find((t) => t.id === activeId) : undefined
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-shell" aria-label={t('workspace.ariaLabel')}>
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-shell" aria-label={t('workspace.ariaLabel')}>
       <TabStrip onRequestClose={guard.requestClose} mac={mac} />
       <div className="relative min-h-0 flex-1 bg-content">
         {!active ? <FunctionEmpty fn={rail} mac={mac} /> : null}
@@ -45,7 +45,7 @@ export function Workspace({ mac = detectMac() }: WorkspaceProps) {
         ))}
       </div>
       {guard.dialog}
-    </section>
+    </main>
   )
 }
 
@@ -71,7 +71,8 @@ function TabHost({
     <div
       hidden={!active}
       role="tabpanel"
-      aria-label={tabTitle(tab)}
+      id={tabPanelDomId(tab.id)}
+      aria-labelledby={tabDomId(tab.id)}
       data-tab-id={tab.id}
       className="absolute inset-0 flex min-h-0 flex-col"
     >
@@ -94,19 +95,12 @@ function TabHost({
 
 /* ---------------------------------------------------------- empty state */
 
-const EMPTY_COPY: Record<RailFunction, { icon: IconComponent; title: MessageKey; description: MessageKey }> = {
-  chat: { icon: MessageSquare, title: 'workspace.empty.chat.title', description: 'workspace.empty.chat.description' },
-  autoreply: {
-    icon: Reply,
-    title: 'workspace.empty.autoreply.title',
-    description: 'workspace.empty.autoreply.description',
-  },
-  clone: { icon: Bot, title: 'workspace.empty.clone.title', description: 'workspace.empty.clone.description' },
-  tasks: {
-    icon: CalendarClock,
-    title: 'workspace.empty.tasks.title',
-    description: 'workspace.empty.tasks.description',
-  },
+const EMPTY_COPY: Record<RailFunction, { icon: IconComponent; title: MessageKey }> = {
+  chat: { icon: MessageSquare, title: 'workspace.empty.chat.title' },
+  autoreply: { icon: Reply, title: 'workspace.empty.autoreply.title' },
+  clone: { icon: Bot, title: 'workspace.empty.clone.title' },
+  tasks: { icon: CalendarClock, title: 'workspace.empty.tasks.title' },
+  todo: { icon: ListTodo, title: 'workspace.empty.todo.title' },
 }
 
 /** A function may bring its own empty state (定时任务 offers templates); the rest share the generic copy. */
@@ -123,14 +117,8 @@ function WorkspaceEmpty({ fn, mac }: { fn: RailFunction; mac: boolean }) {
       icon={copy.icon}
       title={t(copy.title)}
       description={
-        <span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
-          <span>{t(copy.description)}</span>
-          <span aria-hidden className="text-fg-3/60">
-            ·
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <Trans k="workspace.empty.search" params={{ kbd: <Kbd keys={mac ? '⌘K' : 'Ctrl+K'} /> }} />
-          </span>
+        <span className="inline-flex items-center gap-1">
+          <Trans k="workspace.empty.search" params={{ kbd: <Kbd keys={mac ? '⌘K' : 'Ctrl+K'} /> }} />
         </span>
       }
       className="h-full"

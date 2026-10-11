@@ -3,7 +3,16 @@
  * `Ref` point into the OS-backed secret store (electron safeStorage).
  */
 import { z } from 'zod'
+import { JEV_DEFAULT_BASE_URL, JEV_DEFAULT_MODEL } from './jev'
+import { CallLogConfigSchema, ProxyConfigSchema } from './modelNetwork'
 import { PET_ID_PATTERN } from './pet'
+import {
+  DEFAULT_TODO_SCHEDULE,
+  TODO_DEFAULT_MAX_MESSAGES,
+  TODO_MAX_SOURCES,
+  TodoScheduleSchema,
+  TodoSourceSchema,
+} from './todo'
 
 export const ThemeSchema = z.enum(['dark', 'light', 'system'])
 const AppearancePaletteSchema = z.object({
@@ -86,6 +95,9 @@ export const CloseBehaviorSchema = z.enum(['quit', 'minimize', 'ask'])
 
 /** Window layout: the four-column workbench, or the Agent window (CLAUDE.md §12). */
 export const ShellModeSchema = z.enum(['workbench', 'agent'])
+/** Which key sends from the Agent composer (设置 › 常规 or the composer's ＋ menu). */
+export const ComposerSendKeySchema = z.enum(['enter', 'modEnter'])
+export type ComposerSendKey = z.infer<typeof ComposerSendKeySchema>
 
 /**
  * UI language (设置 › 常规 › 语言). Every user-facing string in src/ and electron/ resolves through
@@ -110,6 +122,8 @@ export const ModelCapabilitiesSchema = z.object({
   temperature: z.boolean().default(false),
   contextLimit: z.number().int().positive().optional(),
   outputLimit: z.number().int().positive().optional(),
+  /** Accepts images (API metadata or a known profile); the model's own supportsVision is the user's override. */
+  vision: z.boolean().optional(),
   source: z.enum(['api', 'profile', 'unknown']).default('unknown'),
 })
 export type ModelCapabilities = z.infer<typeof ModelCapabilitiesSchema>
@@ -159,6 +173,15 @@ export const ProviderSchema = z.object({
 
 export const ModelSelectionSchema = z.object({ providerId: z.string(), modelId: z.string() })
 
+/** 设置 › AI 接入 › Jev: the decision model behind 自动回复的 Jev（beta）回复方式. The key lives in the secret store. */
+export const JevConfigSchema = z.object({
+  baseUrl: z.string().default(JEV_DEFAULT_BASE_URL),
+  model: z.string().min(1).default(JEV_DEFAULT_MODEL),
+  apiKeyRef: z.string().optional(),
+  lastTest: ProviderTestSchema.optional(),
+})
+export type JevConfig = z.infer<typeof JevConfigSchema>
+
 export const SttConfigSchema = z.object({
   mode: z.enum(['local', 'online']).default('local'),
   localModelId: z.string().optional(),
@@ -175,6 +198,14 @@ export const AppConfigSchema = z.object({
       transparency: z.boolean().default(DEFAULT_TRANSPARENCY),
       launchAtLogin: z.boolean().default(false),
       closeBehavior: CloseBehaviorSchema.default('ask'),
+      /**
+       * 系统通知: while the window is in the background, things waiting for the user (an approval, a reply draft, a
+       * paused auto reply, a finished task) also raise an OS notification. Names stay out of it unless `showNames`
+       * (the lock screen and notification centre keep them).
+       */
+      notifications: z
+        .object({ enabled: z.boolean().default(true), showNames: z.boolean().default(false) })
+        .prefault({}),
       // An unknown value written by a newer build falls back instead of discarding the whole config.
       language: LanguageSchema.catch(DEFAULT_LANGUAGE).default(DEFAULT_LANGUAGE),
     })
@@ -196,6 +227,11 @@ export const AppConfigSchema = z.object({
       defaultModel: ModelSelectionSchema.optional(),
       embeddingModel: ModelSelectionSchema.optional(),
       stt: SttConfigSchema.prefault({}),
+      jev: JevConfigSchema.prefault({}),
+      /** 网络: proxy for requests to model providers (loopback / Ollama always direct). */
+      proxy: ProxyConfigSchema.prefault({}),
+      /** 调用记录: whether request / response content is kept with each logged call (off by default). */
+      callLog: CallLogConfigSchema.prefault({}),
     })
     .prefault({}),
   agent: z
@@ -208,6 +244,8 @@ export const AppConfigSchema = z.object({
       shellSandbox: z.enum(['auto', 'off']).catch('auto').default('auto'),
       maxStepsPerTurn: z.number().int().min(1).max(200).default(40),
       compactionThreshold: z.number().min(0.5).max(0.95).default(0.8),
+      /** 设置 › 技能: skills switched off by name — not offered to the model or in the `/` menu. */
+      disabledSkills: z.array(z.string().max(80)).max(500).default([]).catch([]),
       turnTimeoutMs: z
         .number()
         .int()
@@ -222,11 +260,24 @@ export const AppConfigSchema = z.object({
       maxEntries: z.number().int().min(10).max(2000).default(200),
     })
     .prefault({}),
-  diary: z
+  /**
+   * 每日待办: opt-in (off by default). While on, the picked group chats' new messages are sent to `model`
+   * (the default model when unset) on `schedule`; todos and summaries stay on this machine. A scan never
+   * reads a chat that is not in `sources`. Replaced the nightly 日记 pipeline (`diary`, dropped on load).
+   */
+  todo: z
     .object({
-      enabled: z.boolean().default(true),
-      hour: z.number().int().min(0).max(23).default(2),
-      customPrompt: z.string().optional(),
+      enabled: z.boolean().default(false),
+      sources: z.array(TodoSourceSchema).max(TODO_MAX_SOURCES).default([]).catch([]),
+      schedule: TodoScheduleSchema.default(DEFAULT_TODO_SCHEDULE).catch(DEFAULT_TODO_SCHEDULE),
+      model: ModelSelectionSchema.optional().catch(undefined),
+      maxMessagesPerSource: z
+        .number()
+        .int()
+        .min(20)
+        .max(500)
+        .default(TODO_DEFAULT_MAX_MESSAGES)
+        .catch(TODO_DEFAULT_MAX_MESSAGES),
     })
     .prefault({}),
   autoReply: z
@@ -248,6 +299,12 @@ export const AppConfigSchema = z.object({
       /** Occasional wave / hop while idle. */
       idleFlair: z.boolean().default(true),
       size: z.enum(['sm', 'md', 'lg']).default('md').catch('md'),
+      /** Status readout beside the pet (Codex-style): Agent threads running or waiting for the user. */
+      showRunning: z.boolean().default(true),
+      /** …threads that finished (or failed) while the user was not looking, until they open them. */
+      showDone: z.boolean().default(true),
+      /** …unread WeChat messages in chats that are not muted or folded. */
+      showUnread: z.boolean().default(true),
     })
     .prefault({}),
   onboarding: z.object({ completed: z.boolean().default(false) }).prefault({}),
@@ -265,6 +322,8 @@ export const AppConfigSchema = z.object({
       agentWindowSidebarCollapsed: z.boolean().default(false),
       agentWindowSidebarWidth: z.number().int().min(220).max(400).default(260),
       agentWindowWorkspaceWidth: z.number().int().min(400).max(1200).default(560),
+      /** Agent composer: `enter` sends (⇧↵ newline), `modEnter` sends with ⌘↵ / Ctrl+Enter (↵ newline). */
+      composerSendKey: ComposerSendKeySchema.default('enter').catch('enter'),
     })
     .prefault({}),
 })
@@ -275,6 +334,7 @@ export type ModelEntry = z.infer<typeof ModelEntrySchema>
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>
 export type ModelSelection = z.infer<typeof ModelSelectionSchema>
 export type PetConfig = AppConfig['pet']
+export type TodoConfig = AppConfig['todo']
 export type ShellMode = z.infer<typeof ShellModeSchema>
 
 export const defaultConfig = (): AppConfig => AppConfigSchema.parse({})

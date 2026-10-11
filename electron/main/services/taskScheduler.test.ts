@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { asThreadId, type Event, type TaskRun, type ThreadId, type ToolArtifact, type UserInput } from '@aiwc/protocol'
@@ -10,7 +10,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'aiwc-tasks-'))
 })
 afterEach(() => {
-  rmSync(dir, { recursive: true, force: true })
+  // async heartbeat / run writes may still land while the folder is removed
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
 describe('schedules', () => {
@@ -171,8 +172,8 @@ describe('createTaskScheduler', () => {
     expect(stored.runs.map((r) => r.id)).toEqual([run.id])
 
     // Persistence: a fresh scheduler over the same directory sees the task and its history.
-    await waitFor(() => readFileSync(join(dir, 'runs.jsonl'), 'utf8').includes(run.id))
     scheduler.stop()
+    await scheduler.flush()
     const again = createTaskScheduler({
       dir,
       kernel,
@@ -245,6 +246,29 @@ describe('createTaskScheduler', () => {
     ).rejects.toThrow(/invalid schedule/)
     await expect(scheduler.setEnabled('missing', true)).rejects.toThrow(/unknown task/)
     expect(await scheduler.runs()).toEqual([])
+  })
+
+  it('keeps saving after a write fails', async () => {
+    const scheduler = createTaskScheduler({
+      dir,
+      kernel: fakeKernel(),
+      input: () => ({ content: [], mentions: [] }),
+      threadTitle: () => '',
+    })
+    // A non-empty directory in the file's place makes the first write fail the way a full disk would.
+    mkdirSync(join(dir, 'tasks.json', 'blocker'), { recursive: true })
+    const first = await scheduler.save({
+      name: 'a',
+      prompt: 'p',
+      schedule: { kind: 'daily', time: '08:30' },
+      enabled: true,
+      permissionMode: 'bypass',
+    })
+    expect(existsSync(join(dir, 'tasks.json', 'blocker'))).toBe(true)
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([])
+    rmSync(join(dir, 'tasks.json'), { recursive: true })
+    await scheduler.save({ ...first, name: 'b' })
+    expect(JSON.parse(readFileSync(join(dir, 'tasks.json'), 'utf8')).tasks[0].name).toBe('b')
   })
 
   it('keeps the interval anchor across unrelated edits and resets it when the schedule changes', async () => {

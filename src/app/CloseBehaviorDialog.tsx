@@ -15,7 +15,8 @@ export interface CloseBehaviorDialogProps {
 
 /**
  * Asked when config.general.closeBehavior === 'ask' and the window's × is pressed (DESIGN-SPEC §2 常规):
- * 退出 / 最小化到菜单栏 + 「记住我的选择」. Default focus on 取消; the safe choice (keep running) is primary.
+ * 退出 / 保留在程序坞 (macOS) or 最小化到系统托盘 (Windows) + 「记住我的选择」. Default focus on 取消; the safe choice
+ * (keep running) is primary. The main process creates the tray icon before it hides the window.
  */
 export function CloseBehaviorDialog({ open, onOpenChange, onChoose, platform }: CloseBehaviorDialogProps) {
   const t = useT()
@@ -24,7 +25,7 @@ export function CloseBehaviorDialog({ open, onOpenChange, onChoose, platform }: 
   useEffect(() => {
     if (!open) setRemember(false)
   }, [open])
-  const tray = platform === 'darwin' ? 'menuBar' : 'tray'
+  const tray = platform === 'darwin' ? 'dock' : 'tray'
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -48,7 +49,7 @@ export function CloseBehaviorDialog({ open, onOpenChange, onChoose, platform }: 
             description={t('app.closeDialog.rememberHint')}
           />
         </DialogBody>
-        <DialogFooter>
+        <DialogFooter actions>
           <Button ref={cancelRef} variant="ghost" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>

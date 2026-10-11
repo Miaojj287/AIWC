@@ -108,7 +108,6 @@ it('waits for measurement and corrects the initial scroll to the latest row', ()
       onQuote={noop}
       onToggleSelect={noop}
       onJumpToTime={noop}
-      onDeleteLocal={noop}
       onOpenImage={noop}
     />,
   )

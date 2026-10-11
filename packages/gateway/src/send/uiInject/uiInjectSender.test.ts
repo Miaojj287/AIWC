@@ -198,7 +198,9 @@ describe('createUiInjectSender', () => {
     expect(sender.halted).toBe(true)
     expect(sender.haltReason).toContain('没能确认')
     expect(inj.commits()).toBe(2) // one send + one retry; the queued job never touched the keyboard
-    expect(events).toEqual([{ type: 'autoreply.halted', reason: '没能确认消息已发出，已停止后续发送' }])
+    expect(events).toEqual([
+      { type: 'autoreply.halted', reason: '没能确认消息已发出，已停止后续发送', code: 'not-sent' },
+    ])
 
     const r3 = await sender.send(req('c'))
     expect(r3.ok).toBe(false)
@@ -247,13 +249,16 @@ describe('createUiInjectSender', () => {
     expect(res.ok).toBe(false)
     expect(res.error).toContain('辅助功能权限')
     expect(inj.commits()).toBe(0)
-    expect(events[0]).toMatchObject({ type: 'autoreply.halted' })
+    expect(events[0]).toMatchObject({ type: 'autoreply.halted', code: 'no-permission' })
+    expect(sender.haltCode).toBe('no-permission')
 
     sender.resume()
+    expect(sender.haltCode).toBeUndefined()
     const inj2 = createFakeInjector({ failFocus: new Error('osascript exploded') })
     const { sender: s2 } = harness({ injector: inj2.injector, substrate: db.substrate })
     const r2 = await s2.send(req('x'))
     expect(r2).toEqual({ ok: false, verified: false, error: 'osascript exploded' })
+    expect(s2.haltCode).toBe('not-sent')
   })
 
   it('rejects non-text parts and empty text without halting', async () => {

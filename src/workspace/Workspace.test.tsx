@@ -122,7 +122,7 @@ describe('Workspace', () => {
     render(<Workspace mac />)
     act(() => {
       runCommand('tab.openChat', { sessionId: 's1', title: 'A' })
-      tabs().open({ kind: 'diary', objectId: 'diary', title: '日记' })
+      tabs().open({ kind: 'todo', objectId: 'todo', title: '每日待办' })
     })
     expect(screen.getByText('无法显示此标签')).toBeTruthy()
     act(() => runCommand('tab.closeActive'))

@@ -5,7 +5,14 @@ import { __setBridgeForTests } from '@/platform/bridge'
 import { __resetShellStoreForTests } from '@/shell/shellStore'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { onCommand } from './commands'
-import { formatShortcut, installShortcuts, matchShortcut, resolveShortcutEnv, shortcutLabel } from './shortcuts'
+import {
+  formatShortcut,
+  installShortcuts,
+  matchShortcut,
+  resolveShortcutEnv,
+  shortcutLabel,
+  SHORTCUTS,
+} from './shortcuts'
 import { installTabCommands } from './tabCommands'
 
 const key = (overrides: Partial<KeyboardEventInit> & { key: string }) =>
@@ -21,6 +28,9 @@ describe('matchShortcut', () => {
       payload: { fn: 'autoreply' },
     })
     expect(matchShortcut(key({ key: '3', metaKey: true }), { mac: true })).toMatchObject({ payload: { fn: 'clone' } })
+    expect(matchShortcut(key({ key: '4', metaKey: true }), { mac: true })).toMatchObject({ payload: { fn: 'tasks' } })
+    expect(matchShortcut(key({ key: '5', metaKey: true }), { mac: true })).toMatchObject({ payload: { fn: 'todo' } })
+    expect(matchShortcut(key({ key: '6', metaKey: true }), { mac: true })).toBeUndefined()
   })
 
   it('uses Ctrl instead of ⌘ off macOS and ignores the wrong modifier', () => {
@@ -60,6 +70,24 @@ describe('matchShortcut', () => {
     expect(matchShortcut(key({ key: ',', metaKey: true }), { mac: true })?.command).toBe('tab.openSettings')
     expect(matchShortcut(key({ key: 'f', metaKey: true }), { mac: true })?.command).toBe('search.inPage')
     expect(matchShortcut(key({ key: 'n', metaKey: true }), { mac: true })?.command).toBe('agent.newThread')
+  })
+
+  it('maps ⇧⌘F / Ctrl+Shift+F to the full-history search tab and leaves ⌘F to the page', () => {
+    expect(matchShortcut(key({ key: 'F', metaKey: true, shiftKey: true }), { mac: true })).toMatchObject({
+      command: 'tab.openSearch',
+      payload: {},
+    })
+    expect(matchShortcut(key({ key: 'F', ctrlKey: true, shiftKey: true }), { mac: false })?.command).toBe(
+      'tab.openSearch',
+    )
+    expect(matchShortcut(key({ key: 'f', ctrlKey: true }), { mac: false })?.command).toBe('search.inPage')
+    expect(shortcutLabel('tab.openSearch', true)).toBe('⇧⌘F')
+    expect(shortcutLabel('tab.openSearch', false)).toBe('Ctrl+Shift+F')
+  })
+
+  it('binds every key chord to one command only', () => {
+    const chords = SHORTCUTS.map((b) => `${b.key}|${b.mod}|${Boolean(b.shift)}|${Boolean(b.alt)}`)
+    expect(new Set(chords).size).toBe(chords.length)
   })
 })
 
@@ -167,9 +195,12 @@ describe('⌘⇧K opens the kit gallery tab in web mode', () => {
 
 describe('labels', () => {
   it('formats mac symbols and win/linux words', () => {
-    expect(formatShortcut({ key: 't', mod: true, shift: true }, true)).toBe('⌘⇧T')
+    expect(formatShortcut({ key: 't', mod: true, shift: true }, true)).toBe('⇧⌘T')
     expect(formatShortcut({ key: 't', mod: true, shift: true }, false)).toBe('Ctrl+Shift+T')
     expect(formatShortcut({ key: ',', mod: true }, true)).toBe('⌘,')
+    // Enter is a glyph in macOS menus and a word on Windows.
+    expect(formatShortcut({ key: 'enter', mod: false, shift: true }, true)).toBe('⇧↵')
+    expect(formatShortcut({ key: 'enter', mod: false, shift: true }, false)).toBe('Shift+Enter')
   })
 
   it('looks up a command (optionally by payload)', () => {

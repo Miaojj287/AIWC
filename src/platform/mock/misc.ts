@@ -33,9 +33,11 @@ const MEDIA_TYPES: Record<string, string> = {
   svg: 'image/svg+xml',
 }
 
-export function miscHandlers(
-  ctx: MockContext,
-): HandlersFor<'app'> & HandlersFor<'config'> & HandlersFor<'secret'> & HandlersFor<'ai'> & HandlersFor<'file'> {
+export function miscHandlers(ctx: MockContext): Omit<
+  HandlersFor<'app'> & HandlersFor<'config'> & HandlersFor<'secret'> & HandlersFor<'ai'> & HandlersFor<'file'>,
+  // Served by ./data (updates, Office / chat-file previews).
+  'app:checkUpdate' | 'file:previewDocument' | 'file:stageChatFile'
+> {
   const files = new Map<string, string>()
   const downloads = new Map<string, AbortController>()
   const stt: SttModel[] = [
@@ -43,7 +45,11 @@ export function miscHandlers(
     { id: 'sherpa-sense-voice', label: 'SenseVoice 多语种（离线）', sizeMb: 480, state: 'absent', isDefault: false },
     { id: 'whisper-small-zh', label: 'Whisper Small 中文（离线）', sizeMb: 460, state: 'absent', isDefault: false },
   ]
-  const secrets = () => ctx.kv.get<Record<string, string>>(SECRETS_KEY, {})
+  // A configured mock account (onboarding done) has its database key cached, like a real later launch: the
+  // returning connect page then shows it as 已缓存 and 进入 works.
+  const MOCK_DB_KEY = { 'account:dbKey': 'mock-db-key' }
+  const secrets = () =>
+    ctx.kv.get<Record<string, string>>(SECRETS_KEY, ctx.config().onboarding.completed ? MOCK_DB_KEY : {})
   const sttById = (id: string) => {
     const m = stt.find((x) => x.id === id)
     if (!m) throw new Error(`未知的语音模型：${id}`)
@@ -78,10 +84,6 @@ export function miscHandlers(
       isPackaged: false,
       transparency: false,
     }),
-    'app:checkUpdate': async () => {
-      await ctx.delay(800)
-      return { state: 'up_to_date', version: MOCK_VERSION }
-    },
     'app:exportLogs': async () => {
       await ctx.delay(500)
       return { path: '~/Downloads/aiwc-logs.zip' }
@@ -177,6 +179,11 @@ export function miscHandlers(
     },
     'file:reveal': ({ path }) => {
       console.info('[mockBridge] reveal', path)
+    },
+    'file:saveExport': ({ name, ext, content }) => {
+      const path = `~/Downloads/AIWC 导出/${name || 'export'}-${Date.now()}.${ext}`
+      files.set(path, content)
+      return { path }
     },
   }
 }

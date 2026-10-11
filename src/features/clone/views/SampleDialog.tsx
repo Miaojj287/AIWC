@@ -55,7 +55,7 @@ export function SampleDialog({ open, onOpenChange, contactId, name, onStart }: S
                     <span className="text-micro text-fg-3">
                       {m.senderName ?? name} {formatClock(m.createdAt)}
                     </span>
-                    <div className="max-w-[320px] rounded-item rounded-bl-sm bg-panel px-3 py-1.5 text-bubble leading-[22px] text-fg">
+                    <div className="max-w-[320px] rounded-window rounded-tl-sm border border-line-8 bg-panel px-3.5 py-2 text-bubble leading-bubble text-fg">
                       {m.text}
                     </div>
                   </div>

@@ -1,10 +1,10 @@
 /**
- * Account page helpers (DESIGN-SPEC §2 账号): key hex validation, secret refs, and the mapping of
- * substrate:acquireKeys steps onto the ProgressDialog. Pure — tested in accountModel.test.ts.
+ * Account page helpers (DESIGN-SPEC §2 账号): key hex validation, secret refs, and which keys a failed
+ * acquisition still needs. Pure — tested in accountModel.test.ts. The progress view itself is shared
+ * with onboarding in src/platform/wechatKeys.ts.
  */
 import { validateWechatKey, type AppConfig, type KeyAcquireStep } from '@aiwc/protocol'
-import type { ProgressStep } from '@/kit'
-import { localizeKnownText, t, type MessageKey } from '@/i18n'
+import { localizeKnownText, type MessageKey } from '@/i18n'
 
 export type KeyKind = 'db_key' | 'image_xor' | 'image_aes'
 
@@ -44,77 +44,12 @@ export function maskSecret(kind: KeyKind): string {
   return '•'.repeat(Math.min(48, KEY_HEX_LENGTH[kind]))
 }
 
-/** Placeholder steps until main pushes its own; labels are getters so a copy (`{ ...step }`) takes the current language. */
-export const DEFAULT_KEY_STEPS: readonly KeyAcquireStep[] = [
-  {
-    id: 'db_key',
-    get label() {
-      return t('settings.account.steps.dbKey')
-    },
-    status: 'todo',
-  },
-  {
-    id: 'image_xor',
-    get label() {
-      return t('settings.account.steps.imageXor')
-    },
-    status: 'todo',
-  },
-  {
-    id: 'image_aes',
-    get label() {
-      return t('settings.account.steps.imageAes')
-    },
-    status: 'todo',
-  },
-  {
-    id: 'verify',
-    get label() {
-      return t('settings.account.steps.verify')
-    },
-    status: 'todo',
-  },
-]
-
-/** Replace the step with the same id (or append) — used for the substrate:keyStep push events. */
-export function mergeKeyStep(steps: readonly KeyAcquireStep[], step: KeyAcquireStep): KeyAcquireStep[] {
-  const idx = steps.findIndex((s) => s.id === step.id)
-  if (idx < 0) return [...steps, step]
-  return steps.map((s, i) => (i === idx ? { ...s, ...step } : s))
-}
-
-export interface KeyStepsSummary {
-  done: number
-  total: number
-  percent: number
-  failed: KeyAcquireStep[]
-  running: KeyAcquireStep | undefined
-  finished: boolean
-}
-
-export function summarizeKeySteps(steps: readonly KeyAcquireStep[]): KeyStepsSummary {
-  const total = steps.length
-  const done = steps.filter((s) => s.status === 'done').length
-  const failed = steps.filter((s) => s.status === 'failed')
-  const running = steps.find((s) => s.status === 'doing')
-  const finished = total > 0 && steps.every((s) => s.status === 'done' || s.status === 'failed')
-  return {
-    done,
-    total,
-    percent: total ? Math.round(((done + failed.length) / total) * 100) : 0,
-    failed,
-    running,
-    finished,
-  }
-}
-
-export function keyStepsToProgress(steps: readonly KeyAcquireStep[]): ProgressStep[] {
-  return steps.map((s) => ({ id: s.id, label: s.label, status: s.status, detail: s.detail }))
-}
-
 /** Which key kinds a failed step list still needs — drives the "手动输入" fallback. */
 export function missingKeyKinds(steps: readonly KeyAcquireStep[]): KeyKind[] {
   return steps
-    .filter((s): s is KeyAcquireStep & { id: KeyKind } => s.status === 'failed' && s.id !== 'verify')
+    .filter(
+      (s): s is KeyAcquireStep & { id: KeyKind } =>
+        s.status === 'failed' && s.id !== 'verify' && s.failure !== 'cancelled' && s.failure !== 'skipped',
+    )
     .map((s) => s.id)
 }

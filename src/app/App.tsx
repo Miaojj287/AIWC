@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { AiwcBridge, ToastPayload } from '@aiwc/protocol'
 import { AgentWindow } from '@/features/agent'
-import { OnboardingWizard } from '@/features/onboarding'
+import { LaunchSplash, OnboardingWizard } from '@/features/onboarding'
+import { ModelSetupStep } from '@/features/settings'
 import { useT } from '@/i18n'
-import { EmptyState, Spinner, Toaster, TooltipProvider, toast } from '@/kit'
+import { EmptyState, Toaster, TooltipProvider, toast } from '@/kit'
 import { getBridge } from '@/platform/bridge'
 import { useConfig, useConfigStore } from '@/platform/configStore'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
+import { installInputModality } from '@/platform/inputModality'
+import { installWindowFocus } from '@/platform/windowFocus'
 import { Shell } from '@/shell/Shell'
 import { CloseBehaviorDialog, type CloseBehavior } from './CloseBehaviorDialog'
 import { onCommand, runCommand, type CommandMap, type CommandName } from './commands'
@@ -14,11 +17,13 @@ import { completeOnboarding } from './completeOnboarding'
 import { registerFeatures } from './registerFeatures'
 import { installShellModeCommands } from './shellMode'
 import { detectMac, installShortcuts } from './shortcuts'
+import { ShortcutsDialog } from './ShortcutsDialog'
 
 /**
- * App — renderer root. Hydrates config (which stamps the theme), registers features, then renders the
- * Onboarding wizard (single page, no columns) until `onboarding.completed`, otherwise the four-column
- * Shell. Providers: Tooltip, Toaster, global shortcuts, main-process events (commands / toasts / close).
+ * App — renderer root. Hydrates config (which stamps the theme) behind the launch splash, registers features, then
+ * renders the Onboarding wizard (single page, no columns). A first run walks the whole wizard; every later launch
+ * lands on its connect page with the cached keys and account filled in, and 进入 opens the four-column Shell (or
+ * the Agent window). Providers: Tooltip, Toaster, global shortcuts, main-process events (commands / toasts / close).
  */
 export function App() {
   const t = useT()
@@ -27,6 +32,12 @@ export function App() {
   const completed = useConfig((c) => c.onboarding.completed)
   const shellMode = useConfig((c) => c.ui.shellMode) ?? 'workbench'
   const [bridge, setBridge] = useState<Pick<AiwcBridge, 'platform' | 'runtime'> | null>(null)
+  const [splashDone, setSplashDone] = useState(false)
+  // Passed the connect page in this run. Not persisted: every launch confirms the account on that page first.
+  const [entered, setEntered] = useState(false)
+
+  useEffect(installInputModality, [])
+  useEffect(installWindowFocus, [])
 
   useEffect(() => {
     registerFeatures()
@@ -37,42 +48,60 @@ export function App() {
       .catch(() => undefined)
   }, [])
 
+  // The splash is always the last child of the same fragment, so it keeps animating while what is underneath
+  // switches from the loading state to the first screen; it fades out over that screen.
+  const splash = splashDone ? null : (
+    <LaunchSplash ready={Boolean((hydrated && bridge) || error)} onFinished={() => setSplashDone(true)} />
+  )
+
   if (!hydrated || !bridge) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-shell text-fg">
-        {error ? (
-          <EmptyState
-            variant="error"
-            title={t('app.configError')}
-            description={error.message}
-            action={{
-              label: t('common.retry'),
-              onClick: () =>
-                void useConfigStore
-                  .getState()
-                  .hydrate()
-                  .catch(() => undefined),
-            }}
-          />
-        ) : (
-          <Spinner size={24} label={t('app.starting')} />
-        )}
-      </div>
+      <>
+        <div className="flex h-full w-full items-center justify-center bg-shell text-fg">
+          {error ? (
+            <EmptyState
+              variant="error"
+              title={t('app.configError')}
+              description={error.message}
+              action={{
+                label: t('common.retry'),
+                onClick: () =>
+                  void useConfigStore
+                    .getState()
+                    .hydrate()
+                    .catch(() => undefined),
+              }}
+            />
+          ) : null}
+        </div>
+        {splash}
+      </>
     )
   }
 
   return (
-    <TooltipProvider>
-      {!completed ? (
-        <OnboardingWizard onDone={() => void completeOnboarding()} />
-      ) : shellMode === 'agent' ? (
-        <AgentWindow platform={bridge.platform} runtime={bridge.runtime} />
-      ) : (
-        <Shell platform={bridge.platform} runtime={bridge.runtime} />
-      )}
-      <AppEvents platform={bridge.platform} runtime={bridge.runtime} shellActive={Boolean(completed)} />
-      <Toaster />
-    </TooltipProvider>
+    <>
+      <TooltipProvider>
+        {!completed ? (
+          <OnboardingWizard
+            onDone={() => {
+              setEntered(true)
+              void completeOnboarding()
+            }}
+            modelStep={(props) => <ModelSetupStep {...props} />}
+          />
+        ) : !entered ? (
+          <OnboardingWizard returning onDone={() => setEntered(true)} />
+        ) : shellMode === 'agent' ? (
+          <AgentWindow platform={bridge.platform} runtime={bridge.runtime} />
+        ) : (
+          <Shell platform={bridge.platform} runtime={bridge.runtime} />
+        )}
+        <AppEvents platform={bridge.platform} runtime={bridge.runtime} shellActive={Boolean(completed && entered)} />
+        <Toaster />
+      </TooltipProvider>
+      {splash}
+    </>
   )
 }
 
@@ -82,10 +111,11 @@ interface AppEventsProps {
   shellActive: boolean
 }
 
-/** Global shortcuts, main → renderer events and the close-behaviour dialog. Renders only the dialog. */
+/** Global shortcuts, main → renderer events, the close-behaviour dialog and the shortcut sheet. Renders only the dialogs. */
 function AppEvents({ platform, runtime, shellActive }: AppEventsProps) {
   const t = useT()
   const [closeAsked, setCloseAsked] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   useEffect(() => {
     if (!shellActive) return
@@ -98,6 +128,7 @@ function AppEvents({ platform, runtime, shellActive }: AppEventsProps) {
   }, [shellActive])
 
   useEffect(() => onCommand('toast', (p) => showToast(p)), [])
+  useEffect(() => onCommand('app.showShortcuts', () => setShortcutsOpen(true)), [])
 
   useBridgeEvent('app:command', ({ command, payload }) => dispatch(command, payload))
   useBridgeEvent('app:toast', (p) => showToast(p))
@@ -110,7 +141,17 @@ function AppEvents({ platform, runtime, shellActive }: AppEventsProps) {
     )
   }
 
-  return <CloseBehaviorDialog open={closeAsked} onOpenChange={setCloseAsked} onChoose={choose} platform={platform} />
+  return (
+    <>
+      <CloseBehaviorDialog open={closeAsked} onOpenChange={setCloseAsked} onChoose={choose} platform={platform} />
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+        mac={detectMac(platform)}
+        web={runtime === 'web'}
+      />
+    </>
+  )
 }
 
 /** Untyped command from the menu / main process → the typed bus (unknown names only log a warning). */

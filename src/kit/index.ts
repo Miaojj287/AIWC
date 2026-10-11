@@ -20,6 +20,7 @@ export { Select, type SelectProps, type SelectOption, type SelectFooterAction } 
 export { ColorField } from './ColorField'
 export { PermissionSelect, permissionModeName, type PermissionSelectProps } from './PermissionSelect'
 export { ModelSelect, modelLabelFor, type ModelOption, type ModelSelectProps } from './ModelSelect'
+export { ReasoningEffortSelect, type ReasoningEffortSelectProps } from './ReasoningEffortSelect'
 export { vendorIconFor } from './vendorIcons'
 export { formatTokens } from './format'
 
@@ -60,6 +61,7 @@ export {
 
 // floating layers
 export { Tooltip, TooltipProvider, type TooltipProps, type TooltipProviderProps } from './Tooltip'
+export { SelectionAction, selectionWithin, type SelectionActionProps } from './SelectionAction'
 export { HelpTip, type HelpTipProps } from './HelpTip'
 export {
   Popover,
@@ -139,6 +141,7 @@ export {
   type ProgressStep,
   type ProgressStepStatus,
 } from './DialogVariants'
+export { TaskProgress, type TaskProgressProps } from './TaskProgress'
 export { Drawer, type DrawerProps } from './Drawer'
 
 // structure
@@ -150,3 +153,10 @@ export { Card, type CardProps } from './Card'
 export { Kbd, type KbdProps } from './Kbd'
 export { Divider, type DividerProps } from './Divider'
 export { ScrollArea, type ScrollAreaProps } from './ScrollArea'
+export { ZoomPan, type ZoomPanProps } from './ZoomPan'
+
+// rich text: the one Markdown parser + renderer (Agent replies, file preview)
+export { Markdown, MarkdownInlines, type MarkdownProps, type MarkdownInlinesProps } from './markdown/Markdown'
+export type { MarkdownRenderInlines, MarkdownTableActions } from './markdown/MarkdownTable'
+export { inlineText, type MarkdownInline } from './markdown/inline'
+export { MARKDOWN_CLASS, MARKDOWN_HEADING_CLASS } from './markdown/styles'

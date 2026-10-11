@@ -5,7 +5,14 @@
  */
 import { parseCitationHref, type CitationRef } from '@aiwc/protocol'
 
-export { extractQuotes, normalizeForMatch, verifyQuotes, type CitationRef, type QuoteVerdict } from '@aiwc/protocol'
+export {
+  planCitations,
+  verifyClaim,
+  type CitationClaim,
+  type CitationRef,
+  type CitationToken,
+  type QuoteVerdict,
+} from '@aiwc/protocol'
 
 export const parseCitation = (href: string): CitationRef | undefined => parseCitationHref(href)
 

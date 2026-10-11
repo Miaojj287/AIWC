@@ -9,9 +9,11 @@ import { t } from '@/i18n'
 import { getBridge } from '@/platform/bridge'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
+import { closeKeySteps, initialKeySteps } from '@/platform/wechatKeys'
 import {
   DEFAULT_KEY_STEPS,
   EMPTY_KEYS,
+  KEY_KINDS,
   applyKeySteps,
   hasKey,
   mergeKeyStep,
@@ -50,6 +52,10 @@ export interface WizardState {
   acquiring: boolean
   acquireSteps: KeyAcquireStep[]
   acquireStrategy: 'auto' | 'memory_scan'
+  /** Epoch ms the current / last run started (0 = none) — drives the elapsed time. */
+  acquireStartedAt: number
+  /** The last run failed: its step list and reason stay visible until dismissed or re-run. */
+  acquireFailed: boolean
   permissionDialog: boolean
 
   testing: boolean
@@ -69,11 +75,17 @@ export interface WizardState {
   verify(): Promise<boolean>
   acquire(strategy: 'auto' | 'memory_scan'): Promise<void>
   cancelAcquire(): void
+  dismissAcquireResult(): void
   dismissPermissionDialog(): void
   setManualKey(kind: KeyKind, input: string): Promise<{ ok: boolean; error?: string }>
   clearKey(kind: KeyKind): void
   /** Test the connection; on success persist account + onboarding.completed. */
   testAndFinish(): Promise<boolean>
+  /**
+   * 进入 on a later launch: the substrate already opened the saved account at startup, so when nothing changed on
+   * the page this only confirms it is ready; any change (account, path, a new key) runs the full connection test.
+   */
+  enter(): Promise<boolean>
   clearTestError(): void
   /** Mirror what the user entered into AppConfig.account (called on exit). */
   persistDraft(): Promise<void>
@@ -105,6 +117,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   acquiring: false,
   acquireSteps: [...DEFAULT_KEY_STEPS],
   acquireStrategy: 'auto',
+  acquireStartedAt: 0,
+  acquireFailed: false,
   permissionDialog: false,
   testing: false,
 
@@ -284,7 +298,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     set({
       acquiring: true,
       acquireStrategy: strategy,
-      acquireSteps: DEFAULT_KEY_STEPS.map((s) => ({ ...s })),
+      acquireSteps: initialKeySteps(),
+      acquireStartedAt: Date.now(),
+      acquireFailed: false,
       permissionDialog: false,
     })
     const bridge = await getBridge()
@@ -295,12 +311,13 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     try {
       const steps = await invoke('substrate:acquireKeys', { wxid, dbRoot, strategy })
       if (my !== acquireEpoch) return
-      const finalSteps = steps.length ? steps : get().acquireSteps
+      const finalSteps = steps.length ? steps : closeKeySteps(get().acquireSteps, 'unexpected')
       const keys = applyKeySteps(get().keys, finalSteps)
       const verifyStep = finalSteps.find((s) => s.id === 'verify')
       set((s) => ({
         acquiring: false,
         acquireSteps: finalSteps,
+        acquireFailed: finalSteps.some((st) => st.status === 'failed' && st.failure !== 'cancelled'),
         keys,
         permissionDialog: needsPermission(finalSteps),
         verifyState: verifyStep?.status === 'done' ? 'verified' : s.verifyState,
@@ -311,20 +328,15 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       }))
     } catch (e) {
       if (my !== acquireEpoch) return
+      // The IPC itself failed: close every open step on the error so nothing keeps spinning.
       const msg = errText(e)
+      const closed = closeKeySteps(get().acquireSteps, 'unexpected', msg)
       set((s) => ({
         acquiring: false,
-        acquireSteps: s.acquireSteps.map((st) =>
-          st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st,
-        ),
-        keys: applyKeySteps(
-          s.keys,
-          s.acquireSteps.map((st) =>
-            st.status === 'doing' || st.status === 'todo' ? { ...st, status: 'failed', detail: msg } : st,
-          ),
-        ),
-        // Matches the thrown error text (OS / main process, either language) — detection, not UI copy.
-        permissionDialog: /权限|permission|full disk|完全磁盘|administrator rights/i.test(msg),
+        acquireSteps: closed,
+        acquireFailed: true,
+        keys: applyKeySteps(s.keys, closed),
+        permissionDialog: needsPermission(closed),
       }))
     } finally {
       off()
@@ -333,12 +345,17 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   cancelAcquire() {
     acquireEpoch++
+    // Stop the main-process run too (it kills its helpers and brings WeChat back if it closed it).
+    void invoke('substrate:cancelAcquireKeys', undefined).catch(() => undefined)
     set((s) => ({
       acquiring: false,
-      acquireSteps: s.acquireSteps.map((st) =>
-        st.status === 'doing' ? { ...st, status: 'todo', detail: undefined } : st,
-      ),
+      acquireFailed: false,
+      acquireSteps: closeKeySteps(s.acquireSteps, 'cancelled'),
     }))
+  },
+
+  dismissAcquireResult() {
+    set({ acquireFailed: false })
   },
 
   dismissPermissionDialog() {
@@ -349,7 +366,11 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     const v = validateKeyHex(kind, input)
     if (!v.ok) return { ok: false, error: v.error }
     try {
-      const res = await invoke('substrate:setManualKey', { kind, hex: v.hex })
+      const res = await invoke('substrate:setManualKey', {
+        kind,
+        hex: v.hex,
+        target: { wxid: get().wxid, dbRoot: get().dbRoot },
+      })
       if (!res.ok) return { ok: false, error: res.error ?? t('onboarding.keys.invalidKey') }
       set((s) => ({
         keys: { ...s.keys, [kind]: { status: 'manual', hex: v.hex } },
@@ -381,15 +402,12 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         set({ testing: false, testError: res.error ?? t('onboarding.connectFail.openFailed') })
         return false
       }
-      await useConfigStore.getState().set({
-        account: { wxid, dbRoot, cacheDir: cacheDir || undefined, verifiedAt: Date.now() },
-      })
-      const connected = await invoke('substrate:connect', undefined)
+      const connected = await invoke('substrate:connect', { wxid, dbRoot, cacheDir: cacheDir || undefined })
       if (!connected.ok) {
         set({ testing: false, testError: connected.error ?? t('onboarding.connectFail.connectFailed') })
         return false
       }
-      await useConfigStore.getState().set({ onboarding: { completed: true } })
+      // onboarding.completed is written by the app root once the wizard is done (after 接入模型).
       set({ testing: false })
       return true
     } catch (e) {
@@ -398,16 +416,34 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
   },
 
+  async enter() {
+    const { wxid, dbRoot, keys } = get()
+    const keysChanged = KEY_KINDS.some((kind) => {
+      const k = keys[kind]
+      return k.status === 'manual' || (k.status === 'acquired' && k.source === 'auto')
+    })
+    if (!keysChanged) {
+      try {
+        const status = await invoke('substrate:status', undefined)
+        if (status.connection === 'ready' && status.account?.wxid === wxid && status.account.dbRoot === dbRoot) {
+          const result = await invoke('substrate:connect', { wxid, dbRoot })
+          return result.ok
+        }
+      } catch {
+        // Status unavailable: the full test below reports the real problem.
+      }
+    }
+    return get().testAndFinish()
+  },
+
   clearTestError() {
     set({ testError: undefined })
   },
 
   async persistDraft() {
-    const { wxid, dbRoot, cacheDir } = get()
+    const { cacheDir } = get()
     try {
-      await useConfigStore
-        .getState()
-        .set({ account: { wxid: wxid || undefined, dbRoot: dbRoot || undefined, cacheDir: cacheDir || undefined } })
+      await useConfigStore.getState().set({ account: { cacheDir: cacheDir || undefined } })
     } catch {
       /* best effort */
     }
@@ -441,6 +477,8 @@ export function __resetWizardStoreForTests(): void {
     acquiring: false,
     acquireSteps: [...DEFAULT_KEY_STEPS],
     acquireStrategy: 'auto',
+    acquireStartedAt: 0,
+    acquireFailed: false,
     permissionDialog: false,
     testing: false,
     testError: undefined,

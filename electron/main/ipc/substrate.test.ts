@@ -10,7 +10,7 @@ import {
   type ListMessagesQuery,
   type WxMessage,
 } from '@aiwc/protocol'
-import { verifyAccount } from '@aiwc/substrate'
+import { acquireKeys, verifyAccount } from '@aiwc/substrate'
 import type { AppContext } from '../contracts'
 import type { HostBridge } from './register'
 import { registerSubstrateIpc } from './substrate'
@@ -18,6 +18,9 @@ import { createHandlerHarness } from './testing/handlerHarness'
 
 vi.mock('@aiwc/substrate', () => ({
   acquireKeys: vi.fn(),
+  findWeChatPidSync: vi.fn(() => null),
+  scanMacDbKey: vi.fn(),
+  scanMacDbKeyFromDumps: vi.fn(),
   detectWeChat: vi.fn(),
   listAccounts: vi.fn(),
   verifyAccount: vi.fn().mockResolvedValue({ ok: true }),
@@ -30,7 +33,7 @@ function setup() {
   const logger = { child: () => logger }
   const ipc = createHandlerHarness()
   registerSubstrateIpc(
-    { logger, config: { get: () => config, set }, secrets, substrate: {} } as unknown as AppContext,
+    { logger, config: { get: () => config, set }, secrets, substrate: {}, paths: {} } as unknown as AppContext,
     {} as HostBridge,
     ipc.handle,
   )
@@ -59,6 +62,61 @@ describe('manual WeChat key IPC', () => {
     const { invoke } = setup()
     await invoke('substrate:testConnection', { wxid: 'new', dbRoot: '/new' })
     expect(verifyAccount).toHaveBeenLastCalledWith({ wxid: 'new', dbRoot: '/new', dbKeyHex: 'a'.repeat(64) })
+  })
+})
+
+describe('key acquisition IPC', () => {
+  function acquireSetup() {
+    const secrets = { set: vi.fn(), reveal: vi.fn() }
+    const toast = vi.fn()
+    const logger = { child: () => logger, warn: vi.fn() }
+    const ipc = createHandlerHarness()
+    registerSubstrateIpc(
+      {
+        logger,
+        config: { get: () => defaultConfig(), set: vi.fn() },
+        secrets,
+        substrate: {},
+        paths: { nativeDir: '/native' },
+        broadcast: vi.fn(),
+        toast,
+      } as unknown as AppContext,
+      {} as HostBridge,
+      ipc.handle,
+    )
+    return { ipc, secrets, toast }
+  }
+  // A run that only ends when its signal aborts, like a login hook waiting for the user.
+  const waitForAbort = async (opts: { signal?: AbortSignal }) => {
+    await new Promise<void>((resolve) => opts.signal?.addEventListener('abort', () => resolve(), { once: true }))
+    return { steps: [], cancelled: true, dbKeyHex: 'a'.repeat(64) }
+  }
+
+  it('cancel aborts the running acquisition, which then stores nothing and toasts nothing', async () => {
+    vi.mocked(acquireKeys).mockImplementation(waitForAbort)
+    const { ipc, secrets, toast } = acquireSetup()
+    const run = ipc.invoke('substrate:acquireKeys', { wxid: 'wxid_a', dbRoot: '/root' })
+    await Promise.resolve()
+    await ipc.invoke('substrate:cancelAcquireKeys', undefined)
+    await expect(run).resolves.toEqual([])
+    expect(secrets.set).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('a new request supersedes the running one instead of running two at once', async () => {
+    const signals: AbortSignal[] = []
+    vi.mocked(acquireKeys).mockImplementation(async (opts) => {
+      if (opts.signal) signals.push(opts.signal)
+      return signals.length === 1 ? waitForAbort(opts) : { steps: [] }
+    })
+    const { ipc } = acquireSetup()
+    const first = ipc.invoke('substrate:acquireKeys', { wxid: 'wxid_a', dbRoot: '/root' })
+    await Promise.resolve()
+    await ipc.invoke('substrate:acquireKeys', { wxid: 'wxid_a', dbRoot: '/root' })
+    await first
+    expect(signals).toHaveLength(2)
+    expect(signals[0]?.aborted).toBe(true)
+    expect(signals[1]?.aborted).toBe(false)
   })
 })
 

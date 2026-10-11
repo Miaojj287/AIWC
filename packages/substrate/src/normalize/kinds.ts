@@ -1,9 +1,10 @@
 /**
  * Classification helpers shared by the WCDB reader and the mirror: username → session kind,
- * local_type (+ appmsg subtype) → MessageKind. The only implementation of the group / official /
- * system username rules; wcdb/ imports these instead of keeping its own.
+ * local_type (+ appmsg subtype) → MessageKind. The only implementation of the official / system
+ * username rules (the group rule is @aiwc/protocol's `isGroupChatId`, shared with the renderer);
+ * wcdb/ imports these instead of keeping its own.
  */
-import type { MessageKind, SessionKind, WxContact } from '@aiwc/protocol'
+import { isGroupChatId, type MessageKind, type SessionKind, type WxContact } from '@aiwc/protocol'
 import { extractXmlValue } from './xml'
 
 /**
@@ -44,9 +45,8 @@ export function isSystemUsername(username: string): boolean {
   return false
 }
 
-export function isGroupUsername(username: string): boolean {
-  return /@(im\.)?chatroom$/i.test(String(username ?? '').trim())
-}
+/** `xxx@chatroom` / `xxx@im.chatroom`. */
+export const isGroupUsername: (username: string) => boolean = isGroupChatId
 
 export function isOfficialUsername(username: string): boolean {
   return /^gh_/i.test(String(username ?? '').trim())

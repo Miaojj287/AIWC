@@ -124,6 +124,27 @@ describe('设置 › 宠物', () => {
     expect(saveConfigMock).toHaveBeenCalledWith({ pet: { size: 'lg' } })
   })
 
+  it('previews the status counts and turns each one on or off', async () => {
+    seed()
+    render(<PetsPage />)
+    const preview = await screen.findByTestId('current-pet-preview')
+    const sample = within(preview).getByTestId('pet-status')
+    // static sample: every count named, nothing clickable
+    expect(within(sample).getByRole('img', { name: '2 个会话正在运行' })).toBeTruthy()
+    expect(within(sample).getByRole('img', { name: '1 个会话已完成，还没看' })).toBeTruthy()
+    expect(within(sample).getByRole('img', { name: '微信 5 条未读（2 个聊天）' })).toBeTruthy()
+    expect(within(sample).queryByRole('button')).toBeNull()
+
+    fireEvent.click(screen.getByRole('switch', { name: '微信未读' }))
+    expect(saveConfigMock).toHaveBeenCalledWith({ pet: { showUnread: false } })
+    act(() => {
+      const config = useConfigStore.getState().config!
+      useConfigStore.setState({ config: { ...config, pet: { ...config.pet, showUnread: false } } })
+    })
+    expect(within(preview).queryByRole('img', { name: /微信/ })).toBeNull()
+    expect(within(preview).getByRole('img', { name: '2 个会话正在运行' })).toBeTruthy()
+  })
+
   it('adopts a gallery pet through the install channel and switches to it', async () => {
     seed()
     render(<PetsPage />)

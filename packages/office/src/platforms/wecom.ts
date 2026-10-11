@@ -10,6 +10,7 @@ import { findArray, findString, parseJsonOutput } from '../cli/output'
 import { OfficeError, envelopeFailed } from '../cli/runner'
 import { chunk, formatDate, type Cell, type NormalizedColumn, type NormalizedTable } from '../push/table'
 import {
+  argWords,
   commandWords,
   hasDryRun,
   hasHelpFlag,
@@ -25,6 +26,13 @@ import type { AuthProbe, PlatformModule, PushContext } from './types'
 
 const AUTH_HOSTS = ['work.weixin.qq.com'] as const
 const RECORD_BATCH = 200
+/**
+ * wecom-cli takes the records inline (`--json <payload>`) rather than from a file, and an argv is not
+ * unbounded: macOS caps the whole argument block around 1MB and Linux caps a single argument at 128KB.
+ * A full batch of long cells blows past that and `spawn` fails with E2BIG, so a batch is split again
+ * whenever its payload would get close.
+ */
+const MAX_INLINE_JSON_CHARS = 100_000
 const QR_FILE = 'wecom-qr.png'
 
 async function pngDataUrl(file: string): Promise<string | undefined> {
@@ -198,7 +206,7 @@ export const wecom: PlatformModule = {
     if (startsWithFlag(args)) return REFUSE_LEADING_FLAG
     const words = commandWords(args)
     if (words[0] === 'auth') return REFUSE_CREDENTIALS
-    if (words.some((w) => isDeleteVerb(w))) return REFUSE_DELETE
+    if (argWords(args).some(isDeleteVerb)) return REFUSE_DELETE
     return undefined
   },
 }
@@ -241,22 +249,43 @@ function withSelectNote(table: NormalizedTable): string[] {
     : [...table.warnings]
 }
 
+/** `chunk` by count, then again by encoded size so no batch becomes an oversized argv. */
+function recordBatches(records: readonly unknown[], maxCount: number, maxChars: number): unknown[][] {
+  const batches: unknown[][] = []
+  for (const batch of chunk(records, maxCount)) {
+    let current: unknown[] = []
+    let chars = 0
+    for (const record of batch) {
+      const size = JSON.stringify(record).length + 1
+      if (current.length > 0 && chars + size > maxChars) {
+        batches.push(current)
+        current = []
+        chars = 0
+      }
+      current.push(record)
+      chars += size
+    }
+    if (current.length > 0) batches.push(current)
+  }
+  return batches
+}
+
 async function writeRecords(
   ctx: PushContext,
   docid: string,
   sheetTitle: string,
   table: NormalizedTable,
 ): Promise<number> {
-  const batches = chunk(table.rows, RECORD_BATCH)
+  const all = table.rows.map((row) => ({
+    values: Object.fromEntries(Object.entries(row).map(([name, cell]) => [name, cellValue(cell)])),
+  }))
+  const batches = recordBatches(all, RECORD_BATCH, MAX_INLINE_JSON_CHARS)
   let written = 0
-  for (const [i, batch] of batches.entries()) {
+  for (const [i, records] of batches.entries()) {
     ctx.progress(
-      `写入 ${Math.min(written + batch.length, table.rows.length)}/${table.rows.length} 行`,
+      `写入 ${Math.min(written + records.length, table.rows.length)}/${table.rows.length} 行`,
       0.15 + (0.85 * i) / Math.max(1, batches.length),
     )
-    const records = batch.map((row) => ({
-      values: Object.fromEntries(Object.entries(row).map(([name, cell]) => [name, cellValue(cell)])),
-    }))
     try {
       await wecomJson(ctx, [
         'smartsheet',
@@ -270,7 +299,7 @@ async function writeRecords(
         throw new OfficeError(e.code, `已写入 ${written} 行后失败：${e.message}`)
       throw e
     }
-    written += batch.length
+    written += records.length
   }
   return written
 }

@@ -4,7 +4,7 @@ import { cn } from './cn'
 import { ICON_STROKE, type IconComponent } from './icon'
 
 /**
- * Badge — semantic pill: colour @14% ground + @30% border + 100% text (CLAUDE.md §2.2).
+ * Badge — semantic pill: colour @14% ground + @30% border + the colour's ink for the text (CLAUDE.md §2.2).
  * Figma 154:944. Tones: ok / warn / danger / info / clone / neutral / accent.
  * Neutral has no colour of its own: it uses the grey overlay scale (line-8 ground + line-16 border).
  */
@@ -13,13 +13,13 @@ export const badgeVariants = cva(
   {
     variants: {
       tone: {
-        ok: 'border-ok/30 bg-ok/14 text-ok',
-        warn: 'border-warn/30 bg-warn/14 text-warn',
-        danger: 'border-danger/30 bg-danger/14 text-danger',
-        info: 'border-info/30 bg-info/14 text-info',
-        clone: 'border-clone/30 bg-clone/14 text-clone',
-        accent: 'border-accent/30 bg-accent/14 text-accent',
-        neutral: 'border-(--line-16) bg-line-8 text-fg-3',
+        ok: 'border-ok/30 bg-ok/14 text-ok-ink',
+        warn: 'border-warn/30 bg-warn/14 text-warn-ink',
+        danger: 'border-danger/30 bg-danger/14 text-danger-ink',
+        info: 'border-info/30 bg-info/14 text-info-ink',
+        clone: 'border-clone/30 bg-clone/14 text-clone-ink',
+        accent: 'border-accent/30 bg-accent/14 text-accent-ink',
+        neutral: 'border-(--line-16) bg-line-8 text-fg-2',
       },
     },
     defaultVariants: { tone: 'neutral' },
@@ -54,7 +54,9 @@ export function Badge({ tone, icon: Icon, dot = false, className, children, ...r
   return (
     <span className={cn(badgeVariants({ tone }), className)} {...rest}>
       {Icon ? <Icon size={10} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" /> : null}
-      <span className="min-w-0 truncate">{children}</span>
+      <span className="min-w-0 truncate" title={typeof children === 'string' ? children : undefined}>
+        {children}
+      </span>
     </span>
   )
 }

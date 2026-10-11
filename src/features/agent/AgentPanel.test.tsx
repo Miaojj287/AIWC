@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { defaultConfig, type AiwcBridge, type Event, type Op, type ThreadSummary } from '@aiwc/protocol'
+import {
+  defaultConfig,
+  type AiwcBridge,
+  type ApprovalId,
+  type CallId,
+  type Event,
+  type Op,
+  type ThreadSummary,
+  type TurnId,
+} from '@aiwc/protocol'
 import { __setBridgeForTests } from '@/platform/bridge'
 import { __resetConfigStoreForTests } from '@/platform/configStore'
 import { __resetShellStoreForTests } from '@/shell/shellStore'
@@ -43,7 +52,6 @@ function fakeBridge(threads: ThreadSummary[] = []): FakeBridge {
           return undefined
         case 'agent:listModels':
         case 'agent:listSkills':
-        case 'agent:suggestPrompts':
           return []
         default:
           throw new Error(`unexpected ${channel}`)
@@ -101,5 +109,49 @@ describe('<AgentPanel> composer with no open thread', () => {
     type('你好')
     fireEvent.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(bridge.ops.map((o) => o.type)).toEqual(['thread.create', 'turn.start']))
+  })
+
+  it('answers a pending approval in the composer slot, with the draft hidden underneath', async () => {
+    const bridge = fakeBridge()
+    __setBridgeForTests(bridge)
+    render(<AgentPanel collapsed={false} onToggleCollapsed={() => {}} />)
+    await flush()
+    const threadId = useAgentStore.getState().activeThreadId!
+    act(() =>
+      useAgentStore.setState((s) => ({
+        views: {
+          ...s.views,
+          [threadId]: {
+            ...s.views[threadId]!,
+            isStreaming: true,
+            pendingApprovals: [
+              {
+                approvalId: 'apr_1' as ApprovalId,
+                callId: 'c1' as CallId,
+                turnId: 'trn_1' as TurnId,
+                toolName: 'send_message',
+                summary: '推送到 投研交流群',
+                input: { to: 'g2' },
+                risk: 'send',
+                canAllowAlways: true,
+              },
+            ],
+          },
+        },
+      })),
+    )
+    expect(screen.getByRole('group', { name: 'Agent 请求：推送到 投研交流群' })).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: '给 Agent 的消息' })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('listbox', { name: '确认选项' }), { key: '1' })
+    await waitFor(() =>
+      expect(bridge.ops).toContainEqual({
+        type: 'approval.resolve',
+        threadId,
+        approvalId: 'apr_1',
+        decision: 'allow_once',
+      }),
+    )
+    expect(screen.queryByRole('group', { name: 'Agent 请求：推送到 投研交流群' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '给 Agent 的消息' })).toBeTruthy()
   })
 })

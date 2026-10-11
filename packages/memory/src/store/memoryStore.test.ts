@@ -32,6 +32,20 @@ describe('createMemoryStore', () => {
     expect(() => store.pathFor(hostile)).toThrow(/unknown memory file/)
   })
 
+  it('records which Agent thread wrote an entry, and only well-formed thread ids', async () => {
+    const store = createMemoryStore({ dir: tmp() })
+    await store.addEntry('MEMORY', '周五交周报', { source: 'agent', threadId: 'thr_abc123' })
+    await store.addEntry('MEMORY', '喜欢简短回复', { source: 'agent', threadId: '../../etc' })
+    await store.addEntry('USER', '用户本人写的')
+    const [fromThread, badId] = await store.entries('MEMORY')
+    expect(fromThread).toMatchObject({ text: '周五交周报', source: 'agent', threadId: 'thr_abc123' })
+    expect(badId?.threadId).toBeUndefined()
+    expect((await store.entries('USER'))[0]?.threadId).toBeUndefined()
+    // Survives a restart: the provenance lives in the sidecar, not in memory.
+    const reopened = createMemoryStore({ dir: store.dir })
+    expect((await reopened.entries('MEMORY'))[0]?.threadId).toBe('thr_abc123')
+  })
+
   it('adds entries, rejects duplicates (normalised) and over-budget adds', async () => {
     const store = createMemoryStore({ dir: tmp(), limits: { MEMORY: 40 } })
     expect(await store.addEntry('MEMORY', '用户住在杭州。')).toEqual({ ok: true })

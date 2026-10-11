@@ -181,3 +181,31 @@ describe('scrim', () => {
     expect(dialogScrim).not.toMatch(/bg-black|bg-white|\/\d+/)
   })
 })
+
+describe('dialog action order', () => {
+  afterEach(() => {
+    delete document.documentElement.dataset.platform
+  })
+
+  const labels = () =>
+    Array.from(document.querySelectorAll('[role="dialog"] button'))
+      .map((button) => button.textContent?.trim())
+      .filter((text): text is string => Boolean(text))
+
+  it('keeps 取消 first on macOS and puts the affirmative button first on Windows, DOM order included', async () => {
+    document.documentElement.dataset.platform = 'darwin'
+    const { unmount } = render(
+      <ConfirmDialog open onOpenChange={() => {}} title="放弃修改？" confirmLabel="放弃" onConfirm={() => {}} />,
+    )
+    await settle()
+    expect(labels()).toEqual(['取消', '放弃'])
+    unmount()
+
+    document.documentElement.dataset.platform = 'win32'
+    render(<ConfirmDialog open onOpenChange={() => {}} title="放弃修改？" confirmLabel="放弃" onConfirm={() => {}} />)
+    await settle()
+    expect(labels()).toEqual(['放弃', '取消'])
+    // The safe default is still where focus lands.
+    expect(document.activeElement?.textContent).toContain('取消')
+  })
+})

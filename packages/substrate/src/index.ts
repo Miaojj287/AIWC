@@ -19,12 +19,20 @@ export * from './shared'
 // wcdb / key / discovery / decrypt (owner: substrate-wcdb)
 export { createWcdbSourceReader } from './wcdb'
 export { detectWeChat, listAccounts, verifyAccount } from './discovery'
-export { acquireKeys } from './key'
+export { acquireKeys, type RelaunchCapture } from './key'
 // Low-level scanners + path helpers the electron host needs for the last-resort relaunch capture.
 export { scanMacDbKey, scanMacDbKeyFromDumps } from './key/macosMemoryScanner'
 
 export { findWeChatPidSync } from './discovery/processDetect'
+// Where the SQLCipher engine keeps plaintext copies of WeChat's databases: the main process has to
+// fence that directory off, and a second spelling of the name would drift the day this one moves.
+export { decryptedCopyDir } from './wcdb/decryptedCopy'
 export * from './decrypt'
 
 // tools (owner: substrate-tools)
 export { substrateTools } from './tools'
+// The one model-facing view of a message (cite link, sender, bounded text): the host renders the messages a user
+// quoted to the Agent with it, so they read exactly like tool results.
+export { compactMessage, MAX_ANCHOR_TEXT_CHARS, MAX_TEXT_CHARS } from './tools/shared'
+
+export { resolveAccountDir } from './wcdb/dbFiles'

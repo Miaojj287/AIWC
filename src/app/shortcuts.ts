@@ -23,9 +23,11 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { key: '2', mod: true, command: 'rail.select', payload: { fn: 'autoreply' } },
   { key: '3', mod: true, command: 'rail.select', payload: { fn: 'clone' } },
   { key: '4', mod: true, command: 'rail.select', payload: { fn: 'tasks' } },
+  { key: '5', mod: true, command: 'rail.select', payload: { fn: 'todo' } },
   { key: ',', mod: true, command: 'tab.openSettings', payload: {} },
   { key: 'k', mod: true, command: 'search.sessions' },
   { key: 'f', mod: true, command: 'search.inPage' },
+  { key: 'f', mod: true, shift: true, command: 'tab.openSearch', payload: {} },
   { key: 'n', mod: true, command: 'agent.newThread', payload: {} },
   { key: 'w', mod: true, command: 'tab.closeActive' },
   { key: 't', mod: true, shift: true, command: 'tab.reopenClosed' },
@@ -34,7 +36,11 @@ export const SHORTCUTS: readonly ShortcutBinding[] = [
   { key: 'j', mod: true, shift: true, command: 'agent.toggleCollapsed' },
   { key: 'l', mod: true, shift: true, command: 'shell.toggleMode' },
   { key: 'k', mod: true, shift: true, command: 'tab.openKit', webOnly: true },
+  { key: '/', mod: true, command: 'app.showShortcuts' },
 ]
+
+/** An open kit Dialog / Drawer (Radix stamps `data-state` on the dialog content). */
+const MODAL_SELECTOR = "[role='dialog'][data-state='open'], [role='alertdialog'][data-state='open']"
 
 export interface ShortcutEnv {
   /** true → ⌘ is the modifier and labels use symbols; false → Ctrl. */
@@ -101,6 +107,8 @@ export function installShortcuts(
     if (e.defaultPrevented || e.isComposing) return
     const binding = matchShortcut(e, resolved)
     if (!binding) return
+    // A modal dialog owns the keyboard: ⌘W / ⌘N / ⌘1–4 must not act on the window behind a confirmation.
+    if (typeof document !== 'undefined' && document.querySelector(MODAL_SELECTOR)) return
     e.preventDefault()
     e.stopPropagation()
     dispatchShortcut(binding)
@@ -118,10 +126,20 @@ const KEY_GLYPH: Record<string, string> = {
   backspace: '⌫',
 }
 
-/** Human label for a binding: ⌘⇧T on macOS, Ctrl+Shift+T elsewhere. */
+/** Windows and Linux spell these keys out; the glyphs above are what macOS menus print. */
+const KEY_WORD: Record<string, string> = {
+  enter: 'Enter',
+  backspace: 'Backspace',
+}
+
+/**
+ * Human label for a binding: ⇧⌘T on macOS, Ctrl+Shift+T elsewhere. macOS lists modifiers in the order its own
+ * menus use — ⌃ ⌥ ⇧ ⌘ — so the label reads like the system's; Windows spells them out with the Command key last.
+ */
 export function formatShortcut(binding: Pick<ShortcutBinding, 'key' | 'mod' | 'shift' | 'alt'>, mac: boolean): string {
-  const key = KEY_GLYPH[binding.key.toLowerCase()] ?? binding.key.toUpperCase()
-  if (mac) return `${binding.mod ? '⌘' : ''}${binding.alt ? '⌥' : ''}${binding.shift ? '⇧' : ''}${key}`
+  const name = binding.key.toLowerCase()
+  const key = (mac ? undefined : KEY_WORD[name]) ?? KEY_GLYPH[name] ?? binding.key.toUpperCase()
+  if (mac) return `${binding.alt ? '⌥' : ''}${binding.shift ? '⇧' : ''}${binding.mod ? '⌘' : ''}${key}`
   const parts: string[] = []
   if (binding.mod) parts.push('Ctrl')
   if (binding.alt) parts.push('Alt')

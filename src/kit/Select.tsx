@@ -59,7 +59,7 @@ type Row<T extends string> =
 
 /**
  * Select — pick one value from a few (CLAUDE.md §4.3). Figma 154:791 (trigger) + 154:1063 (list).
- * Trigger h28 r6 fg 5% ground; open = accent border + chevron up; list = overlay ground, r8, items 30 / 42 with
+ * Trigger h28 r6 fg 5% ground; open = stronger neutral border + chevron up; list = overlay ground, r8, items 30 / 42 with
  * description, check mark on the left, hover fg 7%, optional search and a separated "manage…" footer.
  * Built on Radix Popover with an ARIA listbox so search + descriptions + footer all work.
  */
@@ -223,10 +223,10 @@ export function Select<T extends string = string>({
           data-placeholder={selected ? undefined : ''}
           className={cn(
             'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-control border border-line-8 bg-hover-5 pl-2.5 pr-2 text-caption text-fg',
-            'transition-colors duration-(--dur-fast) hover:bg-line-10',
-            'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
-            'data-[state=open]:border-accent/70 data-[state=open]:hover:bg-hover-5',
-            'disabled:pointer-events-none disabled:opacity-45',
+            'transition-colors enabled:hover:bg-hover-7 enabled:active:bg-(--fill-13)',
+            'outline-none',
+            'data-[state=open]:border-(--line-25) data-[state=open]:hover:bg-hover-5',
+            'disabled:cursor-not-allowed disabled:opacity-40',
             'data-[placeholder]:text-fg-3',
             size === 'lg' ? 'h-8' : 'h-7',
             fullWidth && 'flex w-full',
@@ -241,8 +241,11 @@ export function Select<T extends string = string>({
               className="shrink-0 text-fg-3"
             />
           ) : null}
-          {/* A custom `renderValue` brings its own (flex) layout and truncates its leaves itself; a plain label truncates here. */}
-          <span className={cn('min-w-0 flex-1 text-left', !renderValue && 'truncate')}>
+          {/* A `renderValue` that returns elements brings its own (flex) layout and truncates its leaves itself; plain text — a label or a string from `renderValue` — truncates here. */}
+          <span
+            className={cn('min-w-0 flex-1 text-left', typeof triggerText === 'string' && 'truncate')}
+            title={typeof triggerText === 'string' ? triggerText : undefined}
+          >
             {triggerText ?? placeholder ?? t('kit.select.placeholder')}
           </span>
           {open ? (
@@ -281,7 +284,7 @@ export function Select<T extends string = string>({
           )}
         >
           {searchable ? (
-            <div className="mb-1 flex h-7 items-center gap-1.5 rounded-control border border-line-8 bg-content px-2 focus-within:border-accent/80">
+            <div className="mb-1 flex h-7 items-center gap-1.5 rounded-control border border-line-8 bg-content px-2 focus-within:border-(--line-25)">
               <Search size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" />
               <input
                 ref={searchRef}
@@ -291,7 +294,7 @@ export function Select<T extends string = string>({
                 placeholder={searchPlaceholder ?? t('kit.select.searchPlaceholder')}
                 aria-controls={listId}
                 aria-activedescendant={rows[active] ? `${listId}-${active}` : undefined}
-                className="min-w-0 flex-1 bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3"
+                className="min-w-0 flex-1 bg-transparent text-caption text-fg caret-fg outline-none placeholder:text-fg-3"
               />
             </div>
           ) : null}
@@ -365,9 +368,13 @@ export function Select<T extends string = string>({
                     />
                   ) : null}
                   <span className="flex min-w-0 flex-1 flex-col gap-px">
-                    <span className="truncate text-tab text-fg">{option.label}</span>
+                    <span className="truncate text-tab text-fg" title={option.label}>
+                      {option.label}
+                    </span>
                     {option.description ? (
-                      <span className="truncate text-micro text-fg-3">{option.description}</span>
+                      <span className="truncate text-micro text-fg-3" title={option.description}>
+                        {option.description}
+                      </span>
                     ) : null}
                   </span>
                   {option.badge ? <span className="shrink-0">{option.badge}</span> : null}

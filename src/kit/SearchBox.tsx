@@ -19,11 +19,13 @@ export interface SearchBoxProps extends Omit<
   size?: 'default' | 'sm'
   /** Optional trailing keyboard hint shown when empty (e.g. "⌘K"). */
   shortcut?: string
+  /** Expose the box as a `search` landmark. Only the one search of a column should be one (the object list, the Agent sidebar). */
+  landmark?: boolean
   wrapperClassName?: string
 }
 
 /**
- * SearchBox — Input with a search glyph, focus = accent border, × clears when there is text.
+ * SearchBox — Input with a search glyph, focus = stronger neutral border, × clears when there is text.
  * Figma 154:835. Escape clears first, then blurs.
  */
 export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function SearchBox(
@@ -34,6 +36,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
     onSubmit,
     size = 'default',
     shortcut,
+    landmark = false,
     wrapperClassName,
     className,
     placeholder,
@@ -71,12 +74,12 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
 
   return (
     <div
-      role="search"
+      role={landmark ? 'search' : undefined}
       data-disabled={disabled || undefined}
       className={cn(
         'flex items-center gap-2 rounded-control border border-line-8 bg-content pl-2.5 pr-1.5 text-caption text-fg',
-        'transition-colors duration-(--dur-fast) hover:border-(--line-16) focus-within:border-accent/80 focus-within:hover:border-accent/80',
-        'data-[disabled]:pointer-events-none data-[disabled]:opacity-45',
+        'kit-field transition-colors hover:border-(--line-16) focus-within:border-(--line-25) focus-within:hover:border-(--line-25)',
+        'data-[disabled]:pointer-events-none data-[disabled]:opacity-40',
         size === 'sm' ? 'h-7' : 'h-8',
         wrapperClassName,
       )}
@@ -97,7 +100,7 @@ export const SearchBox = forwardRef<HTMLInputElement, SearchBoxProps>(function S
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         className={cn(
-          'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-accent outline-none placeholder:text-fg-3',
+          'h-full min-w-0 flex-1 text-ellipsis bg-transparent text-caption text-fg caret-fg outline-none placeholder:text-fg-3',
           '[&::-webkit-search-cancel-button]:hidden',
           className,
         )}

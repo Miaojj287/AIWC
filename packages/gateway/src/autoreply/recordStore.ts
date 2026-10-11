@@ -9,6 +9,7 @@ import {
   DEFAULT_HISTORY_COUNT,
   MAX_HISTORY_COUNT,
   MIN_HISTORY_COUNT,
+  normaliseJevRuleConfig,
   type AutoReplyRecord,
   type AutoReplyRule,
   type DraftState,
@@ -99,9 +100,10 @@ export function normaliseStoredRule(input: AutoReplyRule): AutoReplyRule {
     accountId: typeof raw.accountId === 'string' ? raw.accountId : undefined,
     enabled: Boolean(raw.enabled),
     // 'handoff' rules no longer exist; they became AI replies rather than silently doing nothing.
-    source: raw.source === 'fixed' ? 'fixed' : 'ai',
+    source: raw.source === 'fixed' ? 'fixed' : raw.source === 'jev' ? 'jev' : 'ai',
     fixedText: typeof raw.fixedText === 'string' && raw.fixedText.trim() ? raw.fixedText : undefined,
     prompt: typeof raw.prompt === 'string' && raw.prompt.trim() ? raw.prompt : undefined,
+    jev: raw.source === 'jev' ? normaliseJevRuleConfig(raw.jev) : undefined,
     historyCount: Number.isFinite(n)
       ? Math.max(MIN_HISTORY_COUNT, Math.min(MAX_HISTORY_COUNT, n))
       : DEFAULT_HISTORY_COUNT,

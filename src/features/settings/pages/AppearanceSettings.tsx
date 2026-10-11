@@ -94,7 +94,7 @@ export function AppearanceSettings({ general }: { general: AppConfig['general'] 
               type="button"
               aria-pressed={general.theme === theme}
               onClick={() => void saveConfig({ general: { theme } })}
-              className="group min-w-0 rounded-item outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="group min-w-0 rounded-item outline-none"
             >
               <div
                 className={`relative overflow-hidden rounded-item border-2 ${general.theme === theme ? 'border-accent' : 'border-line-10 group-hover:border-fg-3'}`}
@@ -106,7 +106,9 @@ export function AppearanceSettings({ general }: { general: AppConfig['general'] 
                   </div>
                 )}
               </div>
-              <div className={`truncate pt-2 text-caption ${general.theme === theme ? 'text-accent' : 'text-fg-2'}`}>
+              <div
+                className={`truncate pt-2 text-caption ${general.theme === theme ? 'text-accent-ink' : 'text-fg-2'}`}
+              >
                 {t(`settings.general.appearance.themes.${theme}`)}
               </div>
             </button>
@@ -116,7 +118,6 @@ export function AppearanceSettings({ general }: { general: AppConfig['general'] 
       <SRow
         id="general.transparency"
         title={t('settings.general.appearance.transparency.title')}
-        description={t('settings.general.appearance.transparency.description')}
         help={t('settings.general.appearance.transparency.help')}
         htmlFor="general-transparency"
       >
@@ -131,7 +132,6 @@ export function AppearanceSettings({ general }: { general: AppConfig['general'] 
       <SRow
         id="general.appearance"
         title={t('settings.general.appearance.custom.title')}
-        description={t('settings.general.appearance.custom.description')}
         help={t('settings.general.appearance.custom.help')}
       >
         <SegmentedControl
@@ -193,16 +193,26 @@ export function AppearanceSettings({ general }: { general: AppConfig['general'] 
           <Button variant="outline">{t('settings.general.appearance.preview.secondaryAction')}</Button>
           <Button>{t('settings.general.appearance.preview.primaryAction')}</Button>
         </div>
+      </SRow>
+      {/* Its own last row: it resets the whole mode (every color above plus 透明效果), not the preview it used to sit in. */}
+      <SRow
+        id="general.resetAppearance"
+        title={t('settings.general.appearance.reset.title')}
+        description={t('settings.general.appearance.reset.description', { mode })}
+      >
         <Button
-          variant="link"
+          variant="outline"
+          size="sm"
           onClick={() =>
-            // Restores this mode's colors and turns 透明效果 back on (it is part of the default appearance).
             void saveConfig({
-              general: { appearance: { ...appearance, [mode]: DEFAULT_PALETTES[mode] }, transparency: DEFAULT_TRANSPARENCY },
+              general: {
+                appearance: { ...appearance, [mode]: DEFAULT_PALETTES[mode] },
+                transparency: DEFAULT_TRANSPARENCY,
+              },
             })
           }
         >
-          {t('settings.general.appearance.preview.reset')}
+          {t('settings.general.appearance.reset.action')}
         </Button>
       </SRow>
     </Card>

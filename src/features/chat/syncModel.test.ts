@@ -34,8 +34,8 @@ describe('syncView', () => {
   it('synced with counts', () => {
     const v = syncView({ phase: 'idle', lastSyncedAt: NOW - 2 * 60_000 }, counts, NOW)
     expect(v.phase).toBe('synced')
-    expect(v.text).toBe('2 分钟前同步 · 共 14,238 条消息 / 942 张图片 / 186 个文件 / 78 段语音')
-    expect(countsSummary(counts)).toContain('942 张图片')
+    expect(v.text).toBe('2 分钟前同步 · 14,238 条消息')
+    expect(countsSummary(counts)).not.toContain('942')
   })
   it('syncing with progress', () => {
     const v = syncView({ phase: 'syncing', progress: { done: 1240, total: 14238, label: '正在同步' } }, counts, NOW)

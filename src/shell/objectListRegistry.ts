@@ -16,6 +16,10 @@ export interface ObjectListRegistration {
   fn: RailFunction
   /** header title, e.g. 会话 / 自动回复 / AI 克隆 */
   title: string
+  /** Search field placeholder in the list's own words ("Search chats"); default = the generic 搜索{title}. */
+  searchPlaceholder?: string
+  /** Enter in the search field with text in it (the chat list opens 搜索聊天记录 with it); default = nothing. */
+  onSearchSubmit?: (query: string) => void
   component: ComponentType<ObjectListProps>
   /** optional segmented filter (e.g. 全部 / 已开启 / 已暂停) rendered by the shell */
   segments?: Array<{ id: string; label: string }>

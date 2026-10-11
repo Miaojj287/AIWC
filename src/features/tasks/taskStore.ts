@@ -104,8 +104,3 @@ export function useTaskRuns(taskId: string | undefined): TaskRun[] | undefined {
   }, [taskId])
   return useTaskStore((s) => (taskId ? s.runs[taskId] : undefined))
 }
-
-export function __resetTaskStoreForTests(): void {
-  subscription = undefined
-  useTaskStore.setState({ tasks: [], loaded: false, loading: false, error: undefined, runs: {} })
-}

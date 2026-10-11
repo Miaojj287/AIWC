@@ -5,6 +5,7 @@
 import {
   asCallId,
   newItemId,
+  usageFeatureForProfile,
   type AssistantMessageItem,
   type FinishReason,
   type HistoryItem,
@@ -18,12 +19,15 @@ import {
   type ThreadSettings,
   type TokenUsage,
   type ToolCallItem,
+  type ToolSummary,
   type TurnId,
 } from '@aiwc/protocol'
 import type { ToolCallRequest, ToolDispatchOutcome, ToolRouter } from '../ports'
 import type { ContextManager, RecordOptions } from './context/manager'
 import type { Emitter } from './emitter'
+import { sampleResilient, type ResilientSampleOptions } from './model/resilientSample'
 import { executeToolCalls, outcomeToResultItem } from './toolExec'
+import { createToolInputStream } from './toolInputStream'
 import type { Logger } from './types'
 import type { RwLock } from './util/rwlock'
 
@@ -43,6 +47,8 @@ export interface StepContext {
   readonly settings: Readonly<ThreadSettings>
   readonly systemPrompt: string
   readonly cacheKey: string
+  /** This step rewrites the answer after a blocking Stop hook (announced on `step.started`). */
+  readonly revision?: 'stop_hook'
 }
 
 export function freezeStepContext(ctx: StepContext): StepContext {
@@ -67,6 +73,10 @@ export interface StepDeps {
    * and the outcome carries `loopGuard: true` so the turn aborts with reason 'loop_guard'.
    */
   beforeDispatch?: (calls: readonly ToolCallRequest[]) => boolean
+  /** Handed to the router: the turn's time budget pauses while a call waits for approval. */
+  onApprovalWait?: () => () => void
+  /** Stream watchdog and retry policy (model/resilientSample.ts); defaults apply when absent. */
+  stream?: ResilientSampleOptions
   logger?: Logger
 }
 
@@ -103,9 +113,21 @@ function loopGuardOutcome(call: ToolCallRequest): ToolDispatchOutcome {
   }
 }
 
+function describeFor(router: ToolRouter, call: ToolCallRequest): { display?: ToolSummary } {
+  const display = router.has(call.toolName) ? router.describe?.(call.toolName, call.input) : undefined
+  return display ? { display } : {}
+}
+
 export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOutcome> {
   const { threadId, turnId, emit } = deps
-  emit({ type: 'step.started', threadId, turnId, stepId: ctx.stepId, index: ctx.index })
+  emit({
+    type: 'step.started',
+    threadId,
+    turnId,
+    stepId: ctx.stepId,
+    index: ctx.index,
+    ...(ctx.revision ? { revision: ctx.revision } : {}),
+  })
 
   const request: SamplingRequest = {
     system: ctx.systemPrompt,
@@ -115,12 +137,14 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
     maxOutputTokens: ctx.model.ref.maxOutputTokens,
     signal: deps.signal,
     cacheKey: ctx.cacheKey,
+    purpose: { feature: usageFeatureForProfile(ctx.settings.profile), threadId },
+    ...(ctx.settings.reasoningEffort ? { reasoningEffort: ctx.settings.reasoningEffort } : {}),
     ...(PROFILE_TEMPERATURE[ctx.settings.profile] !== undefined
       ? { temperature: PROFILE_TEMPERATURE[ctx.settings.profile] }
       : {}),
   }
 
-  const itemId = newItemId()
+  let itemId = newItemId()
   let text = ''
   let reasoning = ''
   let started = false
@@ -128,10 +152,31 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
   let finish: FinishReason = 'other'
   let error: ModelError | undefined
   const toolCalls: ToolCallRequest[] = []
+  // Arguments the model is still writing reach the transcript as they stream (throttled).
+  const inputs = createToolInputStream({ emit, threadId, turnId, clock: deps.clock })
 
   try {
-    for await (const part of ctx.model.sample(request)) {
+    for await (const part of sampleResilient(ctx.model, request, deps.stream ?? {})) {
       switch (part.type) {
+        case 'restart':
+          // The failed attempt's partial output is dropped (the UI removes it on stream.retrying); the retry starts
+          // a fresh assistant item.
+          text = ''
+          reasoning = ''
+          toolCalls.length = 0
+          inputs.reset()
+          started = false
+          itemId = newItemId()
+          emit({
+            type: 'stream.retrying',
+            threadId,
+            turnId,
+            attempt: part.attempt,
+            max: part.max,
+            reason: part.reason,
+            delayMs: part.delayMs,
+          })
+          break
         case 'text.delta':
           if (!started) {
             started = true
@@ -144,7 +189,11 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
           reasoning += part.delta
           emit({ type: 'reasoning.delta', threadId, turnId, itemId, delta: part.delta })
           break
+        case 'tool_input.delta':
+          inputs.push(asCallId(part.callId), part.name, part.delta)
+          break
         case 'tool_call':
+          inputs.flush(asCallId(part.callId))
           toolCalls.push({ callId: asCallId(part.callId), toolName: part.name, input: part.input })
           break
         case 'finish':
@@ -192,6 +241,8 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
         toolName: call.toolName,
         input: (call.input ?? null) as ToolCallItem['input'],
       }
+      const display = ctx.router.describe?.(call.toolName, call.input)
+      if (display) item.display = display
       items.push(item)
     }
   }
@@ -216,6 +267,7 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
         callId: call.callId,
         toolName: call.toolName,
         summary: ctx.router.has(call.toolName) ? ctx.router.summarize(call.toolName, call.input) : call.toolName,
+        ...describeFor(ctx.router, call),
         input: (call.input ?? null) as JsonValue,
         status: 'error',
         risk: ctx.router.risk(call.toolName) ?? 'read',
@@ -243,6 +295,7 @@ export async function runStep(ctx: StepContext, deps: StepDeps): Promise<StepOut
       depth: deps.depth,
       signal: deps.signal,
       emit,
+      onApprovalWait: deps.onApprovalWait,
     },
   })
   deps.record(

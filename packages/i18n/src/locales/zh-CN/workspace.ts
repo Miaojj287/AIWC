@@ -4,10 +4,11 @@ export const workspace = {
   tabError: '无法显示此标签',
   closeTab: '关闭标签',
   empty: {
-    chat: { title: '从左侧选择一个会话', description: '浏览、搜索、导出，或引用给 Agent' },
-    autoreply: { title: '选择一个会话来设置自动回复', description: '每个会话一条规则，开启后按设定回复' },
-    clone: { title: '选择一位联系人开始克隆', description: '从聊天记录提炼 TA 的说话风格' },
-    tasks: { title: '选择一个定时任务', description: '或新建一个，让 Agent 按时替你做事' },
+    chat: { title: '从左侧选择一个会话' },
+    autoreply: { title: '选择一个会话来设置自动回复' },
+    clone: { title: '选择一位联系人开始克隆' },
+    tasks: { title: '选择一个定时任务' },
+    todo: { title: '在左侧勾选要扫描的群聊' },
     /** `kbd` is the ⌘K key cap element. */
     search: '{kbd} 搜索',
   },

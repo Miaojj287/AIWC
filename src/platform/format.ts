@@ -15,7 +15,8 @@ const HOUR = 60 * MINUTE
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
-function startOfDay(ms: number): number {
+/** Local midnight of the day `ms` falls on. */
+export function startOfDay(ms: number): number {
   const d = new Date(ms)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
@@ -102,11 +103,4 @@ export function formatCount(n: number, max = 99): string {
 /** Thousands separator for stats: 1,284 */
 export function formatNumber(n: number): string {
   return Math.round(n).toLocaleString('en-US')
-}
-
-/** Middle-ellipsis for paths / wxids that must stay recognisable at both ends. */
-export function truncateMiddle(text: string, max = 32): string {
-  if (text.length <= max) return text
-  const keep = Math.max(2, Math.floor((max - 1) / 2))
-  return `${text.slice(0, keep)}…${text.slice(text.length - (max - 1 - keep))}`
 }

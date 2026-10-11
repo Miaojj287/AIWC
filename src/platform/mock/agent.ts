@@ -6,7 +6,8 @@
  */
 import {
   estimateTokens,
-  formatCitation,
+  modelCapabilities,
+  modelSupportsVision,
   newApprovalId,
   newCallId,
   newItemId,
@@ -19,7 +20,6 @@ import {
   type HistoryItem,
   type ItemId,
   type JsonValue,
-  type Mention,
   type Op,
   type ThreadId,
   type ThreadOrigin,
@@ -27,9 +27,12 @@ import {
   type ThreadSummary,
   type TurnId,
   type UserInput,
-  type WxMessage,
 } from '@aiwc/protocol'
 import { isAborted, type HandlersFor, type MockContext } from './core'
+import { deriveQuery, describeMessage, searchMessages } from './agentRecall'
+import { mockSearchThreads } from './agentSearch'
+import { MOCK_DEMO_MODEL_EXTRAS } from './composer'
+import { conversationHandlers, rollbackMockItems } from './agentConversation'
 import { searchableText } from './dataset'
 
 interface ThreadRecord {
@@ -49,8 +52,6 @@ export interface ScriptedAgent extends HandlersFor<'agent'> {
 }
 
 const TEXT_CHUNK_MS = 28
-const FILLER_WORDS =
-  /(帮我|请你|请|一下|看看|找找|找出|找|搜索|搜一搜|搜|查询|查一查|查|总结|整理|统计|告诉我|关于|的消息|的记录|的聊天|有没有|哪些|什么|最近|一周|上周|这周|上个月|这个月|里|吗|呢)/g
 
 export function agentHandlers(ctx: MockContext): ScriptedAgent {
   const threads = new Map<ThreadId, ThreadRecord>()
@@ -153,42 +154,7 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
     return itemId
   }
 
-  /** Pull a search keyword out of a Chinese request: drop request verbs / fillers, keep the topic. */
-  function deriveQuery(text: string, mentions: Mention[]): string {
-    const cleaned = text
-      .replace(FILLER_WORDS, ' ')
-      .replace(/[，。！？、；：“”‘’（）「」,.!?;:()\s]+/g, ' ')
-      .trim()
-    const tokens = cleaned.split(' ').filter((t) => t.length >= 2)
-    const pick = tokens.find((t) => t.length <= 8) ?? tokens[0]
-    if (pick) return pick.slice(0, 8)
-    const fallback = text.replace(/\s+/g, '').slice(0, 8)
-    return fallback || mentions[0]?.label || '最近'
-  }
-
-  /** Same citation dialect as the real tools (`cite`), so the preview exercises the panel's citation chips. */
-  function describe(m: WxMessage): string {
-    const session = ctx.data.sessions.get(m.sessionId)
-    const d = new Date(m.createdAt)
-    const p = (x: number) => String(x).padStart(2, '0')
-    const cite = formatCitation(
-      m.anchor ?? { sessionId: m.sessionId, messageId: m.id },
-      `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`,
-    )
-    return `${m.senderName ?? '对方'}（${session?.title ?? m.sessionId}）：“${searchableText(m).slice(0, 40)}” ${cite}`
-  }
-
-  function searchDataset(query: string, sessionIds: string[] | undefined): WxMessage[] {
-    const needle = query.toLowerCase()
-    const scope = sessionIds && sessionIds.length ? sessionIds : [...ctx.data.sessions.keys()]
-    const hits: WxMessage[] = []
-    for (const sid of scope)
-      for (const m of ctx.data.messagesBySession.get(sid) ?? [])
-        if (searchableText(m).toLowerCase().includes(needle)) hits.push(m)
-    return hits.sort((a, b) => b.createdAt - a.createdAt)
-  }
-
-  async function runTurn(rec: ThreadRecord, input: UserInput): Promise<void> {
+  async function runTurn(rec: ThreadRecord, input: UserInput, clientInputId?: string): Promise<void> {
     const threadId = rec.summary.threadId
     const turnId = newTurnId()
     const abort = new AbortController()
@@ -209,7 +175,15 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       content: input.content,
       mentions: input.mentions,
     })
-    emit({ type: 'item.user', threadId, turnId, itemId: userItemId, content: input.content, mentions: input.mentions })
+    emit({
+      type: 'item.user',
+      threadId,
+      turnId,
+      itemId: userItemId,
+      content: input.content,
+      mentions: input.mentions,
+      clientInputId,
+    })
     const sessionMention = input.mentions.find((m) => m.kind === 'session')
     if (sessionMention && !rec.summary.contextRef)
       rec.summary.contextRef = { kind: 'session', id: sessionMention.id, label: sessionMention.label }
@@ -276,7 +250,7 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       await ctx.delay(150, signal)
       emit({ ...base, status: 'running' })
       await ctx.delay(ctx.rng.int(450, 900), signal)
-      const hits = searchDataset(query, scopeIds)
+      const hits = searchMessages(ctx.data, query, scopeIds)
       const output: JsonValue = {
         total: hits.length,
         hits: hits.slice(0, 5).map((m) => ({
@@ -360,7 +334,7 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       finalText = hits.length
         ? `在 ${sessionsHit} 个会话里找到 ${hits.length} 条和“${query}”相关的消息。最近的几条：\n${hits
             .slice(0, 3)
-            .map((m) => `- ${describe(m)}`)
+            .map((m) => `- ${describeMessage(ctx.data, m)}`)
             .join('\n')}\n\n需要我按会话整理成摘要，或者只看某个人说的部分吗？`
         : `没有找到和“${query}”直接相关的消息。可以换个关键词，或者用 @ 引用具体会话再试。`
       await streamText(rec, turnId, step1, finalText, signal)
@@ -443,11 +417,12 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
             itemId,
             content: op.input.content,
             mentions: op.input.mentions,
+            clientInputId: op.clientInputId,
           })
           return
         }
         if (rec.running) interrupt(rec)
-        void runTurn(rec, op.input)
+        void runTurn(rec, op.input, op.clientInputId)
         return
       }
       case 'turn.interrupt':
@@ -496,12 +471,9 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       }
       case 'thread.rollback': {
         const rec = get(op.threadId)
-        const turnIds = [
-          ...new Set(rec.items.filter((i) => 'turnId' in i && i.turnId).map((i) => (i as { turnId: TurnId }).turnId)),
-        ]
-        const drop = new Set(turnIds.slice(-op.turns))
-        rec.items = rec.items.filter((i) => !('turnId' in i && i.turnId && drop.has(i.turnId)))
-        rec.turns = Math.max(0, rec.turns - op.turns)
+        interrupt(rec)
+        rec.items = rollbackMockItems(rec.items, op)
+        rec.turns = new Set(rec.items.filter((i) => i.type === 'user_message').map((i) => i.turnId)).size
         emit({ type: 'context.usage', threadId: op.threadId, usage: usageFor(rec) })
         return
       }
@@ -516,23 +488,36 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       case 'thread.shutdown':
         interrupt(get(op.threadId))
         return
+      case 'question.answer':
+        return
     }
   }
 
   const handlers: HandlersFor<'agent'> = {
+    ...conversationHandlers({
+      threads,
+      get,
+      now: ctx.now,
+      create: (threadId, summary) => {
+        const rec: ThreadRecord = { summary, items: [], turns: 0, approvals: new Map() }
+        threads.set(threadId, rec)
+        return rec
+      },
+    }),
     'agent:submit': (op) => dispatch(op),
-    'agent:listThreads': ({ query, limit, channel }) => {
+    'agent:listThreads': ({ query, limit, offset, channel }) => {
       const needle = query?.trim().toLowerCase()
       const list = [...threads.values()]
         .map((t) => t.summary)
-        .filter((s) => !channel || s.origin.channel === channel)
+        .filter((s) => !s.archived && (!channel || s.origin.channel === channel))
         .filter((s) => !needle || s.title.toLowerCase().includes(needle))
         .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
-      return limit ? list.slice(0, limit) : list
+      return list.slice(offset ?? 0, limit ? (offset ?? 0) + limit : undefined)
     },
+    'agent:searchThreads': ({ query, limit }) => mockSearchThreads([...threads.values()], query, limit),
     'agent:getThread': ({ threadId }) => {
       const rec = get(threadId)
-      return { summary: rec.summary, items: [...rec.items] }
+      return { summary: rec.summary, items: [...rec.items], running: Boolean(rec.running) }
     },
     'agent:renameThread': ({ threadId, title }) => {
       const rec = get(threadId)
@@ -549,10 +534,10 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
       if (rec) interrupt(rec)
       threads.delete(threadId)
     },
-    'agent:exportThread': async ({ threadId }) => {
+    'agent:exportThread': async ({ threadId, options }) => {
       const rec = get(threadId)
       await ctx.delay(400)
-      return { path: `~/Downloads/AIWC 导出/${rec.summary.title}.md` }
+      return { path: `~/Downloads/AIWC 导出/${rec.summary.title}.${options?.format ?? 'md'}` }
     },
     'agent:listSkills': () => [
       { name: 'weekly_report', description: '按会话整理最近一周的要点', command: '/周报', source: 'builtin' },
@@ -574,6 +559,8 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
             local: p.kind === 'ollama',
             supportsTools: m.supportsTools,
             reasoningEffort: m.reasoningEffort,
+            supportsVision: modelSupportsVision(p, m),
+            reasoningLevels: modelCapabilities(p, m).reasoning,
           })),
       )
       if (out.length === 0)
@@ -587,20 +574,9 @@ export function agentHandlers(ctx: MockContext): ScriptedAgent {
           local: true,
           supportsTools: true,
           reasoningEffort: undefined,
+          ...MOCK_DEMO_MODEL_EXTRAS,
         })
       return out
-    },
-    'agent:suggestPrompts': ({ contextRef }) => {
-      if (contextRef?.kind === 'session')
-        return [
-          `总结「${contextRef.label}」最近一周聊了什么`,
-          `找出「${contextRef.label}」里还没回复的问题`,
-          `把「${contextRef.label}」里提到的时间和地点列出来`,
-        ]
-      if (contextRef?.kind === 'contact')
-        return [`${contextRef.label} 最近关心什么`, `我和 ${contextRef.label} 上次聊到哪了`]
-      if (contextRef?.kind === 'file') return [`概括这个文件的要点`, `把文件里的待办整理出来`]
-      return ['最近一周哪些群最活跃', '帮我找一下上个月提到“会议”的消息', '统计我和谁聊得最多']
     },
   }
 

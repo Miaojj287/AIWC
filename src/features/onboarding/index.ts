@@ -7,3 +7,4 @@ export function register(): void {
 }
 
 export { OnboardingWizard } from './OnboardingWizard'
+export { LaunchSplash } from './LaunchSplash'

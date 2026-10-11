@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import type { HistoryItem, InvokeReq, SubstrateService, WxMessage, WxSession } from '@aiwc/protocol'
+import type { InvokeReq, SubstrateService, WxMessage, WxSession } from '@aiwc/protocol'
 import { mainLanguage, t } from '../i18n'
 
 /** Messages requested per listMessages page while collecting a session export. */
@@ -255,57 +255,6 @@ export function sessionToCsv(messages: WxMessage[]): string {
       .join(','),
   )
   return `\uFEFF${[head, ...rows].join('\r\n')}\r\n`
-}
-
-export function threadToMarkdown(title: string, items: HistoryItem[]): string {
-  const lines: string[] = [`# ${title}`, '', t('main.export.exportedLine', { time: formatTimestamp(Date.now()) }), '']
-  for (const it of items) {
-    switch (it.type) {
-      case 'user_message':
-        lines.push(
-          `## ${t('main.export.user')}`,
-          '',
-          ...it.content.map((c) =>
-            c.type === 'text' ? c.text : `[${c.type}${'name' in c && c.name ? ` ${c.name}` : ''}]`,
-          ),
-          '',
-        )
-        break
-      case 'assistant_message':
-        lines.push('## Agent', '', it.text, '')
-        break
-      case 'tool_call':
-        lines.push(
-          `> ${t('main.export.toolCall')} \`${it.toolName}\``,
-          '',
-          '```json',
-          JSON.stringify(it.input, null, 2),
-          '```',
-          '',
-        )
-        break
-      case 'tool_result': {
-        const out =
-          it.output.type === 'text'
-            ? it.output.text
-            : it.output.type === 'json'
-              ? JSON.stringify(it.output.value, null, 2)
-              : '[image]'
-        lines.push(
-          `> ${t('main.export.toolResult')} \`${it.toolName}\`${it.isError ? t('main.export.toolError') : ''}${it.truncated ? t('main.export.toolTruncated') : ''}`,
-          '',
-          '```',
-          out,
-          '```',
-          '',
-        )
-        break
-      }
-      default:
-        break
-    }
-  }
-  return `${lines.join('\n').trimEnd()}\n`
 }
 
 export function writeExport(dir: string, baseName: string, ext: string, content: string): string {

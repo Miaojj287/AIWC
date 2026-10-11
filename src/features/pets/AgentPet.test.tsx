@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultConfig, type InstalledPet, type PetConfig } from '@aiwc/protocol'
 import { AgentPet } from './AgentPet'
 import type { AgentPetSignal } from './petModel'
+import type { PetFleet } from './petStatus'
 
 const pet: InstalledPet = {
   id: 'aiwcji',
@@ -101,6 +102,41 @@ describe('<AgentPet>', () => {
     expect(sprite().dataset.frame).toBe('0')
   })
 
+  it('shows the counts across threads and WeChat beside the pet, and opens what a count names', () => {
+    const onStatusSelect = vi.fn()
+    const fleet: PetFleet = {
+      running: 2,
+      waiting: 1,
+      done: 1,
+      failed: 0,
+      targets: { waiting: 't2', done: 't3' },
+      unread: { messages: 5, chats: 2, capped: false },
+    }
+    mount({ ...idle, fleet }, {}, { onStatusSelect })
+    const readout = screen.getByRole('group', { name: /1 个会话等你确认/ })
+    expect([...readout.querySelectorAll('[data-kind]')].map((el) => (el as HTMLElement).dataset.kind)).toEqual([
+      'waiting',
+      'running',
+      'done',
+      'unread',
+    ])
+    // the only running thread target is the one on screen: a plain readout, not a button
+    expect(screen.getByRole('img', { name: '2 个会话正在运行' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '1 个会话已完成，还没看' }))
+    expect(onStatusSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'done', threadId: 't3' }))
+    fireEvent.click(screen.getByRole('button', { name: '微信 5 条未读（2 个聊天）' }))
+    expect(onStatusSelect).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'unread' }))
+  })
+
+  it('keeps the bubble while counts show, and hides counts the settings turn off', () => {
+    const fleet: PetFleet = { running: 0, waiting: 0, done: 2, failed: 0, targets: { done: 't3' } }
+    const { rerender } = mount({ ...idle, streaming: true, approval: '删除规则', fleet })
+    expect(screen.getByText('需要你确认')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '2 个会话已完成，还没看' })).toBeTruthy()
+    rerender({ ...idle, fleet }, { showDone: false })
+    expect(screen.queryByTestId('pet-status')).toBeNull()
+  })
+
   it('in the collapsed strip it has no bubble and expands the panel on click', () => {
     const onActivate = vi.fn()
     mount({ ...idle, approval: '删除规则' }, {}, { variant: 'mini', onActivate })
@@ -108,5 +144,15 @@ describe('<AgentPet>', () => {
     expect(screen.queryByText('需要你确认')).toBeNull()
     fireEvent.click(petButton())
     expect(onActivate).toHaveBeenCalledTimes(1)
+  })
+
+  it('in the collapsed strip it stacks the counts under the pet', () => {
+    const onStatusSelect = vi.fn()
+    const fleet: PetFleet = { running: 1, waiting: 0, done: 0, failed: 1, targets: { running: 't1', failed: 't4' } }
+    mount({ ...idle, fleet }, {}, { variant: 'mini', onStatusSelect })
+    const strip = screen.getByTestId('agent-pet-mini')
+    expect(strip.querySelector('[data-testid="pet-status"]')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '1 个会话出错了' }))
+    expect(onStatusSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'failed', threadId: 't4' }))
   })
 })

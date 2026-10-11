@@ -8,7 +8,6 @@ import {
   formatRelative,
   formatTime,
   formatVoiceDuration,
-  truncateMiddle,
 } from './format'
 
 // 2026-09-06 14:30 local time
@@ -66,11 +65,5 @@ describe('durations, bytes, counts', () => {
     expect(formatCount(0)).toBe('')
     expect(formatCount(7)).toBe('7')
     expect(formatCount(120)).toBe('99+')
-  })
-  it('truncateMiddle', () => {
-    expect(truncateMiddle('short')).toBe('short')
-    const t = truncateMiddle('/Users/demo/Library/Containers/com.tencent.xinWeChat/Data', 20)
-    expect(t.length).toBe(20)
-    expect(t).toContain('…')
   })
 })

@@ -79,9 +79,17 @@ describe('appearance settings', () => {
   it('恢复默认外观 restores the edited mode and turns 透明效果 back on', () => {
     ;(window as unknown as { aiwc?: unknown }).aiwc = { runtime: 'electron', platform: 'darwin' }
     const base = defaultConfig().general
-    const general = { ...base, transparency: false, appearance: { ...base.appearance, dark: { ...base.appearance.dark, accent: '#123456' } } }
+    const general = {
+      ...base,
+      transparency: false,
+      appearance: { ...base.appearance, dark: { ...base.appearance.dark, accent: '#123456' } },
+    }
     render(<AppearanceSettings general={general} />)
-    fireEvent.click(screen.getByRole('button', { name: '恢复默认外观' }))
-    expect(saveConfig).toHaveBeenCalledWith({ general: { appearance: { light: base.appearance.light, dark: base.appearance.dark }, transparency: true } })
+    // Its own row now: the row is titled 恢复默认外观, the button says 恢复默认.
+    expect(screen.getByText('恢复默认外观')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }))
+    expect(saveConfig).toHaveBeenCalledWith({
+      general: { appearance: { light: base.appearance.light, dark: base.appearance.dark }, transparency: true },
+    })
   })
 })

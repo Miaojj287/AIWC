@@ -131,7 +131,7 @@ export function RecordsCard({ sessionId, sessionTitle, drawerOpen, onDrawerOpenC
         onConfirm={recall}
       >
         {recallTarget ? (
-          <div className="rounded-item border border-line-8 bg-content px-3 py-2 text-caption text-fg-2">
+          <div className="rounded-item border border-line-6 bg-content px-3 py-2 text-caption leading-4.5 text-fg-2">
             {recallTarget.replyText}
           </div>
         ) : null}

@@ -1,20 +1,46 @@
 /**
  * 文件 Tab (kind 'file', objectId = path): Markdown files get a monospace editor with a live split preview,
- * dirty state (title dot via tab.dirty), 保存 / 重置; other text files are read-only; images preview inline.
- * Toolbar: 在文件夹中显示 (file:reveal). ⌘S saves.
+ * dirty state (title dot via tab.dirty), 保存 / 重置. Everything else is a read-only preview: text, CSV / TSV
+ * and Excel as tables, Word, PDF, images, audio / video, and HTML in an isolated frame (FilePreviews.tsx,
+ * PdfPreview.tsx). Header (72px like every object tab): tile · name + path · view switch · 用默认应用打开 ·
+ * 在文件夹中显示 (file:reveal) · 重置 / 保存; the controls wrap under the name when the tab is narrow (the Agent
+ * window's workspace column). ⌘S saves.
  */
-import { Columns2, Eye, FileText, FolderOpen, PenLine, RotateCcw, Save } from 'lucide-react'
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
-import { Badge, Button, EmptyState, ScrollArea, SegmentedControl, Textarea, Tooltip, cn, toast } from '@/kit'
+import { Columns2, ExternalLink, Eye, FileText, FolderOpen, PenLine, RotateCcw, Save, TextQuote } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import type { DocumentPreview } from '@aiwc/protocol'
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ICON_STROKE,
+  Markdown,
+  ScrollArea,
+  SegmentedControl,
+  SelectionAction,
+  Textarea,
+  Tooltip,
+  cn,
+  toast,
+  type MarkdownTableActions,
+} from '@/kit'
+import { runCommand } from '@/app/commands'
 import { detectMac } from '@/app/shortcuts'
 import { useT } from '@/i18n'
 import { invoke } from '@/platform/hooks'
+import { quoteScopeProps } from '@/platform/focusScope'
 import { formatNumber } from '@/platform/format'
+import { toMediaUrl } from '@/platform/mediaUrl'
+import { openLocalPath, openTarget } from '@/platform/openExternal'
 import type { TabRendererProps } from '@/workspace/tabRegistry'
-import { contentStats, fileName, isDirty, previewKind } from './fileModel'
-import { Markdown } from './markdown'
+import { base64ToBytes, contentStats, fileName, isDirty, previewKind, previewSource, toDataUrl } from './fileModel'
+import { CsvPreview, DocumentView, HtmlPreview, ImagePreview, MediaPreview } from './FilePreviews'
+import { PdfPreview } from './PdfPreview'
 
 type ViewMode = 'edit' | 'split' | 'preview'
+
+/** The preview's tables offer the two copy actions; saving a CSV is an Agent-reply action. */
+const PREVIEW_TABLE_ACTIONS: MarkdownTableActions = { copy: true }
 
 /** `label` is a catalog key. */
 const VIEW_OPTIONS = [
@@ -29,8 +55,12 @@ export function FileTab({ tab, update }: TabRendererProps) {
   const t = useT()
   const path = tab.objectId
   const mac = detectMac()
+  // Text selected in the preview can be quoted to the Agent (引用到 Agent), with this file as the source.
+  const quoteRef = useRef<HTMLDivElement>(null)
+  const source = previewSource(previewKind(path), path)
   const [loaded, setLoaded] = useState<{ content: string; mediaType: string } | undefined>()
-  const [loading, setLoading] = useState(true)
+  const [officeDoc, setOfficeDoc] = useState<DocumentPreview | undefined>()
+  const [loading, setLoading] = useState(source === 'read' || source === 'document')
   const [error, setError] = useState<string | undefined>()
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -40,18 +70,25 @@ export function FileTab({ tab, update }: TabRendererProps) {
   )
 
   const load = useCallback(async () => {
+    // Audio / video stream from the aiwc-media protocol (range requests): nothing to load up front.
+    // Known binaries (archives, installers) are not read at all: the Tab offers the default app.
+    if (source === 'stream' || source === 'none') return
     setLoading(true)
     setError(undefined)
     try {
-      const res = await invoke('file:read', { path })
-      setLoaded(res)
-      setDraft(res.content)
+      if (source === 'document') {
+        setOfficeDoc(await invoke('file:previewDocument', { path }))
+      } else {
+        const res = await invoke('file:read', { path })
+        setLoaded(res)
+        setDraft(res.content)
+      }
     } catch (e) {
       setError(errText(e))
     } finally {
       setLoading(false)
     }
-  }, [path])
+  }, [path, source])
 
   useEffect(() => {
     void load()
@@ -79,10 +116,15 @@ export function FileTab({ tab, update }: TabRendererProps) {
     }
   }, [dirty, saving, path, draft, t])
 
+  const openExternally = () => void openLocalPath(path, t('file.openTarget'))
+
   const reveal = () =>
     void invoke('file:reveal', { path }).catch((e: unknown) =>
       toast.error(t('file.revealFailed', { detail: errText(e) })),
     )
+
+  /** Preview links open through the shell (browser or default app), never by navigating the renderer. */
+  const openLink = useCallback((href: string) => void openTarget(href, t('file.markdown.link')), [t])
 
   const onEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const mod = mac ? e.metaKey : e.ctrlKey
@@ -98,52 +140,94 @@ export function FileTab({ tab, update }: TabRendererProps) {
   }
 
   const stats = contentStats(draft)
+  // file:read hands binaries over as bare base64; the image and PDF views need a data URL / bytes.
+  const imageSrc = useMemo(
+    () => (kind === 'image' && loaded ? toDataUrl(loaded.content, loaded.mediaType) : undefined),
+    [kind, loaded],
+  )
+  const pdfBytes = useMemo(() => (kind === 'pdf' && loaded ? base64ToBytes(loaded.content) : undefined), [kind, loaded])
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-content">
-      <div className="flex h-[44px] shrink-0 items-center gap-3 border-b border-line-6 px-4">
-        <FileText size={15} strokeWidth={1.75} aria-hidden className="shrink-0 text-accent" />
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="min-w-0 truncate text-body font-medium text-fg">{fileName(path)}</span>
-          <span className="hidden min-w-0 truncate font-mono text-micro text-fg-3 md:inline" title={path}>
-            {path}
+    <div
+      ref={quoteRef}
+      className="flex h-full min-h-0 flex-col bg-content"
+      {...quoteScopeProps({ kind: 'file', id: path, label: fileName(path) })}
+    >
+      <SelectionAction
+        containerRef={quoteRef}
+        icon={TextQuote}
+        label={t('file.quoteSelection')}
+        onAction={(text) =>
+          runCommand('agent.quoteText', { text, source: { kind: 'file', id: path, label: fileName(path) } })
+        }
+      />
+      <div className="flex min-h-18 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line-6 px-5 py-3">
+        <div className="flex min-w-40 flex-1 items-center gap-3">
+          <span
+            aria-hidden
+            className="flex size-9 shrink-0 items-center justify-center rounded-item bg-hover-7 text-fg-2"
+          >
+            <FileText size={18} strokeWidth={ICON_STROKE} />
           </span>
-          {dirty ? <Badge tone="warn">{t('file.dirty')}</Badge> : null}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-bubble font-semibold leading-5 text-fg" title={fileName(path)}>
+                {fileName(path)}
+              </span>
+              {dirty ? <Badge tone="warn">{t('file.dirty')}</Badge> : null}
+            </div>
+            {/* The second line, like the chat header's meta: always there, so no breakpoint decides whether the
+                path is visible. It truncates at the tail and keeps the whole path in `title`. */}
+            <span className="truncate font-mono text-micro leading-4 text-fg-3" title={path}>
+              {path}
+            </span>
+          </div>
         </div>
-        {editable ? (
-          <SegmentedControl
-            options={VIEW_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
-            value={view}
-            onValueChange={changeView}
-            size="sm"
-            aria-label={t('file.view.label')}
-          />
-        ) : null}
-        <Tooltip content={t('file.reveal')}>
+        <div className="flex flex-wrap items-center gap-2">
+          {editable ? (
+            <SegmentedControl
+              options={VIEW_OPTIONS.map((o) => ({ ...o, label: t(o.label) }))}
+              value={view}
+              onValueChange={changeView}
+              size="sm"
+              aria-label={t('file.view.label')}
+            />
+          ) : null}
+          {!editable ? (
+            <Button variant="ghost" size="sm" icon={ExternalLink} onClick={openExternally}>
+              {t('file.openExternally')}
+            </Button>
+          ) : null}
           <Button variant="ghost" size="sm" icon={FolderOpen} onClick={reveal}>
             {t('file.reveal')}
           </Button>
-        </Tooltip>
-        {editable ? (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={RotateCcw}
-              disabled={!dirty || saving}
-              onClick={() => setDraft(loaded?.content ?? '')}
-            >
-              {t('common.reset')}
-            </Button>
-            <Tooltip content={t('common.save')} kbd={mac ? '⌘S' : 'Ctrl+S'} disabled={!dirty}>
-              <span className="inline-flex">
-                <Button size="sm" icon={Save} disabled={!dirty} loading={saving} onClick={() => void save()}>
+          {editable ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={RotateCcw}
+                disabled={!dirty || saving}
+                onClick={() => setDraft(loaded?.content ?? '')}
+              >
+                {t('common.reset')}
+              </Button>
+              {/* Enabled: the shortcut. Disabled: the button says why itself (`disabledReason`). */}
+              <Tooltip content={t('common.save')} kbd={mac ? '⌘S' : 'Ctrl+S'} disabled={!dirty}>
+                <Button
+                  size="sm"
+                  icon={Save}
+                  disabled={!dirty}
+                  disabledReason={t('file.nothingToSave')}
+                  loading={saving}
+                  onClick={() => void save()}
+                >
                   {t('common.save')}
                 </Button>
-              </span>
-            </Tooltip>
-          </>
-        ) : null}
+              </Tooltip>
+            </>
+          ) : null}
+        </div>
       </div>
 
       {loading ? (
@@ -177,7 +261,7 @@ export function FileTab({ tab, update }: TabRendererProps) {
                 spellCheck={false}
                 aria-label={t('file.editorLabel')}
                 wrapperClassName="min-h-0 flex-1"
-                className="h-full min-h-0 resize-none rounded-none border-0 bg-content px-5 py-4 leading-[20px] focus:border-0"
+                className="h-full min-h-0 resize-none rounded-none border-0 bg-content px-5 py-4 leading-5 focus:border-0"
               />
               <div className="flex h-7 shrink-0 items-center gap-3 border-t border-line-6 px-4 font-latin text-micro text-fg-3">
                 <span>{t('file.chars', { n: stats.chars, count: formatNumber(stats.chars) })}</span>
@@ -190,7 +274,12 @@ export function FileTab({ tab, update }: TabRendererProps) {
             <ScrollArea className={cn('min-h-0 min-w-0', view === 'split' ? 'flex-1' : 'flex-1')}>
               <div className="mx-auto w-full max-w-[760px] px-8 py-6">
                 {draft.trim() ? (
-                  <Markdown source={draft} />
+                  <Markdown
+                    source={draft}
+                    onLink={openLink}
+                    tableActions={PREVIEW_TABLE_ACTIONS}
+                    className="select-text"
+                  />
                 ) : (
                   <EmptyState compact title={t('file.emptyFile')} description={t('file.emptyFileHint')} />
                 )}
@@ -200,24 +289,29 @@ export function FileTab({ tab, update }: TabRendererProps) {
         </div>
       ) : kind === 'text' ? (
         <ScrollArea className="min-h-0 flex-1">
-          <pre className="select-text whitespace-pre-wrap break-words px-5 py-4 font-mono text-caption leading-[18px] text-fg-2">
+          <pre className="select-text whitespace-pre-wrap break-words px-5 py-4 font-mono text-caption leading-4.5 text-fg-2">
             {loaded?.content}
           </pre>
         </ScrollArea>
-      ) : kind === 'image' && loaded?.content.startsWith('data:') ? (
-        <div className="flex flex-1 items-center justify-center overflow-auto p-6">
-          <img
-            src={loaded.content}
-            alt={fileName(path)}
-            className="max-h-full max-w-full rounded-item object-contain"
-          />
-        </div>
+      ) : kind === 'csv' && loaded ? (
+        <CsvPreview path={path} text={loaded.content} />
+      ) : kind === 'html' && loaded ? (
+        <HtmlPreview source={loaded.content} title={fileName(path)} />
+      ) : kind === 'image' && imageSrc ? (
+        <ImagePreview src={imageSrc} alt={fileName(path)} />
+      ) : kind === 'pdf' && pdfBytes ? (
+        <PdfPreview data={pdfBytes} />
+      ) : (kind === 'audio' || kind === 'video') && source === 'stream' ? (
+        <MediaPreview kind={kind} src={toMediaUrl(path) ?? path} title={fileName(path)} />
+      ) : (kind === 'docx' || kind === 'xlsx') && officeDoc ? (
+        <DocumentView preview={officeDoc} />
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <EmptyState
             title={t('file.unsupported')}
             description={loaded?.mediaType ?? t('file.unknownType')}
-            action={{ label: t('file.reveal'), onClick: reveal, variant: 'ghost' }}
+            action={{ label: t('file.openExternally'), onClick: openExternally, variant: 'ghost' }}
+            secondaryAction={{ label: t('file.reveal'), onClick: reveal }}
           />
         </div>
       )}

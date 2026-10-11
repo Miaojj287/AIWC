@@ -269,7 +269,7 @@ export function PersonaChat({
         </div>
       </div>
       <div className="shrink-0 px-5 pb-4">
-        <div className="mx-auto flex w-full max-w-[720px] items-end gap-2 rounded-item border border-line-8 bg-content p-1.5 focus-within:border-accent/70">
+        <div className="mx-auto flex w-full max-w-[720px] items-end gap-2 rounded-item border border-line-8 bg-content p-1.5 focus-within:border-(--line-25)">
           <Textarea
             autosize
             minRows={1}
@@ -318,7 +318,7 @@ function UserBubble({ m, selfName }: { m: PersonaMessage; selfName?: string }) {
         <span className="font-latin text-micro text-fg-3">{formatClock(m.at)}</span>
         <div
           className={cn(
-            'rounded-item rounded-br-sm bg-bubble-self px-3 py-1.5 text-bubble leading-[22px] text-white',
+            'rounded-window rounded-tr-sm bg-bubble-self px-3.5 py-2 text-bubble leading-bubble text-white',
             m.pending && 'opacity-80',
           )}
         >
@@ -401,7 +401,7 @@ function AssistantBubble({
             {bubbles.map((bubble, i) => (
               <div
                 key={i}
-                className="whitespace-pre-wrap break-words rounded-item rounded-tl-sm border border-line-6 bg-panel px-3 py-1.5 text-bubble leading-[22px] text-fg"
+                className="whitespace-pre-wrap break-words rounded-window rounded-tl-sm border border-line-8 bg-panel px-3.5 py-2 text-bubble leading-bubble text-fg"
               >
                 {bubble || (m.streaming ? '…' : '')}
                 {m.streaming && i === bubbles.length - 1 ? (
@@ -413,7 +413,7 @@ function AssistantBubble({
               <div
                 className={cn(
                   'flex items-center gap-1',
-                  voted || correctionOpen ? 'flex' : 'invisible group-hover:visible',
+                  voted || correctionOpen ? 'flex' : 'invisible group-focus-within:visible group-hover:visible',
                 )}
               >
                 <Button

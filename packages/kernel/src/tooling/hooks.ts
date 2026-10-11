@@ -1,6 +1,6 @@
 /**
  * Ordered hook runner. Hooks never break a turn: exceptions are logged and treated as "no opinion".
- * Merge rules: the first block wins; additionalContext is concatenated; updatedInput / updatedOutput
+ * Merge rules: the first block wins; additionalContext and checks are concatenated; updatedInput / updatedOutput
  * last wins (and each rewritten input is what the next hook sees).
  */
 import type { Hook, HookEventName, HookPayload, HookResult, HookRunner } from '../ports'
@@ -23,6 +23,7 @@ export function createHookRunner(opts?: { logger?: HookLogger }): HookRunner {
     async run(event: HookEventName, payload: HookPayload): Promise<HookResult> {
       const merged: HookResult = {}
       const contexts: string[] = []
+      const checks: NonNullable<HookResult['checks']> = []
       let current: HookPayload = payload
       for (const hook of [...hooks]) {
         if (!hook.events.includes(event)) continue
@@ -36,6 +37,7 @@ export function createHookRunner(opts?: { logger?: HookLogger }): HookRunner {
         if (!result) continue
         if (result.block && !merged.block) merged.block = result.block
         if (result.additionalContext) contexts.push(result.additionalContext)
+        if (result.checks?.length) checks.push(...result.checks)
         if (result.updatedInput !== undefined) {
           merged.updatedInput = result.updatedInput
           current = { ...current, input: result.updatedInput }
@@ -46,6 +48,7 @@ export function createHookRunner(opts?: { logger?: HookLogger }): HookRunner {
         }
       }
       if (contexts.length) merged.additionalContext = contexts.join('\n')
+      if (checks.length) merged.checks = checks
       return merged
     },
   }

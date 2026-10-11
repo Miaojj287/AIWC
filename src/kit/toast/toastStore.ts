@@ -1,6 +1,6 @@
 /**
  * Toast store — framework-free (useSyncExternalStore in <Toaster/>), so features and the shell can
- * push toasts from anywhere. Rules (CLAUDE.md §4.6): bottom-right, 4 s auto-dismiss, sticky when it
+ * push toasts from anywhere. Rules (CLAUDE.md §4.6): top-centre, 4 s auto-dismiss, sticky when it
  * carries an action or is marked sticky; `progress` toasts are sticky by default and get updated.
  */
 export type ToastKind = 'success' | 'info' | 'warning' | 'error' | 'progress'

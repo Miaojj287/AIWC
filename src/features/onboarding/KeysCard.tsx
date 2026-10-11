@@ -2,14 +2,16 @@
  * Card ② 密钥 (Figma 135:415 下半 / 155:415 ②): header 自动获取 → progress dialog; per-key rows with
  * masked value, reveal toggle, manual paste with 64-hex validation; failed rows red with 重试 / 内存扫描.
  */
-import { Check, Circle, CircleAlert, Eye, EyeOff, KeyRound, RefreshCw, ScanSearch, Sparkles } from 'lucide-react'
+import { Check, CircleAlert, Eye, EyeOff, KeyRound, RefreshCw, ScanSearch, Settings, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { AppConfig, KeyAcquireStep } from '@aiwc/protocol'
+import type { AppConfig } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Badge, Button, Card, FieldLabel, ICON_STROKE, IconButton, InlineHint, Input, Spinner, cn, toast } from '@/kit'
+import { Badge, Button, Card, FieldLabel, IconButton, InlineHint, Input, TaskProgress, cn, toast } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
-import { KEY_KINDS, KEY_META, KEY_STEP_LABELS, hasKey, summariseKeys, type KeyKind, type KeyState } from './gating'
+import { openUrl } from '@/platform/openExternal'
+import { DEVELOPER_TOOLS_SETTINGS_URL, keyAcquireView, useClock } from '@/platform/wechatKeys'
+import { KEY_KINDS, KEY_META, hasKey, summariseKeys, type KeyKind, type KeyState } from './gating'
 import { useWizardStore } from './wizardStore'
 
 const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = {
@@ -67,7 +69,7 @@ function AcquiredKeyInput({
       revealable={false}
       value={shown ? (known ?? '') : '•'.repeat(Math.min(meta.hexLength, 48))}
       aria-label={t('onboarding.keys.acquiredAria', { label: t(meta.label) })}
-      wrapperClassName="flex-1"
+      wrapperClassName="flex-[3]"
       trailing={
         <>
           <IconButton
@@ -97,6 +99,8 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
   const clearKey = useWizardStore((s) => s.clearKey)
   const acquire = useWizardStore((s) => s.acquire)
   const acquiring = useWizardStore((s) => s.acquiring)
+  // While the progress panel shows the failed run, it carries the reason and the retry actions.
+  const panelShowsFailure = useWizardStore((s) => s.acquireFailed)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | undefined>()
   const [saving, setSaving] = useState(false)
@@ -125,7 +129,7 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
       <div
         className={cn(
           'flex items-center gap-3 rounded-item border p-2',
-          failed ? 'border-danger/40 bg-danger/5' : 'border-line-6 bg-content/60',
+          failed ? 'border-danger/40 bg-danger/5' : 'border-line-6 bg-content',
         )}
       >
         <span
@@ -142,7 +146,8 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
             <KeyRound size={15} strokeWidth={1.75} aria-hidden />
           )}
         </span>
-        <div className="flex w-[124px] shrink-0 flex-col gap-0.5">
+        {/* Grows with the row (English labels run longer); the key field keeps three times the share. */}
+        <div className="flex min-w-32 flex-1 flex-col gap-0.5">
           <span
             className={cn('truncate text-body font-medium', failed ? 'text-danger' : 'text-fg')}
             title={t(meta.label)}
@@ -173,7 +178,7 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
             disabled={saving || acquiring}
             error={Boolean(error)}
             aria-label={t(meta.label)}
-            wrapperClassName="flex-1"
+            wrapperClassName="flex-[3]"
           />
         )}
         {!present ? (
@@ -194,7 +199,7 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
         ) : null}
       </div>
       {error ? <InlineHint kind="error">{error}</InlineHint> : null}
-      {failed ? (
+      {failed && !panelShowsFailure ? (
         <div className="flex items-center gap-2">
           <InlineHint kind="error" className="min-w-0 flex-1">
             {state.error}
@@ -217,65 +222,54 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
   )
 }
 
-const STEP_ICON: Record<KeyAcquireStep['status'], React.ReactNode> = {
-  done: <Check size={13} strokeWidth={2} aria-hidden className="text-ok" />,
-  doing: <Spinner size={13} />,
-  todo: <Circle size={11} strokeWidth={ICON_STROKE} aria-hidden className="text-fg-3" />,
-  failed: <CircleAlert size={13} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" />,
-}
-
 /**
- * Inline key-acquire progress (shown below the key rows, not in a modal). Mirrors the reference app:
- * a compact step list ✓/⟳/○/! with the live detail — including the macOS hook's “请重新登录微信”
- * prompt — plus a 取消 button while running (CLAUDE.md §4.5, long tasks stay cancellable).
+ * Inline key-acquire progress below the key rows (CLAUDE.md §4.5): one line naming the current stage
+ * (with what to do and a countdown when it waits on the user), elapsed time, ✓/⟳/○/! steps and 取消.
+ * A failed run stays visible with its reason and 重试 until dismissed or re-run.
  */
 function KeyAcquireProgress() {
   const t = useT()
   const acquiring = useWizardStore((s) => s.acquiring)
+  const failed = useWizardStore((s) => s.acquireFailed)
   const steps = useWizardStore((s) => s.acquireSteps)
-  const strategy = useWizardStore((s) => s.acquireStrategy)
+  const startedAt = useWizardStore((s) => s.acquireStartedAt)
   const cancelAcquire = useWizardStore((s) => s.cancelAcquire)
-  if (!acquiring) return null
-  const active = steps.find((s) => s.status === 'doing')
+  const dismiss = useWizardStore((s) => s.dismissAcquireResult)
+  const acquire = useWizardStore((s) => s.acquire)
+  const now = useClock(acquiring)
+  if (!acquiring && !failed) return null
+  const view = keyAcquireView(steps, { running: acquiring, startedAt, now })
   return (
-    <div className="flex flex-col gap-2 rounded-item border border-line-6 bg-content/60 p-3">
-      <div className="flex items-center gap-2">
-        <Spinner size={13} />
-        <span className="min-w-0 flex-1 truncate text-caption text-fg-2">
-          {strategy === 'memory_scan' ? t('onboarding.keys.scanningMemory') : t('onboarding.keys.fetchingKeys')}
-          {active?.detail ? ` · ${active.detail}` : ''}
-        </span>
-        <Button variant="ghost" size="sm" onClick={cancelAcquire}>
-          {t('common.cancel')}
-        </Button>
-      </div>
-      <ol className="flex flex-col gap-1.5">
-        {steps.map((s) => (
-          <li key={s.id} data-status={s.status} className="flex items-center gap-2 text-tab">
-            <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
-            <span
-              className={cn(
-                'min-w-0 flex-1 truncate',
-                s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg',
-              )}
-            >
-              {s.label || t(KEY_STEP_LABELS[s.id])}
-            </span>
-            {s.detail ? (
-              <span
-                className={cn(
-                  'shrink-0 truncate text-micro max-w-[55%] text-right',
-                  s.status === 'failed' ? 'text-danger' : 'text-fg-3',
-                )}
+    <TaskProgress
+      {...view}
+      onCancel={cancelAcquire}
+      actions={
+        view.state === 'failed' ? (
+          <>
+            <Button variant="outline" size="sm" icon={RefreshCw} onClick={() => void acquire('auto')}>
+              {t('common.retry')}
+            </Button>
+            {view.needsSettings ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={Settings}
+                onClick={() => void openUrl(DEVELOPER_TOOLS_SETTINGS_URL)}
               >
-                {s.detail}
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ol>
-      <span className="text-note text-fg-3">{t('onboarding.keys.stayLoggedIn')}</span>
-    </div>
+                {t('app.keyAcquire.openSettings')}
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" icon={ScanSearch} onClick={() => void acquire('memory_scan')}>
+                {t('onboarding.keys.memoryScan')}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={dismiss}>
+              {t('common.close')}
+            </Button>
+          </>
+        ) : undefined
+      }
+    />
   )
 }
 
@@ -314,11 +308,13 @@ export function KeysCard() {
           className="min-w-0 flex-1"
         />
         <Button
+          // Accent only while nothing has been acquired yet; afterwards 重新获取 is a secondary action.
+          variant={summary.done > 0 ? 'outline' : 'primary'}
           icon={Sparkles}
           loading={acquiring}
           onClick={() => void acquire('auto')}
           disabled={!canAcquire}
-          title={!wxid || !dbRoot ? t('onboarding.keys.selectFirst') : undefined}
+          disabledReason={!wxid || !dbRoot ? t('onboarding.keys.selectFirst') : undefined}
         >
           {acquiring
             ? t('onboarding.keys.acquiring')

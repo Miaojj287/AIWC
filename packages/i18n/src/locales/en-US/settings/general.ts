@@ -1,21 +1,31 @@
 import type { Messages } from '../../zh-CN'
 
 export const general: Messages['settings']['general'] = {
-  sections: { appearance: 'Appearance', startup: 'Startup' },
-  language: { section: 'Language', title: 'Interface language' },
+  sections: { appearance: 'Appearance', preferences: 'Preferences' },
+  language: { title: 'Interface language' },
   layout: {
-    section: 'Layout',
     title: 'Default view',
-    description: 'The four-column workbench, or a full-window Agent chat',
     workbench: 'Workbench',
     agent: 'Agent window',
   },
   launchAtLogin: 'Launch at login',
+  sendKey: {
+    title: 'Send messages with',
+    description: 'The other combination inserts a new line',
+    enter: 'Enter',
+    modEnter: '{mac, select, true {⌘ Enter} other {Ctrl+Enter}}',
+  },
+  notifications: {
+    title: 'System notifications',
+    help: 'Approvals, auto-reply drafts, a paused auto reply and scheduled task results raise a system notification; click it to go straight there. While the window is in front, alerts stay inside the app.',
+    showNames: 'Show contact names in notifications',
+    showNamesDescription: 'The lock screen and notification center keep notification text',
+  },
   closeBehavior: 'When closing the window',
   close: {
     quit: 'Quit',
     quitDescription: 'Auto reply and push stop too',
-    minimize: 'Minimize to menu bar',
+    minimize: '{tray, select, dock {Keep in Dock} other {Minimize to tray}}',
     minimizeDescription: 'Keeps running in the background',
     ask: 'Ask every time',
     askDescription: 'Choose when you close',
@@ -25,14 +35,12 @@ export const general: Messages['settings']['general'] = {
     themes: { system: 'System', light: 'Light', dark: 'Dark' },
     transparency: {
       title: 'Transparency',
-      description: 'Sidebar and lists show the desktop behind them',
-      help: 'When on, the left sidebar and lists turn into frosted glass that shows your wallpaper and the windows behind; the workspace and Agent panel stay opaque. Available in the desktop app on macOS and Windows 11.',
+      help: 'When on, the left sidebar and lists turn into frosted glass that shows your wallpaper and the windows behind; the workspace and Agent panel stay opaque.',
       unsupported: 'Transparency is not supported on this platform',
     },
     custom: {
       title: 'Custom colors',
-      description: 'Light and dark are saved separately',
-      help: 'The default colors match Codex. Background sets the content area, foreground sets the sidebar and cards, and text sets body text and derives secondary text.',
+      help: 'Light and dark are saved separately; the defaults match Codex. Background sets the content area, foreground sets the sidebar and cards, and text sets body text and derives secondary text.',
       mode: 'Color mode to edit',
     },
     colors: { accent: 'Accent', background: 'Background', surface: 'Foreground', foreground: 'Text' },
@@ -59,7 +67,12 @@ export const general: Messages['settings']['general'] = {
       secondary: 'and caption text',
       secondaryAction: 'Secondary action',
       primaryAction: 'Primary action',
-      reset: 'Restore default appearance',
+    },
+    reset: {
+      title: 'Restore default appearance',
+      description:
+        '{mode, select, light {Resets the light colors} other {Resets the dark colors}} and turns transparency back on',
+      action: 'Restore defaults',
     },
   },
 }

@@ -2,9 +2,9 @@
  * 执行时间 — kind (每天 / 每周 / 按间隔 / Cron) as a segmented control, then the fields that kind needs.
  * Figma 184:354's 执行时间 row, as setting rows.
  */
-import type { TaskSchedule, TaskScheduleKind } from '@aiwc/protocol'
+import type { TaskCatchUp, TaskSchedule, TaskScheduleKind } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Card, Chip, InlineHint, Input, SegmentedControl, Select, SettingRow, type SelectOption } from '@/kit'
+import { Card, Chip, InlineHint, Input, SegmentedControl, Select, SettingRow, Toggle, type SelectOption } from '@/kit'
 import {
   describeSchedule,
   INTERVAL_PRESETS,
@@ -18,11 +18,20 @@ export interface ScheduleCardProps {
   schedule: TaskSchedule
   errors: TaskDraftErrors
   onChange(schedule: TaskSchedule): void
+  catchUp: TaskCatchUp
+  onCatchUpChange(catchUp: TaskCatchUp): void
 }
 
-const KINDS: readonly TaskScheduleKind[] = ['daily', 'weekly', 'interval', 'cron']
+const KINDS: readonly TaskScheduleKind[] = ['once', 'daily', 'weekly', 'interval', 'cron']
 
-export function ScheduleCard({ schedule, errors, onChange }: ScheduleCardProps) {
+/** `YYYY-MM-DDTHH:mm` in local time, the value a datetime-local input takes. */
+export function toLocalInput(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+export function ScheduleCard({ schedule, errors, onChange, catchUp, onCatchUpChange }: ScheduleCardProps) {
   const t = useT()
   const intervalOptions: SelectOption<string>[] = [
     ...INTERVAL_PRESETS,
@@ -43,6 +52,27 @@ export function ScheduleCard({ schedule, errors, onChange }: ScheduleCardProps) 
           onValueChange={(kind) => onChange(scheduleOfKind(kind, schedule))}
         />
       </SettingRow>
+
+      {schedule.kind === 'once' ? (
+        <SettingRow
+          title={t('tasks.editor.at')}
+          footer={errors.at ? <InlineHint kind="error">{errors.at}</InlineHint> : null}
+        >
+          <Input
+            size="sm"
+            type="datetime-local"
+            mono
+            aria-label={t('tasks.editor.at')}
+            value={toLocalInput(schedule.at)}
+            onChange={(e) => {
+              const at = Date.parse(e.target.value)
+              if (Number.isFinite(at)) onChange({ kind: 'once', at })
+            }}
+            error={Boolean(errors.at)}
+            className="w-[200px]"
+          />
+        </SettingRow>
+      ) : null}
 
       {schedule.kind === 'daily' || schedule.kind === 'weekly' ? (
         <SettingRow
@@ -122,6 +152,14 @@ export function ScheduleCard({ schedule, errors, onChange }: ScheduleCardProps) 
           />
         </SettingRow>
       ) : null}
+
+      <SettingRow title={t('tasks.editor.catchUp')} help={t('tasks.editor.catchUpHelp')}>
+        <Toggle
+          aria-label={t('tasks.editor.catchUp')}
+          checked={catchUp === 'once'}
+          onCheckedChange={(on) => onCatchUpChange(on ? 'once' : 'skip')}
+        />
+      </SettingRow>
     </Card>
   )
 }

@@ -7,6 +7,8 @@ import { readWalSnapshot, walChecksum } from './sqliteWal'
 import { buildWal } from './testing/sqlcipherFixture'
 
 const PAGE = SQLCIPHER_PAGE_SIZE
+/** Generous bound: the tests care about the frames, not the cap (one case below is about the cap). */
+const MAX_PAGES = 4096
 
 function walFile(bytes: Buffer): string {
   const path = join(mkdtempSync(join(tmpdir(), 'aiwc-wal-')), 'db.db-wal')
@@ -47,7 +49,7 @@ describe('readWalSnapshot', () => {
         ],
       }),
     )
-    const snapshot = readWalSnapshot(path, PAGE)
+    const snapshot = readWalSnapshot(path, PAGE, MAX_PAGES)
     expect(snapshot?.dbSizePages).toBe(5)
     expect([...(snapshot?.frames.keys() ?? [])].sort()).toEqual([2, 5])
     // Second frame for page 2 wins: header 32 + frame 1 + frame 2 header.
@@ -63,7 +65,7 @@ describe('readWalSnapshot', () => {
         ],
       }),
     )
-    const snapshot = readWalSnapshot(path, PAGE)
+    const snapshot = readWalSnapshot(path, PAGE, MAX_PAGES)
     expect([...(snapshot?.frames.keys() ?? [])]).toEqual([1])
     expect(snapshot?.dbSizePages).toBe(1)
   })
@@ -78,7 +80,7 @@ describe('readWalSnapshot', () => {
         breakFrameAt: 1,
       }),
     )
-    expect(readWalSnapshot(broken, PAGE)?.dbSizePages).toBe(1)
+    expect(readWalSnapshot(broken, PAGE, MAX_PAGES)?.dbSizePages).toBe(1)
 
     const stale = walFile(
       buildWal({
@@ -89,23 +91,39 @@ describe('readWalSnapshot', () => {
         foreignSaltAt: 1,
       }),
     )
-    expect(readWalSnapshot(stale, PAGE)?.dbSizePages).toBe(1)
+    expect(readWalSnapshot(stale, PAGE, MAX_PAGES)?.dbSizePages).toBe(1)
   })
 
   it('returns null without a usable commit, for a foreign page size and for a missing file', () => {
     const uncommitted = walFile(buildWal({ frames: [{ pageNumber: 1, dbSize: 0, payload: payload(1) }] }))
-    expect(readWalSnapshot(uncommitted, PAGE)).toBeNull()
+    expect(readWalSnapshot(uncommitted, PAGE, MAX_PAGES)).toBeNull()
 
     const otherPageSize = walFile(
       buildWal({ pageSize: 1024, frames: [{ pageNumber: 1, dbSize: 1, payload: Buffer.alloc(1024, 1) }] }),
     )
-    expect(readWalSnapshot(otherPageSize, PAGE)).toBeNull()
+    expect(readWalSnapshot(otherPageSize, PAGE, MAX_PAGES)).toBeNull()
 
-    expect(readWalSnapshot(join(tmpdir(), 'aiwc-missing.db-wal'), PAGE)).toBeNull()
+    expect(readWalSnapshot(join(tmpdir(), 'aiwc-missing.db-wal'), PAGE, MAX_PAGES)).toBeNull()
+  })
+
+  it('stops at a commit claiming more pages than the database can hold', () => {
+    // dbSize is covered by the frame checksum, but that checksum is not a MAC: a corrupt or forged
+    // header must not make the reader allocate for a 34 GB database.
+    const path = walFile(
+      buildWal({
+        frames: [
+          { pageNumber: 1, dbSize: 1, payload: payload(1) },
+          { pageNumber: 2, dbSize: 9_000_000, payload: payload(2) },
+        ],
+      }),
+    )
+    const snapshot = readWalSnapshot(path, PAGE, 16)
+    expect(snapshot?.dbSizePages).toBe(1)
+    expect([...(snapshot?.frames.keys() ?? [])]).toEqual([1])
   })
 
   it('accepts little-endian checksum arithmetic', () => {
     const path = walFile(buildWal({ bigEndian: false, frames: [{ pageNumber: 7, dbSize: 7, payload: payload(9) }] }))
-    expect(readWalSnapshot(path, PAGE)?.frames.get(7)?.offset).toBe(32 + 24)
+    expect(readWalSnapshot(path, PAGE, MAX_PAGES)?.frames.get(7)?.offset).toBe(32 + 24)
   })
 })

@@ -1,14 +1,14 @@
 /** settings.pets — 宠物 page (PetsPage, pets/CurrentPetPreview, pets/InstalledPetGrid, pets/PetCatalog). */
 export const pets = {
-  sections: { current: '当前宠物', installed: '我的宠物', catalog: '宠物图库' },
+  sections: { current: '当前宠物', status: '状态读数', installed: '我的宠物', catalog: '宠物图库' },
   current: {
     title: '当前宠物',
     description: '点下面的动作看看它在不同状态下的样子',
     empty: '还没有宠物',
-    emptyDescription: '在下面的图库里领养一只，或导入下载好的宠物压缩包',
+    emptyDescription: '在下面的图库里领养一只',
     loadFailed: '读取宠物失败：{error}',
   },
-  enabled: { title: '在 Agent 面板显示宠物', description: '宠物站在输入框上方；面板收起时缩到侧边条里' },
+  enabled: { title: '在 Agent 面板显示宠物', description: '站在输入框上方，面板收起时缩进侧边条' },
   bubbles: { title: '状态气泡', description: '需要你确认、完成或出错时，在宠物旁提示一句话' },
   motion: {
     title: '宠物动画',
@@ -17,12 +17,21 @@ export const pets = {
   },
   idleFlair: { title: '闲时小动作', description: '空闲时偶尔挥手、跳一跳' },
   size: { title: '宠物大小', description: '在 Agent 面板里的显示大小', sm: '小', md: '中', lg: '大' },
+  status: {
+    help: '像 Codex 一样，宠物旁用小数字显示所有 Agent 会话和微信的状态；点数字打开对应的会话或未读聊天。只读本机数据。',
+    running: { title: '运行中的会话', description: '正在运行与等你确认的会话数，等待确认用警告色' },
+    done: { title: '已完成的会话', description: '完成或出错后还没查看的会话数，打开即清除' },
+    unread: { title: '微信未读', description: '未读消息数，不含免打扰、折叠的聊天和公众号' },
+    preview: '示例：显示在宠物旁',
+    previewOff: '状态读数已全部关闭',
+  },
   preview: {
     label: '{name} 预览',
     group: '预览动作',
     noDescription: '这只宠物还没有介绍。',
     reducedMotion: '系统开启了「减少动态效果」，宠物保持静止姿势。',
     motionOff: '动画已关闭，宠物保持静止姿势。',
+    status: '状态读数示例',
     moves: {
       idle: '待机',
       running: '正在处理',
@@ -40,7 +49,7 @@ export const pets = {
     description: '点击选用；右键或 ··· 删除。支持从 codex-pets.net 下载的 zip（pet.json + spritesheet）',
     import: '导入压缩包',
     empty: '还没有宠物',
-    emptyDescription: '在下面的图库里领养，或导入下载好的宠物压缩包',
+    emptyDescription: '从图库领养，或导入压缩包',
     loadFailed: '读取宠物失败',
     selected: '{name}（正在使用）',
     inUse: '正在使用',
@@ -67,8 +76,6 @@ export const pets = {
       random: '随便看看',
       randomDescription: '随机一批，点「换一批」刷新',
     },
-    privacy:
-      '浏览时会从 codex-pets.net 加载预览图，领养时下载宠物包保存到本机；不会上传你的任何数据。宠物版权归原作者所有。',
     loading: '正在加载宠物图库',
     loadFailed: '宠物图库加载失败',
     openSite: '在浏览器打开',

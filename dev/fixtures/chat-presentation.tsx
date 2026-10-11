@@ -88,7 +88,6 @@ createRoot(document.getElementById('root')!).render(
           onQuote={noop}
           onToggleSelect={noop}
           onJumpToTime={noop}
-          onDeleteLocal={noop}
           onOpenImage={noop}
         />
       ))}

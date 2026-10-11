@@ -179,7 +179,6 @@ export function PetCatalog({ currentId, motion, onUse }: PetCatalogProps) {
           align="end"
         />
       </div>
-      <InlineHint kind="info">{t('settings.pets.catalog.privacy')}</InlineHint>
 
       {firstLoad ? (
         <div
@@ -243,8 +242,8 @@ export function PetCatalog({ currentId, motion, onUse }: PetCatalogProps) {
               />
             ))}
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-latin text-micro text-fg-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 truncate font-latin text-micro text-fg-3">
               {random
                 ? t('settings.pets.catalog.randomCount', { n: pets.length })
                 : t('settings.pets.catalog.pageSummary', {

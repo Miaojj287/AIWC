@@ -10,6 +10,16 @@ describe('output parsing', () => {
     expect(parseJsonOutput('no json here')).toBeUndefined()
   })
 
+  it('gives up on brace noise instead of scanning it quadratically', () => {
+    // Every `{` used to be scanned to the end of the output: 4MB of CLI noise froze the main process
+    // for minutes. A coarse wall-clock budget is enough to catch a return of that behaviour.
+    const started = Date.now()
+    expect(parseJsonOutput('{'.repeat(200_000))).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(1000)
+    // Noise before the document still does not hide it.
+    expect(parseJsonOutput('{ {{ oops\n{"ok":true}')).toEqual({ ok: true })
+  })
+
   it('extracts URLs without trailing punctuation or CJK text', () => {
     const text =
       '请打开二维码链接扫码: \nhttps://work.weixin.qq.com/ai/qc/gen?source=x&scode=abc。然后（https://open.feishu.cn/page/cli?user_code=AB-12）'
@@ -42,4 +52,3 @@ describe('output parsing', () => {
     expect(parseVersion('wecom-cli 0.3.1 (npm 2026-03-30T00:00:00Z abc)')).toBe('0.3.1')
   })
 })
-

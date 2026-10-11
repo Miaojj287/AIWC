@@ -54,17 +54,18 @@ export interface OfficeConnectPanelProps {
   session: OfficeConnectSession
   /** Offered once the flow failed or was cancelled. */
   onRetry?: () => void
-  /** Settings dialog: add the one-line note on where credentials live. */
-  showPrivacy?: boolean
   className?: string
 }
 
-export function OfficeConnectPanel({ session, onRetry, showPrivacy, className }: OfficeConnectPanelProps) {
+export function OfficeConnectPanel({ session, onRetry, className }: OfficeConnectPanelProps) {
   const t = useT()
   const platform = t(PLATFORM_KEY[session.platform])
   const active = isActiveSession(session)
   const visibleSteps = session.steps.filter((s) => s.state !== 'skipped')
-  const cancel = () => void invoke('office:cancel', { sessionId: session.id }).catch(() => {})
+  const cancel = () =>
+    void invoke('office:cancel', { sessionId: session.id }).catch((e: unknown) =>
+      toast.error(t('common.operationFailed'), { detail: e instanceof Error ? e.message : String(e) }),
+    )
 
   return (
     <div className={cn('flex flex-col gap-2', className)} data-office-session={session.state}>
@@ -93,9 +94,7 @@ export function OfficeConnectPanel({ session, onRetry, showPrivacy, className }:
 
       {active || ((session.state === 'failed' || session.state === 'cancelled') && onRetry) ? (
         <div className="flex items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-micro text-fg-3">
-            {showPrivacy ? t('office.connect.privacy') : null}
-          </span>
+          <span className="min-w-0" />
           {active ? (
             <Button size="sm" variant="ghost" icon={X} onClick={cancel}>
               {t('office.connect.cancel')}
@@ -174,7 +173,7 @@ function LinkBox({
         ? t('office.connect.waitingWecom')
         : t('office.connect.waitingAuthorize')
   const open = () => {
-    invoke('office:openLink', { sessionId: session.id }).catch(() => void openUrl(link.url))
+    void invoke('office:openLink', { sessionId: session.id }).catch(() => void openUrl(link.url))
   }
   return (
     <div className="flex gap-3 rounded-item border border-accent/30 bg-accent/[0.06] p-2.5" data-testid="office-link">
@@ -193,13 +192,13 @@ function LinkBox({
         </div>
       ) : null}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className="text-caption leading-[18px] text-fg">{hint}</span>
+        <span className="text-caption leading-4.5 text-fg">{hint}</span>
         {!link.opened ? <span className="text-micro text-warn">{t('office.connect.notOpened')}</span> : null}
         <button
           type="button"
           onClick={open}
           title={link.url}
-          className="min-w-0 truncate rounded-control text-left font-mono text-micro text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/70"
+          className="min-w-0 truncate rounded-control text-left font-mono text-micro text-accent outline-none hover:underline"
         >
           {link.url}
         </button>
@@ -236,7 +235,7 @@ function FailureBox({ session, platform }: { session: OfficeConnectSession; plat
     <div className="flex flex-col gap-1.5">
       <InlineHint kind="error">{t('office.connect.failed', { platform })}</InlineHint>
       {error?.message ? (
-        <span className="select-text break-words pl-[18px] text-caption leading-[18px] text-fg-2">{error.message}</span>
+        <span className="select-text break-words pl-[18px] text-caption leading-4.5 text-fg-2">{error.message}</span>
       ) : null}
       {error?.command ? (
         <div className="flex flex-col gap-1">

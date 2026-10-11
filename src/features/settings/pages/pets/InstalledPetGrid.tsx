@@ -97,7 +97,6 @@ export function InstalledPetGrid({ pets, currentId, motion, onSelect, onRemove }
                 onPointerLeave={() => setHovered((h) => (h === pet.id ? undefined : h))}
                 className={cn(
                   'group relative flex cursor-pointer select-none flex-col items-center gap-1 rounded-item border px-2 pb-2 pt-3 outline-none transition-colors duration-(--dur-fast)',
-                  'focus-visible:ring-2 focus-visible:ring-accent/70',
                   selected ? 'border-accent-30 bg-accent-12' : 'border-line-6 hover:bg-hover-5',
                 )}
               >
@@ -127,7 +126,7 @@ export function InstalledPetGrid({ pets, currentId, motion, onSelect, onRemove }
                     aria-hidden
                     className="absolute left-2 top-2 flex size-4 items-center justify-center rounded-chip bg-accent text-(--fg-on-accent)"
                   >
-                    <Check size={10} strokeWidth={2.5} />
+                    <Check size={10} strokeWidth={2} />
                   </span>
                 ) : null}
                 <div

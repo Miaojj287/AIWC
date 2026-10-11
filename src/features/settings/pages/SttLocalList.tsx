@@ -5,7 +5,18 @@
 import { Check, Download, Mic, Trash } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useT } from '@/i18n'
-import { Badge, Button, DangerDialog, EmptyState, ICON_STROKE, IconButton, ProgressBar, SettingRow, toast } from '@/kit'
+import {
+  Badge,
+  Button,
+  DangerDialog,
+  EmptyState,
+  ICON_STROKE,
+  IconButton,
+  ProgressBar,
+  SettingRow,
+  SkeletonListRows,
+  toast,
+} from '@/kit'
 import { invoke, useInvoke } from '@/platform/hooks'
 import { errorMessage } from '../hooks'
 
@@ -38,8 +49,9 @@ export function SttLocalList() {
     }
   }
 
+  // Rows shaped like the list that replaces them, at the SettingRow inset; the label keeps the announcement specific.
   if (models.loading && !models.data)
-    return <div className="px-4 py-3 text-caption text-fg-3">{t('settings.ai.sttLocal.loading')}</div>
+    return <SkeletonListRows rows={2} aria-label={t('settings.ai.sttLocal.loading')} className="px-4 py-4" />
   if (models.error)
     return (
       <EmptyState
@@ -74,12 +86,15 @@ export function SttLocalList() {
           <SettingRow
             key={m.id}
             data-setting-row="ai.sttLocal"
+            // The row's own `truncate` cannot reach text inside a flex box, so the ellipsis sits on the text span.
             title={
-              <span className="flex items-center gap-2">
-                <span className="flex size-7 items-center justify-center rounded-control bg-line-6 text-fg-3">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-line-6 text-fg-3">
                   <Mic size={13} strokeWidth={ICON_STROKE} aria-hidden />
                 </span>
-                {m.label}
+                <span className="min-w-0 truncate" title={m.label}>
+                  {m.label}
+                </span>
               </span>
             }
             badge={m.isDefault ? <Badge tone="ok">{t('settings.ai.sttLocal.inUse')}</Badge> : null}

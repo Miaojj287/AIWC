@@ -9,7 +9,9 @@
  */
 import { existsSync } from 'node:fs'
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite'
+import { pathToFileURL } from 'node:url'
 import { isPlaintextSqlitePage, readFirstPage } from '../key/sqlcipherPage'
+import { errorMessage } from '../shared/errors'
 import { normalizeInt64, type SqlParam, type WcdbBridge, type WcdbLogger, type WcdbQueryResult } from './bridge'
 import { DecryptedCopy } from './decryptedCopy'
 import type { Row } from './rowDecoders'
@@ -31,10 +33,6 @@ interface OpenEntry {
   copy: DecryptedCopy | null
   db: DatabaseSync
   statements: Map<string, StatementSync>
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function toInputValue(param: SqlParam): SQLInputValue {
@@ -100,9 +98,8 @@ export class SqlcipherBridge implements WcdbBridge {
     if (dbPath) {
       const entry = this.entries.get(dbPath)
       if (entry) {
-        closeEntry(entry)
+        this.evict(dbPath)
         entry.copy?.remove()
-        this.entries.delete(dbPath)
       }
       return
     }
@@ -126,11 +123,18 @@ export class SqlcipherBridge implements WcdbBridge {
       // Reopen rather than let SQLite serve pages it cached before the refresh rewrote them.
       if (cached.copy?.refresh()) {
         closeEntry(cached)
-        cached.db = openReadOnly(cached.copy.path)
+        try {
+          cached.db = openReadOnly(cached.copy.path)
+        } catch (error) {
+          // The old connection is already closed. Keeping the entry would fail every later query
+          // with "database is not open" and never heal, so drop it and let the next call rebuild.
+          this.entries.delete(dbPath)
+          throw error
+        }
       }
       return cached
     }
-    if (cached) this.closeDatabase(dbPath)
+    if (cached) this.evict(dbPath)
     const created = this.create(dbPath, keyHex)
     this.entries.set(dbPath, created)
     return created
@@ -139,20 +143,33 @@ export class SqlcipherBridge implements WcdbBridge {
   private create(dbPath: string, keyHex: string): OpenEntry {
     const page = readFirstPage(dbPath)
     if (!page) throw new Error(`无法读取数据库首页: ${dbPath}`)
-    if (isPlaintextSqlitePage(page)) return { keyHex, copy: null, db: openReadOnly(dbPath), statements: new Map() }
+    if (isPlaintextSqlitePage(page)) return { keyHex, copy: null, db: openSource(dbPath), statements: new Map() }
     if (!keyHex) throw new Error('数据库打开失败：路径、密钥或 SQLCipher 参数不匹配')
     if (!/^[0-9a-f]{64}$/.test(keyHex)) throw new Error('数据库密钥必须是 64 位十六进制字符串')
     const cipher = resolvePageCipher(page, keyHex)
     if (!cipher) throw new Error('密钥与数据库不匹配')
     const copy = new DecryptedCopy({
       dbPath,
-      key: cipher.key,
-      saltHex: cipher.saltHex,
+      cipher,
       cacheDir: this.options.cacheDir,
       logger: this.options.logger,
     })
     copy.refresh(true)
     return { keyHex, copy, db: openReadOnly(copy.path), statements: new Map() }
+  }
+
+  /**
+   * Drop the connection but keep the plaintext copy. A key that is momentarily unknown or different
+   * is not a corruption signal: on Windows every database resolves its own key from the running
+   * WeChat, so `keyFor` returns undefined while WeChat is closed, and deleting the copy there would
+   * throw away minutes of decryption. The copy is named after the database's salt, so a database that
+   * was really replaced gets a different file anyway.
+   */
+  private evict(dbPath: string): void {
+    const entry = this.entries.get(dbPath)
+    if (!entry) return
+    closeEntry(entry)
+    this.entries.delete(dbPath)
   }
 }
 
@@ -160,8 +177,19 @@ function normalizeKey(hexKey?: string): string {
   return (hexKey ?? '').trim().toLowerCase()
 }
 
+/** The decrypted copy: our own file, rewritten and reopened as the source changes. */
 function openReadOnly(path: string): DatabaseSync {
   return new DatabaseSync(path, { readOnly: true })
+}
+
+/**
+ * A source database that needs no copy (already plaintext), opened through an `immutable=1` URI.
+ * A plain read-only open of a WAL-mode database makes SQLite create `-shm` and `-wal` next to it, and
+ * the substrate must never write into WeChat's directory. Immutable also tells SQLite the file will
+ * not change under it, which is what this connection already assumed: nothing reopens it.
+ */
+function openSource(path: string): DatabaseSync {
+  return new DatabaseSync(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
 }
 
 /** Cached prepared statement. WeChat stores int64 ids that overflow a JS number, and node:sqlite

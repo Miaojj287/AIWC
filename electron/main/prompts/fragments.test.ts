@@ -1,7 +1,7 @@
-import type { ContextFragment, MessageEvent, ThreadOrigin, ThreadSettings, ToastPayload } from '@aiwc/protocol'
+import type { ContextFragment, MessageEvent, ThreadOrigin, ThreadSettings } from '@aiwc/protocol'
 import { createObservedBuffer } from '@aiwc/gateway'
 import { describe, expect, it } from 'vitest'
-import { dateHook, formatChineseDate, memoryToastHook } from '../hooks'
+import { dateHook, formatChineseDate } from '../hooks'
 import { observedFragmentProvider, userInstructionsFragmentProvider, wireMemoryInvalidation } from './fragments'
 
 const settings: ThreadSettings = { permissionMode: 'ask', profile: 'desktop-chat', allowAlways: [] }
@@ -99,17 +99,5 @@ describe('host hooks', () => {
     const r = await h.run('UserPromptSubmit', { threadId: 't' as never })
     expect(r?.additionalContext).toBe('当前日期：2026-09-06（周日）')
     expect(formatChineseDate(new Date(2026, 0, 1))).toBe('2026-01-01（周四）')
-  })
-
-  it('memoryToastHook toasts only for a successful remember', async () => {
-    const toasts: ToastPayload[] = []
-    const h = memoryToastHook((p) => toasts.push(p))
-    await h.run('PostToolUse', { threadId: 't' as never, toolName: 'recall', output: {} })
-    await h.run('PostToolUse', { threadId: 't' as never, toolName: 'remember', output: { isError: true } })
-    expect(toasts).toEqual([])
-    await h.run('PostToolUse', { threadId: 't' as never, toolName: 'remember', output: { content: 'ok' } })
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0]?.kind).toBe('success')
-    expect(toasts[0]?.action?.command).toBe('tab.openSettings')
   })
 })

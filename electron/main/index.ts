@@ -9,7 +9,19 @@
  */
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, dialog, nativeTheme, safeStorage, shell, type BrowserWindow } from 'electron'
+import {
+  app,
+  dialog,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  safeStorage,
+  session,
+  shell,
+  Tray,
+  type BrowserWindow,
+} from 'electron'
+import { resolveAccountDir } from '@aiwc/substrate'
 import type { AppConfig } from '@aiwc/protocol'
 import { createPaths, ensureDirs, type AppPaths } from './paths'
 import { createLogger, nullLogger, type Logger } from './log'
@@ -17,28 +29,42 @@ import { createBroadcast, sendToActive } from './broadcast'
 import { createApp } from './composition'
 import type { AppContext } from './contracts'
 import { registerMediaProtocol, registerMediaScheme } from './protocols/mediaProtocol'
+import { createWeChatVideoAccess } from './security/wechatVideoAccess'
 import { createWindowManager, type WindowManager } from './windows/mainWindow'
+import { isAppFocused, notificationsSupported, showNativeNotification } from './windows/nativeNotification'
+import { createSystemNotifier } from './services/systemNotifier'
+import { createTrayController } from './windows/tray'
+import { applyLoginItem } from './services/loginItem'
 import { installApplicationMenu, type MenuDeps } from './menu'
 import { mainLanguage, setMainLanguage, t } from './i18n'
 import { resolveLanguage } from '@aiwc/i18n'
 import { registerIpc, type HostBridge } from './ipc/register'
-import { formatDateForFile } from './services/exporter'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { diagnosticsRedaction, exportDiagnostics } from './services/diagnostics'
+import { createPrivacyHost } from './windows/privacyHost'
+import { openAccountProfile } from './services/accountProfiles'
+import { createAccountSession, seedProfileSecrets, type AccountSession } from './services/accountSession'
+import { applyPendingDataReset } from './services/dataReset'
 
 const here = dirname(fileURLToPath(import.meta.url)) // dist-electron/
 const SMOKE = process.argv.includes('--smoke')
 const SMOKE_TIMEOUT_MS = 15_000
 const SHUTDOWN_TIMEOUT_MS = 8_000
 const APP_NAME = 'AIWC'
+/** electron-builder `appId`: the Windows taskbar groups, pins and notifies under this identity. */
+const APP_USER_MODEL_ID = 'com.aiwc.desktop'
+/** Tray icons are 16pt; the OS picks the @2x representation itself on scaled displays. */
+const TRAY_ICON_SIZE = 16
 
 // In development Electron otherwise exposes its own bundle name in the macOS Dock and app menu.
 // Packaged builds also set this from productName, but keeping it explicit makes every launch path
 // present the same product identity.
 app.setName(APP_NAME)
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
 
 let logger: Logger = nullLogger
 let ctx: AppContext | undefined
 let windows: WindowManager | undefined
+let accountSession: AccountSession | undefined
 let quitting = false
 let shutdownDone = false
 
@@ -98,9 +124,15 @@ function openLogger(paths: AppPaths): Logger {
 async function bootstrap(): Promise<void> {
   // Until the config is loaded, main-process copy (a fatal startup dialog) follows the OS language.
   setMainLanguage(resolveLanguage(app.getLocale()))
-  const paths = buildPaths()
+  const basePaths = buildPaths()
+  // 清除全部数据 (设置 › 数据) relaunches with a marker: delete before anything opens the data root.
+  const reset = applyPendingDataReset(basePaths)
+  const profile = openAccountProfile(basePaths, mainLanguage())
+  const paths = profile.paths
   ensureDirs(paths)
+  seedProfileSecrets(basePaths, paths, safeStorage)
   logger = openLogger(paths)
+  if (reset.applied) logger.warn('local data wiped on request', { removed: reset.removed, failed: reset.failed })
   process.on('uncaughtException', (e) => logger.error('uncaughtException', e))
   process.on('unhandledRejection', (e) => logger.error('unhandledRejection', e))
   logger.info('starting', {
@@ -113,7 +145,24 @@ async function bootstrap(): Promise<void> {
     dataRoot: paths.dataRoot,
   })
 
-  const broadcast = createBroadcast()
+  const appIcon = app.isPackaged ? join(here, '..', 'dist', 'app-icon.png') : join(here, '..', 'public', 'app-icon.png')
+  const emit = createBroadcast()
+  const broadcast: typeof emit = (channel, payload) => {
+    if (!accountSession?.isSwitching()) emit(channel, payload)
+  }
+  // Created before the window: its getters read `windows` / `ctx` when a notice fires, not now.
+  const notifier = createSystemNotifier({
+    isSupported: notificationsSupported,
+    isAppFocused,
+    enabled: () => !accountSession?.isSwitching() && (ctx?.config.get().general.notifications.enabled ?? false),
+    show: (request) => showNativeNotification(request, appIcon),
+    reveal: () => windows?.ensure(),
+    runCommand: (command, payload) => {
+      if (!sendToActive('app:command', { command, payload })) logger.warn('notification command dropped', { command })
+    },
+    logger: (level, msg, meta) => logger[level](msg, meta),
+  })
+  app.on('will-quit', () => notifier.dispose())
   ctx = await createApp({
     paths,
     logger,
@@ -123,18 +172,63 @@ async function bootstrap(): Promise<void> {
     env: process.env,
     systemLocale: app.getLocale(),
     openExternal: (url) => shell.openExternal(url),
+    attention: notifier.notify,
+    resolveProxy: (url) => session.defaultSession.resolveProxy(url),
+    privacyHost: createPrivacyHost(),
   })
   const context = ctx
+  accountSession = createAccountSession({
+    base: basePaths,
+    profile,
+    context,
+    safeStorage,
+    restart: () => {
+      notifier.dispose()
+      windows?.get()?.destroy()
+      app.relaunch()
+      app.quit()
+    },
+  })
 
-  registerMediaProtocol({ allowList: context.allowList, logger })
+  registerMediaProtocol({
+    protocol: session.fromPartition(`persist:account-${paths.accountScope}`).protocol,
+    allowList: context.allowList,
+    logger,
+    readOnly: createWeChatVideoAccess(() => {
+      const account = context.substrate.status().account
+      return account ? (resolveAccountDir(account.dbRoot, account.wxid) ?? undefined) : undefined
+    }),
+  })
 
   applyTheme(context.config.get())
   context.config.subscribe(applyTheme)
+  // 设置 › 常规 › 开机自启 → the OS login item (packaged builds only).
+  applyLoginItem(app, process.platform, context.config.get().general.launchAtLogin)
+  context.config.subscribe((next, prev) => {
+    if (next.general.launchAtLogin !== prev.general.launchAtLogin)
+      applyLoginItem(app, process.platform, next.general.launchAtLogin)
+  })
+  app.setAboutPanelOptions({
+    applicationName: APP_NAME,
+    applicationVersion: app.getVersion(),
+    copyright: `© ${new Date().getFullYear()} ${APP_NAME}`,
+  })
 
   const smoke = SMOKE ? startSmoke() : undefined
   const devServerUrl = process.env.VITE_DEV_SERVER_URL
-  const appIcon = app.isPackaged ? join(here, '..', 'dist', 'app-icon.png') : join(here, '..', 'public', 'app-icon.png')
   if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
+  // "Keep running after the window closes" hides the window: outside macOS only a tray icon can bring it back.
+  const tray = createTrayController({
+    platform: process.platform,
+    tooltip: APP_NAME,
+    labels: () => ({ show: t('main.tray.show', { name: APP_NAME }), quit: t('main.tray.quit') }),
+    show: () => windows?.ensure(),
+    quit: () => app.quit(),
+    createTray: () =>
+      new Tray(nativeImage.createFromPath(appIcon).resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE })),
+    buildMenu: (template) => Menu.buildFromTemplate(template),
+  })
+  app.on('will-quit', () => tray.dispose())
   windows = createWindowManager({
     paths,
     config: context.config,
@@ -146,6 +240,7 @@ async function bootstrap(): Promise<void> {
     appIcon,
     isQuitting: () => quitting,
     onCloseRequested: (win: BrowserWindow) => win.webContents.send('app:closeRequested', { reason: 'window_close' }),
+    onBeforeHide: () => tray.ensure(),
     requestQuit: () => app.quit(),
     // Without this a broken preload leaves the renderer on its mock bridge and the smoke run only
     // dies of the 15 s timeout, with nothing in the log saying why.
@@ -154,11 +249,15 @@ async function bootstrap(): Promise<void> {
   const wm = windows
 
   const host: HostBridge = {
+    accountSession,
     appVersion: app.getVersion(),
     isPackaged: app.isPackaged,
     getMainWindow: () => wm.get(),
     isTrustedSender: (sender) => wm.isTrustedSender(sender),
-    hideMainWindow: () => wm.hide(),
+    hideMainWindow: () => {
+      tray.ensure()
+      wm.hide()
+    },
     quit: () => app.quit(),
     onGetInfo: smoke ? () => smoke.finish(0, 'renderer invoked app:getInfo') : undefined,
   }
@@ -182,6 +281,7 @@ async function bootstrap(): Promise<void> {
     if (next.general.language === menuLanguage) return
     menuLanguage = next.general.language
     installApplicationMenu(menuDeps)
+    tray.refresh()
   })
 
   wm.create()
@@ -195,9 +295,12 @@ function applyTheme(cfg: AppConfig): void {
 
 function exportLogsFromMenu(context: AppContext, paths: AppPaths): void {
   try {
-    const files = [...context.logger.files()].reverse()
-    const out = join(paths.exportsDir, `aiwc-logs-${formatDateForFile()}.log`)
-    writeFileSync(out, files.map((f) => `\n===== ${f} =====\n${readFileSync(f, 'utf8')}`).join(''), 'utf8')
+    const out = exportDiagnostics({
+      appVersion: app.getVersion(),
+      files: context.logger.files(),
+      exportsDir: paths.exportsDir,
+      redaction: diagnosticsRedaction(),
+    })
     shell.showItemInFolder(out)
     context.toast({ kind: 'success', text: t('menu.logsExported') })
   } catch (e) {

@@ -3,7 +3,7 @@
  * if it crashes only that process restarts) and exposes a *stable* SubstrateClient façade to the
  * rest of main. Protocol with electron/hosts/substrateHost.ts:
  *   main → host : SubstrateHostInit + one transferred MessagePort (channel.port2)
- *   host → main : { type: 'ready' } | { type: 'fatal', message } | { type: 'log', level, message }
+ *   host → main : { type: 'ready' } | { type: 'fatal', message } | { type: 'log', level, message, meta? }
  * After 'ready' the port carries the substrate JSON-RPC (`createSubstrateClient` on our side).
  */
 import { existsSync } from 'node:fs'
@@ -116,7 +116,7 @@ export function createSubstrateHost(deps: SubstrateHostDeps): SubstrateHost {
         log.error('substrate host fatal', { message: msg.message })
         rejectReady(new Error(msg.message))
       } else if (msg.type === 'log') {
-        log[msg.level](`[host] ${msg.message}`)
+        log[msg.level](`[host] ${msg.message}`, msg.meta)
       }
     })
     proc.on('spawn', () => {

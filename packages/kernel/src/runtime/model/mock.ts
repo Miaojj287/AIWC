@@ -9,6 +9,8 @@ export interface MockToolCall {
   name: string
   input: unknown
   callId?: string
+  /** Stream the arguments first as raw JSON deltas (tool_input.delta), the way a real provider writes them. */
+  streamInput?: boolean
 }
 
 export interface MockStep {
@@ -80,12 +82,13 @@ export function createMockModelClient(script: MockScript): MockModelClient {
       return
     }
     for (const call of step.toolCalls ?? []) {
-      yield {
-        type: 'tool_call',
-        callId: call.callId ?? `mock_call_${++mockCallSeq}`,
-        name: call.name,
-        input: call.input,
+      const callId = call.callId ?? `mock_call_${++mockCallSeq}`
+      if (call.streamInput) {
+        const raw = JSON.stringify(call.input) ?? ''
+        for (let i = 0; i < raw.length; i += chunk)
+          yield { type: 'tool_input.delta', callId, name: call.name, delta: raw.slice(i, i + chunk) }
       }
+      yield { type: 'tool_call', callId, name: call.name, input: call.input }
     }
     yield { type: 'finish', reason: step.toolCalls?.length ? 'tool_calls' : 'stop', usage }
   }

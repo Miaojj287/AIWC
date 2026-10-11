@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   asCallId,
+  asItemId,
   asThreadId,
   asTurnId,
   newStepId,
@@ -14,6 +15,7 @@ import { createTestServices, waitForEvent, type FakeTool } from './testing/fakes
 import { defaultTestConfig, userInput } from './testing/harness'
 import { createDelegateTool } from './delegate'
 import type { KernelInternal } from './types'
+import type { HistoryItem } from '@aiwc/protocol'
 
 const make = (services: ReturnType<typeof createTestServices>, config = defaultTestConfig()): KernelInternal =>
   createKernel({ services, config: () => config, systemPrompt: { stable: '你是 AIWC。' } })
@@ -357,5 +359,70 @@ describe('kernel façade', () => {
         label: '任务三',
       }),
     ).rejects.toThrow(/unknown parent thread/)
+  })
+})
+
+describe('profileForChannel', () => {
+  it("gives the owner's phone thread the desktop toolset", async () => {
+    const { profileForChannel } = await import('./kernel')
+    expect(profileForChannel('wechat-remote')).toBe('desktop-chat')
+    expect(profileForChannel('wechat-ilink')).toBe('wechat-bot')
+  })
+})
+
+describe('rewind, fork and archive', () => {
+  const desktop = async (k: KernelInternal) => k.ensureThread({ channel: 'desktop' })
+  const prompts = (items: readonly HistoryItem[]) =>
+    items.flatMap((i) => (i.type === 'user_message' && i.content[0]?.type === 'text' ? [i.content[0].text] : []))
+
+  it('rollback from an item drops that prompt onward, persisted; an unknown item is refused untouched', async () => {
+    const services = createTestServices({ model: createMockModelClient({ steps: [{ text: '好' }], loopLast: true }) })
+    const k = make(services)
+    const id = await desktop(k)
+    for (const text of ['一', '二', '三']) await k.runOnce(id, userInput(text))
+    const second = (await k.getThread(id))!.items.find(
+      (i) => i.type === 'user_message' && i.content[0]?.type === 'text' && i.content[0].text === '二',
+    )!
+    await k.submit({ type: 'thread.rollback', threadId: id, turns: 2, fromItemId: second.id })
+    expect(prompts((await k.getThread(id))!.items)).toEqual(['一'])
+    expect(prompts(services.rollout.itemsOf(id))).toEqual(['一'])
+    await expect(
+      k.submit({ type: 'thread.rollback', threadId: id, turns: 1, fromItemId: second.id }),
+    ).rejects.toMatchObject({ code: 'rollback_target_missing' })
+    expect(prompts((await k.getThread(id))!.items)).toEqual(['一'])
+  })
+
+  it('forkThread copies the history through the chosen turn into a new persisted thread', async () => {
+    const services = createTestServices({ model: createMockModelClient({ steps: [{ text: '好' }], loopLast: true }) })
+    const k = make(services)
+    const id = await desktop(k)
+    for (const text of ['一', '二', '三']) await k.runOnce(id, userInput(text))
+    const second = (await k.getThread(id))!.items.find(
+      (i) => i.type === 'user_message' && i.content[0]?.type === 'text' && i.content[0].text === '二',
+    )!
+    const forked = await k.forkThread(id, { throughItemId: second.id, title: '分支' })
+    expect(forked).not.toBe(id)
+    const thread = (await k.getThread(forked))!
+    expect(prompts(thread.items)).toEqual(['一', '二'])
+    expect(thread.items.at(-1)?.type).toBe('assistant_message')
+    expect(thread.record.title).toBe('分支')
+    expect(prompts(services.rollout.itemsOf(forked))).toEqual(['一', '二'])
+    // the source is untouched
+    expect(prompts((await k.getThread(id))!.items)).toEqual(['一', '二', '三'])
+    await expect(k.forkThread(id, { throughItemId: asItemId('itm_missing'), title: 'x' })).rejects.toMatchObject({
+      code: 'fork_target_missing',
+    })
+  })
+
+  it('archived threads leave the listing and come back only with archivedOnly', async () => {
+    const services = createTestServices({ model: createMockModelClient({ steps: [{ text: '好' }], loopLast: true }) })
+    const k = make(services)
+    const kept = await desktop(k)
+    const archived = await desktop(k)
+    await k.runOnce(kept, userInput('一'))
+    await k.runOnce(archived, userInput('二'))
+    await k.updateMeta(archived, { archived: true })
+    expect((await k.listThreads({ channel: 'desktop' })).map((r) => r.threadId)).toEqual([kept])
+    expect((await k.listThreads({ channel: 'desktop', archivedOnly: true })).map((r) => r.threadId)).toEqual([archived])
   })
 })

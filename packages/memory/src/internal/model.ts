@@ -19,7 +19,7 @@ export class ModelSampleError extends Error {
 }
 
 /**
- * Deadline for one model call (diary summary / synthesis, clone extraction / merge, reflection). Generous
+ * Deadline for one model call (每日待办 chat scan, clone extraction / merge, reflection). Generous
  * enough for a slow local model writing ~2k tokens; a stream still open after it is a failure, not a hang.
  */
 export const MODEL_CALL_TIMEOUT_MS = 5 * 60_000
@@ -31,6 +31,8 @@ export interface SampleTextOptions {
   maxOutputTokens?: number
   temperature?: number
   cacheKey?: string
+  /** Reasoning depth for the call; background passes use `lowest` (SamplingRequest.reasoningEffort). */
+  reasoningEffort?: SamplingRequest['reasoningEffort']
 }
 
 const abortedError = () => new ModelSampleError({ code: 'unknown', message: 'aborted', retryable: false })
@@ -101,6 +103,7 @@ export async function sampleText(
     ...(opts.maxOutputTokens !== undefined ? { maxOutputTokens: opts.maxOutputTokens } : {}),
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
     ...(opts.cacheKey !== undefined ? { cacheKey: opts.cacheKey } : {}),
+    ...(opts.reasoningEffort !== undefined ? { reasoningEffort: opts.reasoningEffort } : {}),
   }
   let iterator: AsyncIterator<SamplingPart> | undefined
   let finished = false

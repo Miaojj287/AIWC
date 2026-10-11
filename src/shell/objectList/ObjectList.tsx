@@ -30,7 +30,7 @@ export interface ObjectListProps {
 
 /** Square 32px tool next to the list search (更多筛选, 刷新); `shell-list-tool` lets 透明效果 make it translucent. */
 const HEADER_TOOL_CLASS =
-  'shell-list-tool size-8 rounded-item border border-line-8 bg-content text-fg-2 hover:bg-content hover:text-fg'
+  'shell-list-tool app-no-drag size-8 rounded-item border border-line-8 bg-content text-fg-2 enabled:hover:bg-content enabled:hover:text-fg'
 
 /** The column is a singleton; remember which ⌘K request has already been honoured across remounts. */
 let handledFocusRequest = 0
@@ -118,20 +118,31 @@ export function ObjectList({ mac }: ObjectListProps) {
 
   const Body = registration?.component
 
+  const searchLabel =
+    registration?.searchPlaceholder ?? t('shell.objectList.search', { title: registration?.title ?? '' })
   return (
     <aside
       aria-label={registration?.title ?? t('shell.objectList.ariaLabel')}
       className="shell-list @container/list flex h-full w-full min-w-0 flex-col border-r border-line-6 bg-panel"
     >
-      <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
+      {/* The top band of every column drags the window, like a native toolbar; its controls opt out. */}
+      <div className="app-drag flex shrink-0 items-center gap-2 px-3 pb-2 pt-3">
         <SearchBox
           ref={searchRef}
           value={query}
           onValueChange={(v) => useShellStore.getState().setListQuery(v)}
-          placeholder={t('shell.objectList.search', { title: registration?.title ?? '' })}
+          onKeyDown={(e) => {
+            // Enter hands the text to the list's own search (chats: 搜索聊天记录); never the Enter that ends an IME composition.
+            const submit = registration?.onSearchSubmit
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing || !submit || !query.trim()) return
+            e.preventDefault()
+            submit(query.trim())
+          }}
+          placeholder={searchLabel}
           shortcut={mac ? '⌘K' : 'Ctrl+K'}
-          aria-label={t('shell.objectList.search', { title: registration?.title ?? '' })}
-          wrapperClassName="h-8 min-w-0 flex-1 rounded-item"
+          aria-label={searchLabel}
+          landmark
+          wrapperClassName="app-no-drag h-8 min-w-0 flex-1 rounded-item"
         />
         {/* 更多筛选 sits with the other header tools: three counted chips plus two icons do not fit one 280px row. */}
         {filterOptions.length > 0 ? (
@@ -154,7 +165,7 @@ export function ObjectList({ mac }: ObjectListProps) {
         <RefreshButton />
       </div>
       {segments.length > 0 || filtersActive ? (
-        <div className="flex min-w-0 shrink-0 items-center gap-1 px-3 pb-2 pt-0.5">
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1 px-3 pb-3">
           {segments.map((s) => (
             <Chip
               key={s.id}

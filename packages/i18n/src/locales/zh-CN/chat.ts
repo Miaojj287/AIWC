@@ -60,9 +60,8 @@ export const chat = {
     syncedDetail: '上次同步 {time} · 点击立即同步',
     clickToSync: '点击立即同步',
     progress: '同步进度',
-    /** Numbers pick the plural form; the *Text params are the formatted counts. */
-    countsSummary:
-      '共 {messages, plural, other {{messagesText} 条消息}} / {images, plural, other {{imagesText} 张图片}} / {files, plural, other {{filesText} 个文件}} / {voices, plural, other {{voicesText} 段语音}}',
+    /** The number picks the plural form; messagesText is the formatted count. */
+    countsSummary: '{messages, plural, other {{messagesText} 条消息}}',
   },
   dateRange: {
     label: '日期范围',
@@ -152,6 +151,8 @@ export const chat = {
     pause: '暂停',
     transcribe: '转文字',
     transcript: '语音转文字',
+    previewFile: '在应用内预览 {name}',
+    openFile: '用默认应用打开 {name}',
   },
   lightbox: {
     media: '媒体',
@@ -251,13 +252,7 @@ export const chat = {
     removedFromIndex: '已从索引中移除「{title}」',
     removeFailed: '移除失败：{error}',
   },
-  deleteDialog: {
-    title: '删除 {n} 条本地记录？',
-    description: '仅删除 AIWC 本地索引，不影响微信里的原始消息，不可撤销。',
-    unsupported: '暂不支持删除单条本地记录',
-    unsupportedDetail: '可在会话菜单中「从索引中移除」整个会话',
-    copyFirst: '先复制这些消息',
-  },
+  deleteUnsupported: '暂不支持删除单条本地记录，可在会话菜单里「从索引中移除」整个会话。',
   removeIndexDialog: {
     title: '从索引中移除「{title}」？',
     description: '删除本机的索引与缓存，不影响微信数据，之后可重新索引。',

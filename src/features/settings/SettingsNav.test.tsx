@@ -15,13 +15,23 @@ afterEach(cleanup)
 function openSearch(query: string) {
   const onNavigate = vi.fn()
   render(<SettingsNav page="general" onNavigate={onNavigate} />)
-  const input = screen.getByRole('searchbox', { name: '搜索设置' })
+  const input = screen.getByRole('combobox', { name: '搜索设置' })
   fireEvent.focus(input)
   fireEvent.change(input, { target: { value: query } })
   return { input, onNavigate }
 }
 
 describe('SettingsNav search results', () => {
+  it('associates the focused search field with its active result for assistive technology', () => {
+    const { input } = openSearch('模型')
+    const list = screen.getByRole('listbox')
+    expect(input.getAttribute('aria-expanded')).toBe('true')
+    expect(input.getAttribute('aria-controls')).toBe(list.id)
+    const options = screen.getAllByRole('option')
+    expect(input.getAttribute('aria-activedescendant')).toBe(options[0]?.id)
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input.getAttribute('aria-activedescendant')).toBe(options[1]?.id)
+  })
   it('renders hits as kit ListItem rows (h42, title + location) inside the listbox', () => {
     openSearch('模型')
     const expected = searchSettings('模型')
@@ -58,5 +68,28 @@ describe('SettingsNav search results', () => {
     fireEvent.click(options[0]!)
     const [first] = searchSettings('密钥')
     expect(onNavigate).toHaveBeenLastCalledWith(first!.row.page, first!.row.id)
+  })
+})
+
+describe('SettingsNav search Escape', () => {
+  it('closes the open result list first and only then clears the text', () => {
+    const { input } = openSearch('模型')
+    expect(screen.getByRole('listbox')).toBeTruthy()
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(input.getAttribute('aria-expanded')).toBe('false')
+    expect((input as HTMLInputElement).value).toBe('模型')
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect((input as HTMLInputElement).value).toBe('')
+  })
+
+  it('closes a list that has no hits the same way', () => {
+    const { input } = openSearch('不存在的设置项xyz')
+    expect(screen.getByRole('listbox')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect((input as HTMLInputElement).value).toBe('不存在的设置项xyz')
   })
 })

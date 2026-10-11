@@ -1,10 +1,10 @@
 /**
- * Agent window header (h40, also the window drag region — CLAUDE.md §12): the sidebar toggle while the
- * sidebar is collapsed, the active thread's title (click → rename) with its context chip, then 新会话, the
- * ··· thread menu (the panel's, via threadMenus), the workspace-pane toggle and the 「工作台」 pill back to
- * the four-column layout.
+ * Agent window header (h40, also the window drag region — CLAUDE.md §12), laid out like ZCode's: the sidebar toggle
+ * while the sidebar is collapsed, the active thread's title (semibold, click → rename) with its context chip and the
+ * ··· thread menu (the panel's, via threadMenus) right after it; on the right 新会话, the workspace-pane toggle and
+ * the 「工作台」 pill back to the four-column layout. An empty thread has no title (nor a menu) yet: the left stays blank.
  */
-import { ArrowUpRight, Ellipsis, MessageSquare, PanelLeftOpen, PanelRight, PanelRightClose, Plus } from 'lucide-react'
+import { ArrowUpRight, Ellipsis, PanelLeftOpen, PanelRight, PanelRightClose, Plus } from 'lucide-react'
 import { useMemo } from 'react'
 import { runCommand } from '@/app/commands'
 import { shortcutLabel } from '@/app/shortcuts'
@@ -16,7 +16,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItems,
   DropdownMenuTrigger,
-  ICON_STROKE,
   IconButton,
   Tooltip,
 } from '@/kit'
@@ -53,6 +52,8 @@ export function AgentWindowHeader({
   )
   const title = active ? (isUntitledTitle(active.title) ? t('agent.thread.untitled') : active.title) : ''
   const contextRef = active?.contextRef
+  // A fresh thread is still 新会话 with nothing in it: ZCode's draft header shows no title, and neither do we.
+  const isEmpty = Boolean(active && isUntitledTitle(active.title) && !surface.view?.items.length && !surface.streaming)
   const paneTip = !hasTabs
     ? t('agent.window.header.noPane')
     : paneVisible
@@ -72,17 +73,16 @@ export function AgentWindowHeader({
         </Tooltip>
       ) : null}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1">
-        {active ? (
+        {active && !isEmpty ? (
           <>
             <Tooltip content={t('agent.window.header.rename')}>
               <button
                 type="button"
                 onClick={() => onAction('rename', active.threadId)}
-                className="flex h-7 min-w-0 max-w-[360px] items-center gap-1.5 rounded-control px-1.5 text-left outline-none transition-colors duration-(--dur-fast) hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-accent/70"
+                className="flex h-7 min-w-0 max-w-[360px] items-center rounded-control px-1.5 text-left outline-none hover:bg-hover-5"
                 data-testid="agent-window-title"
               >
-                <MessageSquare size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-accent" />
-                <span className="min-w-0 truncate text-tab font-medium text-fg">{title}</span>
+                <span className="min-w-0 truncate text-body font-semibold text-fg">{title}</span>
               </button>
             </Tooltip>
             {contextRef ? (
@@ -97,6 +97,18 @@ export function AgentWindowHeader({
             ) : null}
           </>
         ) : null}
+        {active && !isEmpty ? (
+          <DropdownMenu>
+            <Tooltip content={t('agent.window.header.menu')}>
+              <DropdownMenuTrigger asChild>
+                <IconButton size="sm" icon={Ellipsis} label={t('agent.window.header.menu')} className="text-fg-2" />
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent align="start" className="min-w-[228px]">
+              <DropdownMenuItems items={menu} />
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         <Tooltip content={t('agent.window.header.newThread')} kbd={shortcutLabel('agent.newThread', mac)}>
@@ -105,18 +117,9 @@ export function AgentWindowHeader({
             icon={Plus}
             label={t('agent.window.header.newThread')}
             onClick={() => void store().newThread()}
+            className="text-fg-2"
           />
         </Tooltip>
-        <DropdownMenu>
-          <Tooltip content={t('agent.window.header.menu')}>
-            <DropdownMenuTrigger asChild>
-              <IconButton size="sm" icon={Ellipsis} label={t('agent.window.header.menu')} />
-            </DropdownMenuTrigger>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="min-w-[228px]">
-            <DropdownMenuItems items={menu} />
-          </DropdownMenuContent>
-        </DropdownMenu>
         <Tooltip content={paneTip}>
           {/* A disabled button emits no pointer events; the span keeps the hint reachable. */}
           <span className="inline-flex">
@@ -124,9 +127,10 @@ export function AgentWindowHeader({
               size="sm"
               icon={paneVisible ? PanelRightClose : PanelRight}
               label={paneVisible ? t('agent.window.header.hidePane') : t('agent.window.header.showPane')}
-              active={paneVisible}
               disabled={!hasTabs}
               onClick={onTogglePane}
+              aria-pressed={paneVisible}
+              className={paneVisible ? 'text-fg' : 'text-fg-2'}
               data-testid="agent-window-pane-toggle"
             />
           </span>

@@ -14,20 +14,31 @@ import { PAGE_META, isSettingsPage, type SettingsPage, type SettingsTabState } f
 import { SettingsNav } from './SettingsNav'
 import { GeneralPage } from './pages/GeneralPage'
 import { AccountPage } from './pages/AccountPage'
+import { DataPage } from './pages/DataPage'
 import { AiPage } from './pages/AiPage'
+import { UsagePage } from './pages/UsagePage'
 import { MemoryPage } from './pages/MemoryPage'
+import { SkillsPage } from './pages/SkillsPage'
+import { TodoPage } from './pages/TodoPage'
+import { ExtensionsPage } from './pages/ExtensionsPage'
 import { PetsPage } from './pages/PetsPage'
 import { AboutPage } from './pages/AboutPage'
 import { DirtyContext, HighlightContext, PageHeader } from './pageKit'
+import { focusedFindScope } from '@/platform/focusScope'
 
 export const HIGHLIGHT_MS = 2000
 
 const PAGES: Record<SettingsPage, ComponentType> = {
   general: GeneralPage,
   account: AccountPage,
+  data: DataPage,
   ai: AiPage,
+  usage: UsagePage,
   pets: PetsPage,
   memory: MemoryPage,
+  skills: SkillsPage,
+  todo: TodoPage,
+  extensions: ExtensionsPage,
   about: AboutPage,
 }
 
@@ -75,7 +86,9 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
   // ⌘F while this tab is active focuses the settings search.
   useEffect(() => {
     if (!active) return
-    return onCommand('search.inPage', () => searchRef.current?.focus())
+    return onCommand('search.inPage', () => {
+      if (!focusedFindScope()) searchRef.current?.focus()
+    })
   }, [active])
 
   const go = useCallback(
@@ -103,9 +116,9 @@ export function SettingsTab({ tab, active, update }: TabRendererProps) {
           <DirtyContext.Provider value={reportDirty}>
             <div
               key={page}
-              className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-7 pb-10 pt-6 @max-[720px]/settings:px-4 @max-[720px]/settings:pt-4"
+              className="mx-auto flex w-full max-w-[760px] flex-col gap-7 px-8 pb-12 pt-8 @max-[720px]/settings:px-4 @max-[720px]/settings:pt-5"
             >
-              <PageHeader title={t(meta.title)} description={t(meta.description)} />
+              <PageHeader title={t(meta.title)} description={meta.description ? t(meta.description) : undefined} />
               <Page />
             </div>
           </DirtyContext.Provider>

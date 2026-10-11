@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultConfig, type AiwcBridge, type AppConfig, type ConfigPatch } from '@aiwc/protocol'
 import { __setBridgeForTests } from '@/platform/bridge'
 import { __resetConfigStoreForTests, useConfig, useConfigStore } from '@/platform/configStore'
-import { AGENT_PANEL_WIDTH, OBJECT_LIST_WIDTH, useColumnLayout } from './columnLayout'
+import { AGENT_PANEL_WIDTH, fitColumns, OBJECT_LIST_WIDTH, useColumnLayout, WORKSPACE_MIN_WIDTH } from './columnLayout'
 
 let writes: ConfigPatch[]
 
@@ -40,6 +40,30 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup()
   __setBridgeForTests(undefined)
+})
+
+describe('fitColumns', () => {
+  const widest = { listWidth: OBJECT_LIST_WIDTH.max, agentWidth: AGENT_PANEL_WIDTH.max }
+
+  it('leaves saved widths alone while the workspace has room', () => {
+    expect(fitColumns({ ...widest, viewport: 1920, listCollapsed: false, agentCollapsed: false })).toEqual(widest)
+  })
+
+  it('shrinks the Agent panel first, then the list, so the workspace keeps its minimum at 1200px', () => {
+    const fitted = fitColumns({ ...widest, viewport: 1200, listCollapsed: false, agentCollapsed: false })
+    expect(fitted.listWidth).toBe(OBJECT_LIST_WIDTH.max)
+    expect(fitted.agentWidth).toBe(1200 - 64 - OBJECT_LIST_WIDTH.max - WORKSPACE_MIN_WIDTH)
+    const tight = fitColumns({ ...widest, viewport: 1100, listCollapsed: false, agentCollapsed: false })
+    expect(tight.agentWidth).toBe(AGENT_PANEL_WIDTH.min)
+    expect(tight.listWidth).toBe(1100 - 64 - AGENT_PANEL_WIDTH.min - WORKSPACE_MIN_WIDTH)
+  })
+
+  it('never goes below a column minimum and ignores a collapsed column', () => {
+    const fitted = fitColumns({ ...widest, viewport: 800, listCollapsed: false, agentCollapsed: false })
+    expect(fitted).toEqual({ listWidth: OBJECT_LIST_WIDTH.min, agentWidth: AGENT_PANEL_WIDTH.min })
+    const collapsed = fitColumns({ ...widest, viewport: 1200, listCollapsed: false, agentCollapsed: true })
+    expect(collapsed).toEqual(widest)
+  })
 })
 
 describe('useColumnLayout', () => {

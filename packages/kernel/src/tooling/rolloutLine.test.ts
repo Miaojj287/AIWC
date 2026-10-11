@@ -47,6 +47,16 @@ describe('parseRolloutLine', () => {
     expect(ThreadSettingsSchema.parse({ profile: 'wechat-bot', allowAlways: [] }).permissionMode).toBe('ask')
   })
 
+  it("keeps a desktop thread's context chip and drops a malformed one without losing the thread", () => {
+    const contextRef = { kind: 'session', id: 'wxid_x', label: '项目群' }
+    const kept = parseRolloutLine(JSON.stringify({ ...meta, origin: { channel: 'desktop', contextRef } }))
+    expect(kept.ok && kept.line.type === 'thread_meta' && kept.line.origin.contextRef).toEqual(contextRef)
+    const broken = parseRolloutLine(
+      JSON.stringify({ ...meta, origin: { channel: 'desktop', contextRef: { kind: 'x' } } }),
+    )
+    expect(broken.ok && broken.line.type === 'thread_meta' && broken.line.origin.contextRef).toBeUndefined()
+  })
+
   it('rejects a torn write as invalid_json', () => {
     expect(parseRolloutLine('{"ts":1,"type":"item","item":{"type":"user_mes')).toEqual({
       ok: false,

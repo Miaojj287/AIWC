@@ -117,6 +117,20 @@ describe('SqlcipherBridge', () => {
     expect(readdirSync(copies)).toHaveLength(1)
   })
 
+  it('keeps the decrypted copy when the key for a database is momentarily unknown', () => {
+    const encrypted = join(root, 'session.db')
+    writeFileSync(encrypted, encryptPage(plaintextPage(1, 0x33), Buffer.alloc(32, 7), 1, fixtureIv(1)))
+    const copies = join(cacheDir, 'wcdb-plain')
+    const b = bridge()
+
+    b.execQuery(encrypted, 'SELECT count(*) FROM sqlite_master', [], KEY_HEX)
+    expect(readdirSync(copies)).toHaveLength(1)
+    // Windows resolves a key per database out of the running WeChat, so `keyFor` yields undefined
+    // whenever WeChat is closed. That is not corruption: rebuilding the copy costs minutes.
+    expect(b.execQuery(encrypted, 'SELECT count(*) FROM sqlite_master').success).toBe(false)
+    expect(readdirSync(copies)).toHaveLength(1)
+  })
+
   it('uses the salt of the database it was keyed for', () => {
     // Guards the copy naming: the salt lives in the first 16 bytes of an encrypted page 1.
     const page = encryptPage(plaintextPage(1, 0x33), Buffer.alloc(32, 7), 1, fixtureIv(1))

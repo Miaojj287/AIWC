@@ -39,7 +39,7 @@ export function userInstructionsFragmentProvider(memory: Pick<MemoryStore, 'read
 /**
  * The stable-tier memory snapshot is frozen per provider instance; without this wiring every thread
  * created after startup would keep reading the snapshot taken at launch. Each write to a memory file
- * (agent tools, 设置 › 记忆, diary backfill) invalidates it so the next new thread re-reads the store;
+ * (agent tools, 设置 › 记忆) invalidates it so the next new thread re-reads the store;
  * threads already running keep their frozen prefix (prompt-cache stability, ARCHITECTURE §5.2).
  */
 export function wireMemoryInvalidation(

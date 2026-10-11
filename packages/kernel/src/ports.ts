@@ -11,11 +11,14 @@ import type {
   ContextFragment,
   FragmentProvider,
   Event,
+  SkillParam,
+  GrantScope,
   HistoryItem,
   ItemId,
   JsonValue,
   ModelClient,
   PermissionMode,
+  QuestionAnswer,
   StepId,
   ThreadId,
   ThreadOrigin,
@@ -26,7 +29,10 @@ import type {
   ToolResult,
   ToolRisk,
   ToolSpecForModel,
+  ToolSummary,
+  TurnCheck,
   TurnId,
+  SubagentTrace,
 } from '@aiwc/protocol'
 
 // ---------------------------------------------------------------------------------------------
@@ -59,6 +65,8 @@ export interface ToolDispatchContext {
   depth: number
   signal: AbortSignal
   emit: (event: Event) => void
+  /** Called while a call waits for the user's approval; the returned function ends the wait (turn budget pauses). */
+  onApprovalWait?: () => () => void
 }
 
 export interface ToolDispatchOutcome {
@@ -69,6 +77,7 @@ export interface ToolDispatchOutcome {
   status: 'done' | 'error' | 'denied' | 'timeout'
   durationMs: number
   artifacts?: ToolArtifact[]
+  subagents?: SubagentTrace[]
 }
 
 /**
@@ -80,6 +89,8 @@ export interface ToolRouter {
   risk(name: string): ToolRisk | undefined
   parallelSafe(name: string): boolean
   summarize(name: string, input: unknown): string
+  /** The tool's summary as data (ToolDefinition.describe), when it declares one; recorded with the call. */
+  describe?(name: string, input: unknown): ToolSummary | undefined
   /** Full funnel: validate → approval → PreToolUse hooks → execute (timeout) → PostToolUse → truncate. */
   dispatch(call: ToolCallRequest, ctx: ToolDispatchContext): Promise<ToolDispatchOutcome>
 }
@@ -91,8 +102,10 @@ export interface ToolRouterBuildOptions {
   /** Runtime getters consulted by the approval step (default: ask mode, empty allow-list). */
   permissionMode?: () => PermissionMode
   allowAlways?: () => readonly string[]
-  /** Called when the user answers "总是允许"; the runtime persists it into ThreadSettings. */
-  onAllowAlways?: (toolName: string) => void
+  /** Called when the user answers "总是允许"; the runtime persists the key for the thread or globally. */
+  onAllowAlways?: (key: string, scope: GrantScope) => void
+  /** The thread's model runs on this machine: tools marked `offDevice` are left out. */
+  localModel?: boolean
 }
 
 export interface ToolRouterFactory {
@@ -117,6 +130,15 @@ export interface ApprovalRequest {
   canAllowAlways: boolean
 }
 
+/** The user's answer to one approval: the decision plus its 拒绝并说明 note or 总是允许 scope. */
+export interface ApprovalAnswer {
+  decision: ApprovalDecision
+  /** With 'deny': what the Agent should do instead (handed back to the model). */
+  reason?: string
+  /** With 'allow_always': this thread (default) or every desktop thread. */
+  scope?: GrantScope
+}
+
 export interface ApprovalGate {
   /** Pure policy decision: mode × risk × allow-list × channel. Never blocks. */
   decide(input: {
@@ -129,13 +151,32 @@ export interface ApprovalGate {
     allowAlways: readonly string[]
   }): ApprovalVerdict
   /** Blocks until resolved or aborted. Emits approval.requested via the dispatcher. */
-  ask(req: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision>
+  ask(req: ApprovalRequest, signal: AbortSignal): Promise<ApprovalAnswer>
   /**
    * Called from the Op handler when the UI answers. When threadId is given the gate must refuse
    * (return false) unless the pending request belongs to that thread.
    */
-  resolve(approvalId: ApprovalId, decision: ApprovalDecision, threadId?: ThreadId): boolean
+  resolve(
+    approvalId: ApprovalId,
+    decision: ApprovalDecision,
+    threadId?: ThreadId,
+    extra?: Pick<ApprovalAnswer, 'reason' | 'scope'>,
+  ): boolean
   /** Cancel all pending asks for a thread (interrupt / shutdown). */
+  cancelAll(threadId: ThreadId): void
+  /**
+   * Let the user of `parentId` answer the asks of `childId` (a workflow step asks through the conversation that
+   * started it); interrupting the parent also denies them. Returns the undo.
+   */
+  alias?(childId: ThreadId, parentId: ThreadId): () => void
+}
+
+/** Pending `ask_user` questions (tooling/questions.ts): the router waits on it, the Thread resolves it. */
+export interface QuestionGate {
+  /** Blocks until answered or aborted (an abort settles as `dismissed`). */
+  ask(req: { questionId: string; threadId: ThreadId }, signal: AbortSignal): Promise<QuestionAnswer>
+  /** From the op handler; refuses a question that belongs to another thread. */
+  resolve(questionId: string, answer: QuestionAnswer, threadId?: ThreadId): boolean
   cancelAll(threadId: ThreadId): void
 }
 
@@ -156,9 +197,13 @@ export type HookEventName =
 export interface HookPayload {
   threadId: ThreadId
   turnId?: TurnId
+  /** Pre/PostToolUse: the call, so a host hook can pair the two events of one call. */
+  callId?: CallId
   toolName?: string
   input?: unknown
   output?: unknown
+  /** PostToolUse: the tool reported failure (nothing to record as a change). */
+  isError?: boolean
   text?: string
   /** Stop: where the thread came from and which tool profile it runs, so host hooks can scope themselves. */
   origin?: ThreadOrigin
@@ -177,6 +222,8 @@ export interface HookResult {
   updatedInput?: unknown
   /** replace model-visible output (PostToolUse) */
   updatedOutput?: string
+  /** Stop: what an automatic check found, recorded in the turn for the transcript (all hooks' reports are kept). */
+  checks?: TurnCheck[]
 }
 
 export interface Hook {
@@ -241,6 +288,26 @@ export interface ResumeState {
   skippedLines?: number
 }
 
+export interface RolloutSearchOptions {
+  limit?: number
+  threadId?: ThreadId
+  /** Only threads of this channel, not running these profiles, not archived unless `includeArchived`. */
+  channel?: ChannelKind
+  excludeProfiles?: readonly ToolProfile[]
+  includeArchived?: boolean
+  /** Characters placed around each match in `snippet`; default `[` `]`. */
+  marks?: readonly [string, string]
+}
+
+export interface RolloutSearchHit {
+  threadId: ThreadId
+  itemId: ItemId
+  snippet: string
+  ts: number
+  /** The thread's stored title (empty for an untitled thread). */
+  title: string
+}
+
 export interface RolloutStore {
   create(meta: { threadId: ThreadId; origin: ThreadOrigin; settings: ThreadSettings; title?: string }): Promise<void>
   append(threadId: ThreadId, lines: RolloutLine[]): Promise<void>
@@ -250,21 +317,24 @@ export interface RolloutStore {
   list(opts?: {
     query?: string
     limit?: number
+    /** Rows to skip after filtering and ordering (paging). */
+    offset?: number
     channel?: ChannelKind
     includeArchived?: boolean
+    /** Only archived threads (wins over `includeArchived`). */
+    archivedOnly?: boolean
     /** Leave out threads whose settings run one of these profiles; applied before `limit`. */
     excludeProfiles?: readonly ToolProfile[]
+    /** Leave out threads with no recorded item. */
+    nonEmpty?: boolean
   }): Promise<ThreadRecord[]>
   updateMeta(
     threadId: ThreadId,
     patch: Partial<Pick<ThreadRecord, 'title' | 'pinned' | 'archived' | 'settings'>>,
   ): Promise<void>
   remove(threadId: ThreadId): Promise<void>
-  /** Zero-LLM keyword search over stored user/assistant text (FTS). */
-  search(
-    query: string,
-    opts?: { limit?: number; threadId?: ThreadId },
-  ): Promise<Array<{ threadId: ThreadId; itemId: ItemId; snippet: string; ts: number }>>
+  /** Zero-LLM keyword search over stored user/assistant text (FTS), newest first. */
+  search(query: string, opts?: RolloutSearchOptions): Promise<RolloutSearchHit[]>
   /**
    * Atomically replace a thread's rollout with the given live history (rollback / clear), preserving
    * thread meta (createdAt, pinned, archived, title) and writing a fresh 'compacted' checkpoint when
@@ -292,11 +362,15 @@ export interface SkillMeta {
   source: 'builtin' | 'user' | 'agent'
   dir: string
   tags?: string[]
+  /** Parameters declared in the frontmatter (`arguments` / `params`). */
+  params?: SkillParam[]
 }
 
 export interface SkillIndex {
   refresh(): Promise<void>
+  /** Skills the model may use: enabled in 设置 › 技能 and not broken. */
   list(): SkillMeta[]
+  /** Any indexed skill by name, including disabled or broken ones (writers check for collisions with it). */
   get(name: string): SkillMeta | undefined
   /** Full SKILL.md body (bounded). */
   read(name: string): Promise<string>
@@ -325,6 +399,8 @@ export interface ModelResolver {
 export interface KernelServices {
   tools: ToolRouterFactory
   approvals: ApprovalGate
+  /** Answers to `ask_user`; absent = the question.answer op is ignored. */
+  questions?: QuestionGate
   hooks: HookRunner
   rollout: RolloutStore
   skills: SkillIndex

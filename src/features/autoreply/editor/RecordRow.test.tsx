@@ -61,4 +61,25 @@ describe('RecordRow', () => {
     expect(screen.queryByRole('button', { name: '确认发送' })).toBeNull()
     expect(screen.getByText('已发送')).toBeTruthy()
   })
+
+  it('a compact drawer row still reaches 查看原消息 / 撤回 through its right-click menu, 撤回 last', () => {
+    const onView = vi.fn()
+    const onRecall = vi.fn()
+    const sent = record({ status: 'sent', sendMode: 'auto', recallableUntil: 1_700_000_120_000 })
+    render(<RecordRow record={sent} now={sent.at + 1_000} onView={onView} onRecall={onRecall} compact />)
+    expect(screen.queryByRole('button', { name: '撤回' })).toBeNull()
+    fireEvent.contextMenu(screen.getByText('在的，怎么了'))
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent)
+    expect(items).toEqual(['查看原消息', '复制回复', '撤回'])
+    fireEvent.click(screen.getByRole('menuitem', { name: '撤回' }))
+    expect(onRecall).toHaveBeenCalledWith(sent)
+  })
+
+  it('an emptied draft cannot be sent and says why', () => {
+    render(<RecordRow record={record()} now={1_700_000_000_000} onDecide={async () => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: '待确认的回复' }), { target: { value: '  ' } })
+    const send = screen.getByRole('button', { name: '修改后发送' })
+    expect(send).toHaveProperty('disabled', true)
+    expect(send.getAttribute('aria-description')).toBe('回复内容不能为空')
+  })
 })

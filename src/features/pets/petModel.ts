@@ -4,6 +4,7 @@
  */
 import type { InstalledPet, PetConfig } from '@aiwc/protocol'
 import { t } from '@/i18n'
+import type { PetFleet } from './petStatus'
 import type { PetAnimationId } from './spriteSpec'
 
 /** Everything the pet needs to know about the Agent (computed by the agent feature). */
@@ -17,6 +18,8 @@ export interface AgentPetSignal {
   activity?: string
   /** The latest turn of this thread that finished while the app was open. */
   reaction?: PetReaction
+  /** Counts across every thread and WeChat unread, for the status readout beside the pet. */
+  fleet?: PetFleet
 }
 
 export interface PetReaction {

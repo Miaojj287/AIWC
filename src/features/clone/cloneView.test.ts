@@ -8,7 +8,6 @@ import {
   formatEta,
   progressPercent,
   rangeToQuery,
-  readyCount,
   viewFor,
 } from './cloneView'
 
@@ -74,7 +73,6 @@ describe('list filters', () => {
     expect(filterContacts(entries, '', 'ready').map((e) => e.contactId)).toEqual(['wxid_a'])
     expect(filterContacts(entries, 'brook', 'all').map((e) => e.contactId)).toEqual(['wxid_c'])
     expect(filterContacts(entries, 'wxid_b', 'all')).toHaveLength(1)
-    expect(readyCount(entries)).toBe(1)
   })
   it('converts training ranges', () => {
     const now = 1_000_000_000_000

@@ -6,7 +6,7 @@ import { Cloud, HardDrive, Unplug } from 'lucide-react'
 import { useContext, useEffect, useEffectEvent, useState } from 'react'
 import type { ModelEntry, ModelSelection, ProviderConfig } from '@aiwc/protocol'
 import { useT, type MessageKey } from '@/i18n'
-import { Badge, Card, DangerDialog, InlineHint, SegmentedControl, Select, cn, toast } from '@/kit'
+import { Badge, Card, DangerDialog, SegmentedControl, Select, cn, toast } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
 import {
@@ -27,6 +27,9 @@ import { HighlightContext, PagePlaceholder, SRow, Section, rowDomId } from '../p
 import { VENDORS, vendorById } from '../vendors'
 import { AddModelDialog } from './ai/AddModelDialog'
 import { ConnectProviderDialog, type ConnectMode } from './ai/ConnectProviderDialog'
+import { JevSection } from './ai/JevSection'
+import { PermissionRulesSection } from './ai/PermissionRulesSection'
+import { NetworkSection } from './ai/NetworkSection'
 import { useModelSync } from './ai/useModelSync'
 import { ProviderPanel } from './ai/ProviderPanel'
 import { ProviderRail, type RailSelection } from './ai/ProviderRail'
@@ -35,8 +38,7 @@ import { SttLocalList } from './SttLocalList'
 
 const STT_ONLINE_ID = 'stt-online'
 
-// Local-first notices (CLAUDE.md §6): catalog keys, resolved with t() at render.
-const PRIVACY_AGENT: MessageKey = 'settings.ai.page.privacyAgent'
+// Local-first notices (CLAUDE.md §6), catalog keys: PRIVACY_AGENT is the one standing note, the rest sit behind `help`.
 const PRIVACY_TERMS: MessageKey = 'settings.ai.page.privacyTerms'
 const PRIVACY_STT: MessageKey = 'settings.ai.stt.privacyOnline'
 
@@ -177,11 +179,7 @@ export function AiPage() {
 
   return (
     <>
-      <Section
-        title={t('settings.ai.page.agentSection')}
-        help={t(PRIVACY_TERMS)}
-        aside={t('settings.ai.page.summary', { providers: providers.length, models: modelOptions(providers).length })}
-      >
+      <Section title={t('settings.ai.page.agentSection')} help={t(PRIVACY_TERMS)}>
         {/* The container query lives on a wrapper: an element cannot query its own size. */}
         <div className="@container">
           <Card
@@ -190,7 +188,7 @@ export function AiPage() {
             data-setting-row="ai.providers"
             data-highlighted={cardHighlighted || undefined}
             className={cn(
-              'flex min-h-[320px] flex-col overflow-hidden transition-colors duration-(--dur-base) @min-[560px]:flex-row',
+              'flex min-h-[320px] flex-col overflow-hidden @min-[560px]:flex-row',
               cardHighlighted && 'ring-1 ring-inset ring-accent/50',
             )}
           >
@@ -259,7 +257,6 @@ export function AiPage() {
           <SRow
             id="ai.defaultModel"
             title={t('settings.ai.defaultModel.title')}
-            description={t('settings.ai.defaultModel.description')}
             help={t('settings.ai.defaultModel.help')}
             htmlFor="ai-default-model"
           >
@@ -285,15 +282,19 @@ export function AiPage() {
             />
           </SRow>
         </Card>
-        <InlineHint kind="info">{t(PRIVACY_AGENT)}</InlineHint>
       </Section>
+
+      <NetworkSection />
+
+      <PermissionRulesSection />
+      <JevSection />
 
       <Section title={t('settings.ai.stt.section')}>
         <Card variant="rows">
           <SRow
             id="ai.sttMode"
             title={t('settings.ai.stt.mode')}
-            description={stt.mode === 'local' ? t('settings.ai.stt.privacyLocal') : t(PRIVACY_STT)}
+            help={stt.mode === 'local' ? t('settings.ai.stt.privacyLocal') : t(PRIVACY_STT)}
           >
             <SegmentedControl
               aria-label={t('settings.ai.stt.mode')}
@@ -357,7 +358,7 @@ export function AiPage() {
           onOpenChange={(o) => !o && setDialog(undefined)}
           provider={dialogProvider}
           onAdd={async (modelId) => {
-            const entry: ModelEntry = modelEntryFromId(modelId, undefined)
+            const entry: ModelEntry = modelEntryFromId(modelId, undefined, dialogProvider)
             await updateProvider(
               {
                 ...dialogProvider,

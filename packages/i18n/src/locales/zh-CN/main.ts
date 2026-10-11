@@ -5,9 +5,17 @@
  */
 export const main = {
   startupFailed: '启动失败',
+  composer: {
+    invalidDraft: '草稿无法保存：内容格式不正确或附件超出上限',
+  },
   ipc: {
     untrustedSender: '拒绝来自未知窗口的请求',
     operationFailed: '操作失败，请重试',
+  },
+  /** System tray menu (Windows / Linux) shown while the window is hidden. */
+  tray: {
+    show: '显示 {name}',
+    quit: '退出',
   },
   app: {
     unknownWindowAction: '未知窗口操作',
@@ -19,6 +27,7 @@ export const main = {
     invalid: '配置无效：{detail}',
     secretEmpty: '密钥不能为空',
     invalidSecretRef: '非法的密钥引用: {ref}',
+    secretRefRefused: '界面无权访问这个密钥：{ref}',
     encryptionUnavailable: '当前系统无法安全加密密钥（safeStorage 不可用）',
   },
   files: {
@@ -31,7 +40,6 @@ export const main = {
     cacheDirForbiddenRoot: '缓存目录不能是根目录或用户主目录',
     cacheDirNotAllowed: '缓存目录必须通过「选择目录」选取，或位于应用数据目录内',
     cacheDirMissing: '缓存目录不存在或不是文件夹',
-    diaryDateFormat: '日期格式应为 YYYY-MM-DD',
     memoryCleared: '{file}.md 已清空',
     unknownMemoryFile: '未知的记忆文件：只能读写 MEMORY、USER、SOUL、AGENTS',
   },
@@ -42,20 +50,6 @@ export const main = {
     modelNotFound: '服务商「{provider}」下没有模型「{model}」。',
   },
   agent: {
-    suggestions: {
-      sessionSummary: '总结这个会话最近一周聊了什么，按主题分组并给出锚点',
-      sessionUnanswered: '找出对方问了但我还没回复的消息',
-      sessionTopics: '这个会话里最常出现的话题和时间段是什么',
-      contactRelationship: '根据聊天记录概括我和这个人的关系与近期互动',
-      contactFollowUps: '这个人最近有没有提到需要我跟进的事',
-      contactDraftReply: '用这个人的口吻起草一条回复',
-      fileKeyPoints: '概括这个文件的要点',
-      fileShareable: '把这个文件整理成一份可以发出去的说明',
-      fileTodos: '根据文件内容列出待办事项',
-      generalUnanswered: '今天有哪些未回复的重要消息',
-      generalWeekly: '生成本周的聊天周报',
-      generalMeetings: '搜索最近提到「会议」的消息并整理时间线',
-    },
     gotIt: '知道了',
     attachmentThread: '附件会话',
     threadRecord: '会话记录',
@@ -72,17 +66,29 @@ export const main = {
       actionGeneric: '操作',
     },
     memoryWritten: 'Agent 已写入记忆',
+    rollbackTargetMissing: '这条消息已被压缩进摘要，无法从这里回退',
+    fork: {
+      targetMissing: '这一轮已被压缩进摘要，无法从这里分出新会话',
+      turnRunning: '这一轮还在进行，结束后再分出新会话',
+    },
+    conversation: {
+      desktopOnly: '只能操作桌面会话',
+      invalidRequest: '请求无效',
+    },
   },
   substrate: {
     noDataDir: '未找到微信数据目录，请先在「设置 › 账号」中选择',
     keysAcquired: '密钥获取完成',
-    keysAcquireFailed: '未能自动获取数据库密钥，可尝试内存扫描或手动粘贴',
+    keysAcquireFailed: '未能自动获取数据库密钥，可重试或手动粘贴',
+    imageKeysAcquireFailed: '未能获取全部图片密钥，可手动粘贴',
+    keysAcquiredPartial: '已获取数据库密钥，图片密钥可稍后补齐',
     selectDbRootAndAccount: '请先选择数据库目录和账号',
     dbKeyMissing: '尚未获取数据库密钥',
     exported: '已导出 {n} 条消息',
-    openLocation: '打开位置',
+    openLocation: '打开文件',
     selectAccountAndDbRoot: '请先选择微信账号和数据库目录',
     connectFailed: '数据库连接失败',
+    switchingAccount: '正在切换微信账号，请稍候',
     accountMismatch: '实际连接账号与所选账号不一致',
     restoreFailed: '{error}；原账号恢复失败：{detail}',
     connectionFailed: '连接失败',
@@ -102,11 +108,6 @@ export const main = {
       image_xor: '获取图片 XOR 密钥',
       image_aes: '获取图片 AES 密钥',
       verify: '校验密钥',
-    },
-    relaunch: {
-      closing: '正在关闭微信…',
-      restarting: '正在重新启动微信…',
-      capturing: '微信已重启，正在捕获启动阶段密钥（如停在登录页请扫码并进入任意聊天）…',
     },
   },
   autoReply: {
@@ -152,6 +153,23 @@ export const main = {
     halted: '自动回复已熔断：{reason}',
     viewReplyDesk: '查看回复台',
   },
+  /** services/jevClient.ts · services/jevReply.ts · ipc/jev.ts — 自动回复的 Jev（beta） 回复方式. */
+  jev: {
+    noKey: '尚未填写 Jev API Key，请到「设置 › AI 接入 › Jev」填写',
+    unauthorized: 'Jev API Key 无效或已失效，请检查后重试',
+    rateLimited: 'Jev 请求过于频繁，请稍后重试',
+    invalidRequest: 'Jev 拒绝了这次请求：{detail}',
+    overloaded: 'Jev 服务暂时过载，请稍后重试',
+    server: 'Jev 服务出错（HTTP {status}），请稍后重试',
+    network: '连不上 Jev 服务：{detail}',
+    timeout: 'Jev 请求超时，请重试',
+    invalidResponse: 'Jev 返回了无法解析的结果，请重试',
+    invalidEndpoint: 'Jev 接口地址必须以 http:// 或 https:// 开头',
+    invalidRule: 'Jev 规则内容不完整，无法试运行',
+    noCandidates: '请至少写一条候选回复',
+    tooManyCandidates: '候选回复最多 {max} 条',
+    silence: 'Jev 判断这条不用回（置信度 {confidence}%）',
+  },
   clone: {
     notCloned: '该联系人尚未克隆',
     invalidContactId: '联系人 ID 无效，请刷新克隆列表后重试',
@@ -188,6 +206,62 @@ export const main = {
     toolResult: '工具结果',
     toolError: '（错误）',
     toolTruncated: '（已截断）',
+    reasoning: '思考过程',
+    compacted: '早先内容的摘要',
+    aborted: '（本轮已停止）',
+    attachment: '[附件 {name}]',
+    toolOutputsOmitted: '工具的输入与结果未导出（可能含聊天原文）。',
+    redactedNote: '标识信息（微信号、群号、手机号、邮箱、路径、密钥）已脱敏。',
+  },
+  /** 每日待办: IPC validation, and toasts for scans the user did not start. */
+  todo: {
+    invalidRequest: '无效的待办请求',
+    invalidText: '待办内容需为 1–{max} 个字',
+    notFound: '这条待办已不存在',
+    view: '查看',
+    openSettings: '去设置',
+    added: '每日待办：新增 {n} 条',
+    modelUnavailable: '每日待办没能扫描：还没有可用的模型',
+    scanFailed: '每日待办扫描失败，下次会重试',
+  },
+  /** 设置 › 记忆 › 待确认: proposals waiting for the user (composeMemory.ts, ipc/memoryReview.ts). */
+  memoryReview: {
+    pending: '有 {n} 条记忆待你确认',
+    review: '去确认',
+    invalidRequest: '无效的记忆确认请求',
+  },
+  /** 设置 › 技能 (ipc/skills.ts). */
+  skills: {
+    invalidRequest: '无效的技能请求',
+    notFound: '找不到这个技能，可能已被删除',
+    builtin: '内置技能不能删除，可以停用',
+    outsideRoot: '技能不在技能文件夹里，无法删除',
+  },
+  /**
+   * System notifications (services/systemNotifier.ts) while the window is in the background. Bodies leave names out
+   * unless 设置 › 常规 › 系统通知 › 显示联系人名称 is on: the lock screen keeps them.
+   */
+  notify: {
+    approval: { title: 'Agent 需要你确认', body: '有一个操作在等你确认' },
+    question: { title: 'Agent 在等你回答', body: 'Agent 有个问题需要你选一下' },
+    replyDraft: {
+      title: '回复草稿待确认',
+      body: '有一条自动回复写好了，等你确认后发送',
+      bodyNamed: '给 {name} 的回复写好了，等你确认后发送',
+    },
+    agentDraft: {
+      title: '回复草稿已放进回复台',
+      body: 'Agent 起草了一条回复，等你过目后发送',
+      bodyNamed: 'Agent 起草了给 {name} 的回复，等你过目后发送',
+    },
+    halted: { title: '自动回复已暂停', body: '发送遇到问题，需要你处理' },
+    task: {
+      doneTitle: '定时任务完成：{name}',
+      failedTitle: '定时任务失败：{name}',
+      done: '点按查看结果',
+      doneWithDenied: '{n} 个操作被跳过，点按查看',
+      failed: '点按查看原因',
+    },
   },
   tasks: {
     invalidId: '无效的任务 id',
@@ -198,6 +272,15 @@ export const main = {
     done: '定时任务「{name}」已完成',
     doneWithDenied: '定时任务「{name}」已完成，{n} 步未授权被跳过',
     failed: '定时任务「{name}」运行失败',
+    failedRetrying: '定时任务「{name}」遇到限流或网络问题，稍后自动重试',
+    missed: '定时任务「{name}」错过了计划时间',
+    reminderTitle: '提醒',
+    reminder: '提醒：{text}',
+    reminderOpen: '查看',
+    reminderNote: '提醒：{text}',
+  },
+  automation: {
+    invalidBadge: '无效的角标数字',
   },
   pets: {
     invalidId: '无效的宠物 id',
@@ -243,6 +326,44 @@ export const main = {
       entryOutOfRange: '条目越界：{name}',
       sizeMismatch: '解压后大小不符：{name}',
       unsupportedMethod: '不支持的压缩方式 {method}：{name}',
+    },
+  },
+  data: {
+    previewUnreadable: '这个文件已损坏，或不是有效的 Word / Excel 文件',
+    previewTooLarge: '文件内容太大，无法在这里预览，请用默认应用打开',
+    previewUnsupported: '不支持预览这种文件',
+    chatFileMissing: '文件还没有保存到这台电脑，请先在微信里打开或下载它',
+    chatFileOutside: '这个文件不在当前微信账号的数据目录内，无法预览',
+    clearBusy: '正在清理，请稍候再试',
+    update: {
+      devBuild: '开发版本不支持应用内更新',
+      noFeed: '这个版本没有配置更新源',
+      unsupportedPlatform: '当前安装方式不支持应用内更新，请从发布页下载新版本',
+      loadFailed: '更新组件加载失败',
+      nothingToDownload: '没有可下载的更新，请先检查更新',
+      notReady: '更新还没有下载完成',
+      timeout: '检查更新超时，请检查网络后重试',
+      availableToast: '发现新版本 {version}',
+      view: '查看',
+    },
+  },
+  extensions: {
+    invalid: '扩展配置无效（{field}）',
+    serverNotFound: '找不到这个 MCP 服务器，可能已被删除',
+    hookNotFound: '找不到这个 Hook，可能已被删除',
+    duplicateId: '已有同名的 MCP 服务器，请换一个 ID',
+    tooMany: '数量已达上限，请先删除不用的',
+    destructiveOverride: '服务器把「{tool}」标注为破坏性操作，每次都要确认，不能调低权限',
+    commandTooLong:
+      '命令太长，确认框无法完整显示：请控制在 {max} 个字符、{lines} 行以内，较长的内容可以写进脚本文件再运行',
+    confirm: {
+      title: '确认运行命令',
+      mcpMessage: '允许 AIWC 连接 MCP 服务器「{name}」？',
+      hookMessage: '允许 AIWC 运行 Hook「{name}」？',
+      mcpDetail: '本地命令会以你的账户权限在本机运行；远程地址会收到 Agent 传给工具的参数。只连接你信任的服务器。',
+      hookDetail: '这条命令会在相应事件发生时以你的账户权限在本机运行，并通过标准输入收到事件内容（可能含聊天内容）。',
+      allow: '允许',
+      cancel: '取消',
     },
   },
 }

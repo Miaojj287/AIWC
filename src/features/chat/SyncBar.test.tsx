@@ -25,7 +25,7 @@ describe('<SyncBar>', () => {
     )
     const root = container.firstElementChild as HTMLElement
     expect(root.className).toContain('bg-panel')
-    expect(root.className).toContain('h-[34px]')
+    expect(root.className).toContain('h-8')
     expect(root.className).not.toContain('bg-fg/')
     expect(root.className).toContain('border-line-6')
   })

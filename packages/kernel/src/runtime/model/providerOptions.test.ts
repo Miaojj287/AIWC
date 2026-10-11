@@ -46,4 +46,35 @@ describe('capability-aware provider options', () => {
       google: { thinkingConfig: { thinkingLevel: 'minimal' } },
     })
   })
+  it('lets a per-call depth override the model setting when the model supports it', () => {
+    const p = { kind: 'openai' as const, id: 'p' }
+    expect(providerOptionsFor(p, { modelId: 'gpt-5.4', reasoningEffort: 'high' }, 'low')).toEqual({
+      openai: { reasoningEffort: 'low' },
+    })
+    // unsupported override → the model's own setting
+    expect(providerOptionsFor(p, { modelId: 'gpt-5.4', reasoningEffort: 'high' }, 'minimal')).toEqual({
+      openai: { reasoningEffort: 'high' },
+    })
+  })
+  it('uses the least reasoning each model allows for internal calls', () => {
+    expect(
+      providerOptionsFor({ kind: 'openai', id: 'p' }, { modelId: 'gpt-5', reasoningEffort: 'high' }, 'lowest'),
+    ).toEqual({
+      openai: { reasoningEffort: 'minimal' },
+    })
+    expect(providerOptionsFor({ kind: 'openai', id: 'p' }, { modelId: 'gpt-5.4' }, 'lowest')).toEqual({
+      openai: { reasoningEffort: 'none' },
+    })
+    expect(
+      providerOptionsFor(
+        { kind: 'anthropic', id: 'p' },
+        { modelId: 'claude-sonnet-4-5', thinkingBudget: 8000 },
+        'lowest',
+      ),
+    ).toEqual({ anthropic: { thinking: { type: 'disabled' } } })
+    expect(providerOptionsFor({ kind: 'google', id: 'p' }, { modelId: 'gemini-2.5-pro' }, 'lowest')).toEqual({
+      google: { thinkingConfig: { thinkingBudget: 128 } },
+    })
+    expect(providerOptionsFor({ kind: 'openai', id: 'p' }, { modelId: 'gpt-4.1' }, 'lowest')).toBeUndefined()
+  })
 })

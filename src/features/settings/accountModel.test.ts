@@ -1,15 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { KeyAcquireStep } from '@aiwc/protocol'
-import {
-  DEFAULT_KEY_STEPS,
-  keyStepsToProgress,
-  maskSecret,
-  mergeKeyStep,
-  missingKeyKinds,
-  secretRefFor,
-  summarizeKeySteps,
-  validateKeyHex,
-} from './accountModel'
+import { maskSecret, missingKeyKinds, secretRefFor, validateKeyHex } from './accountModel'
 
 describe('validateKeyHex', () => {
   const key64 = 'a'.repeat(64)
@@ -41,31 +32,14 @@ describe('secret refs & masks', () => {
 })
 
 describe('key steps', () => {
-  it('merges pushed steps by id and summarises progress', () => {
-    let steps = [...DEFAULT_KEY_STEPS]
-    steps = mergeKeyStep(steps, { id: 'db_key', label: '读取数据库密钥', status: 'done', detail: '0.2s' })
-    steps = mergeKeyStep(steps, { id: 'image_xor', label: '提取图片 XOR 密钥', status: 'doing' })
-    const s = summarizeKeySteps(steps)
-    expect(s.done).toBe(1)
-    expect(s.total).toBe(4)
-    expect(s.running?.id).toBe('image_xor')
-    expect(s.finished).toBe(false)
-    expect(s.percent).toBe(25)
-  })
-  it('reports failures and the kinds that still need manual input', () => {
-    const steps: KeyAcquireStep[] = DEFAULT_KEY_STEPS.map((s) => ({
-      ...s,
-      status: s.id === 'image_aes' ? 'failed' : 'done',
-    }))
-    const s = summarizeKeySteps(steps)
-    expect(s.finished).toBe(true)
-    expect(s.failed.map((f) => f.id)).toEqual(['image_aes'])
+  it('lists the kinds that still need manual input, not ones a cancel or earlier failure left unrun', () => {
+    const steps: KeyAcquireStep[] = [
+      { id: 'db_key', label: '', status: 'done' },
+      { id: 'image_xor', label: '', status: 'failed', failure: 'skipped' },
+      { id: 'image_aes', label: '', status: 'failed', detail: 'no key' },
+      { id: 'verify', label: '', status: 'failed' },
+    ]
     expect(missingKeyKinds(steps)).toEqual(['image_aes'])
-    expect(keyStepsToProgress(steps)[3]).toMatchObject({ id: 'verify', status: 'done' })
-  })
-  it('appends unknown steps', () => {
-    const merged = mergeKeyStep([], { id: 'verify', label: 'x', status: 'todo' })
-    expect(merged).toHaveLength(1)
   })
 })
 

@@ -7,12 +7,25 @@
  * (sendMode 'auto') offers 取消发送 instead. Rows with such inline buttons show 查看原消息 inline too and
  * never grow the hover column: that column appearing on hover pushed 确认发送 out from under the cursor.
  */
-import { Ban, Check, CircleAlert, Clock, CornerDownRight, ExternalLink, Pencil, Undo2, X } from 'lucide-react'
+import { Ban, Check, CircleAlert, Clock, Copy, CornerDownRight, ExternalLink, Pencil, Undo2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AutoReplyRecord, ReplyRecordStatus } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Button, ICON_STROKE, Textarea, cn, type IconComponent } from '@/kit'
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItems,
+  ContextMenuTrigger,
+  ICON_STROKE,
+  Textarea,
+  cn,
+  toast,
+  type IconComponent,
+  type MenuSpec,
+} from '@/kit'
 import { formatTime } from '@/platform/format'
+import { JevDecisionLine } from '../jev/JevDecisionLine'
 import { RECORD_STATUS, canRecall, isAwaitingConfirm, recordStatusLabel, triggerSummary } from '../recordModel'
 
 const STATUS_ICON: Record<ReplyRecordStatus, { icon: IconComponent; className: string }> = {
@@ -77,61 +90,133 @@ export function RecordRow({
     }
   }
 
+  const copyReply = async () => {
+    try {
+      await navigator.clipboard.writeText(record.replyText)
+      toast.success(t('common.copied', { what: t('autoreply.records.replyCopied') }))
+    } catch {
+      // Clipboard access can be refused (unfocused window, permissions); the toast is the whole recovery.
+      toast.error(t('common.copyFailed'))
+    }
+  }
+  // The drawer's compact rows have no hover column, so the menu is their only way to these actions.
+  const menu: MenuSpec = [
+    ...(onView
+      ? [
+          {
+            id: 'view',
+            label: t('autoreply.records.viewOriginal'),
+            icon: ExternalLink,
+            onSelect: () => onView(record),
+          },
+        ]
+      : []),
+    { id: 'copy', label: t('autoreply.records.copyReply'), icon: Copy, onSelect: () => void copyReply() },
+    ...(onRecall && recallable
+      ? [
+          { type: 'separator' as const },
+          {
+            id: 'recall',
+            label: t('autoreply.records.recall'),
+            icon: Undo2,
+            danger: true,
+            onSelect: () => onRecall(record),
+          },
+        ]
+      : []),
+  ]
+
   return (
-    <div
-      className={cn(
-        'group flex items-start gap-2.5 px-4 hover:bg-hover-5',
-        compact ? 'py-2' : 'py-2.5',
-        'border-b border-line-6 last:border-b-0',
-        parked && 'bg-warn/5',
-      )}
-      data-status={record.status}
-      data-parked={parked || undefined}
-    >
-      <span className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center', meta.className)}>
-        <Icon size={13} strokeWidth={ICON_STROKE} aria-hidden />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-body text-fg" title={triggerSummary(record)}>
-          {triggerSummary(record)}
-        </span>
-        {parked && !compact ? (
-          <div className="mt-1 flex flex-col gap-2">
-            <Textarea
-              autosize
-              minRows={2}
-              maxRows={6}
-              aria-label={t('autoreply.records.pendingReplyLabel')}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={busy !== null}
-            />
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {viewInline}
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={X}
-                loading={busy === 'reject'}
-                disabled={busy !== null && busy !== 'reject'}
-                onClick={() => void decide('reject')}
-              >
-                {t('autoreply.records.ignore')}
-              </Button>
-              {edited ? (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'group flex items-start gap-2.5 px-4 hover:bg-hover-5',
+            compact ? 'py-2' : 'py-2.5',
+            'border-b border-line-6 last:border-b-0',
+            parked && 'bg-warn/5',
+          )}
+          data-status={record.status}
+          data-parked={parked || undefined}
+        >
+          <span className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center', meta.className)}>
+            <Icon size={13} strokeWidth={ICON_STROKE} aria-hidden />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-body text-fg" title={triggerSummary(record)}>
+              {triggerSummary(record)}
+            </span>
+            {parked && !compact ? (
+              <div className="mt-1 flex flex-col gap-2">
+                <Textarea
+                  autosize
+                  minRows={2}
+                  maxRows={6}
+                  aria-label={t('autoreply.records.pendingReplyLabel')}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  disabled={busy !== null}
+                />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {viewInline}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={X}
+                    loading={busy === 'reject'}
+                    disabled={busy !== null && busy !== 'reject'}
+                    onClick={() => void decide('reject')}
+                  >
+                    {t('autoreply.records.ignore')}
+                  </Button>
+                  {edited ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Pencil}
+                      loading={busy === 'edit'}
+                      disabled={!text.trim() || (busy !== null && busy !== 'edit')}
+                      disabledReason={text.trim() ? undefined : t('autoreply.records.emptyReply')}
+                      onClick={() => void decide('edit')}
+                    >
+                      {t('autoreply.records.sendEdited')}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant={primary ? 'primary' : 'outline'}
+                      size="sm"
+                      icon={Check}
+                      loading={busy === 'approve'}
+                      disabled={busy !== null && busy !== 'approve'}
+                      onClick={() => void decide('approve')}
+                    >
+                      {t('autoreply.records.confirmSend')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <span className="flex min-w-0 items-center gap-1 text-caption text-fg-3">
+                <CornerDownRight size={11} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" />
+                <span className="min-w-0 truncate" title={record.replyText}>
+                  {record.replyText}
+                </span>
+              </span>
+            )}
+            {parked && compact ? (
+              <div className="mt-1 flex items-center gap-2">
                 <Button
-                  variant="primary"
+                  variant="ghost"
                   size="sm"
-                  icon={Pencil}
-                  loading={busy === 'edit'}
-                  disabled={!text.trim() || (busy !== null && busy !== 'edit')}
-                  onClick={() => void decide('edit')}
+                  icon={X}
+                  loading={busy === 'reject'}
+                  disabled={busy !== null && busy !== 'reject'}
+                  onClick={() => void decide('reject')}
                 >
-                  {t('autoreply.records.sendEdited')}
+                  {t('autoreply.records.ignore')}
                 </Button>
-              ) : (
                 <Button
-                  variant={primary ? 'primary' : 'outline'}
+                  variant="outline"
                   size="sm"
                   icon={Check}
                   loading={busy === 'approve'}
@@ -140,89 +225,66 @@ export function RecordRow({
                 >
                   {t('autoreply.records.confirmSend')}
                 </Button>
+              </div>
+            ) : null}
+            {countingDown ? (
+              <div className="mt-1 flex items-center gap-2">
+                {compact ? null : viewInline}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={X}
+                  loading={busy === 'reject'}
+                  disabled={busy !== null}
+                  onClick={() => void decide('reject')}
+                >
+                  {t('autoreply.records.cancelSend')}
+                </Button>
+              </div>
+            ) : null}
+            {record.jev ? <JevDecisionLine decision={record.jev} /> : null}
+            {record.error ? (
+              <span className="truncate text-micro text-danger" title={record.error}>
+                {record.error}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <span className="font-latin text-micro text-fg-3">{formatTime(record.at, now)}</span>
+            <span
+              className={cn(
+                'text-micro',
+                status.tone === 'ok'
+                  ? 'text-ok'
+                  : status.tone === 'warn'
+                    ? 'text-warn'
+                    : status.tone === 'danger'
+                      ? 'text-danger'
+                      : 'text-fg-3',
               )}
-            </div>
-          </div>
-        ) : (
-          <span className="flex min-w-0 items-center gap-1 text-caption text-fg-3">
-            <CornerDownRight size={11} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" />
-            <span className="min-w-0 truncate" title={record.replyText}>
-              {record.replyText}
+            >
+              {recordStatusLabel(record)}
             </span>
-          </span>
-        )}
-        {parked && compact ? (
-          <div className="mt-1 flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={X}
-              loading={busy === 'reject'}
-              disabled={busy !== null && busy !== 'reject'}
-              onClick={() => void decide('reject')}
-            >
-              {t('autoreply.records.ignore')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={Check}
-              loading={busy === 'approve'}
-              disabled={busy !== null && busy !== 'approve'}
-              onClick={() => void decide('approve')}
-            >
-              {t('autoreply.records.confirmSend')}
-            </Button>
           </div>
-        ) : null}
-        {countingDown ? (
-          <div className="mt-1 flex items-center gap-2">
-            {compact ? null : viewInline}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={X}
-              loading={busy === 'reject'}
-              disabled={busy !== null}
-              onClick={() => void decide('reject')}
-            >
-              {t('autoreply.records.cancelSend')}
-            </Button>
-          </div>
-        ) : null}
-        {record.error ? <span className="truncate text-micro text-danger">{record.error}</span> : null}
-      </div>
-      <div className="flex shrink-0 flex-col items-end gap-0.5">
-        <span className="font-latin text-micro text-fg-3">{formatTime(record.at, now)}</span>
-        <span
-          className={cn(
-            'text-micro',
-            status.tone === 'ok'
-              ? 'text-ok'
-              : status.tone === 'warn'
-                ? 'text-warn'
-                : status.tone === 'danger'
-                  ? 'text-danger'
-                  : 'text-fg-3',
-          )}
-        >
-          {recordStatusLabel(record)}
-        </span>
-      </div>
-      {!compact && !inlineActions && (onView || (onRecall && recallable)) ? (
-        <div className="hidden shrink-0 items-center gap-1 self-center group-hover:flex group-focus-within:flex">
-          {onView ? (
-            <Button variant="ghost" size="sm" icon={ExternalLink} onClick={() => onView(record)}>
-              {t('autoreply.records.viewOriginal')}
-            </Button>
-          ) : null}
-          {onRecall && recallable ? (
-            <Button variant="ghost" size="sm" icon={Undo2} onClick={() => onRecall(record)}>
-              {t('autoreply.records.recall')}
-            </Button>
+          {!compact && !inlineActions && (onView || (onRecall && recallable)) ? (
+            <div className="hidden shrink-0 items-center gap-1 self-center group-hover:flex group-focus-within:flex">
+              {onView ? (
+                <Button variant="ghost" size="sm" icon={ExternalLink} onClick={() => onView(record)}>
+                  {t('autoreply.records.viewOriginal')}
+                </Button>
+              ) : null}
+              {onRecall && recallable ? (
+                <Button variant="ghost" size="sm" icon={Undo2} onClick={() => onRecall(record)}>
+                  {t('autoreply.records.recall')}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
-      ) : null}
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItems items={menu} />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

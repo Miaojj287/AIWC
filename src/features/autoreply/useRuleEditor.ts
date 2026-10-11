@@ -7,6 +7,7 @@ import type { AutoReplyRule } from '@aiwc/protocol'
 import { useT } from '@/i18n'
 import { toast } from '@/kit'
 import { invoke, useInvoke } from '@/platform/hooks'
+import { warnIfAutoSendBlocked } from './autoSendPermissions'
 import { isRuleValid, newRule, rulesEqual, validateRule, type RuleErrors } from './ruleModel'
 
 export interface RuleEditor {
@@ -115,6 +116,7 @@ export function useRuleEditor(sessionId: string, sessionTitle: string): RuleEdit
             detail: enabled ? t('autoreply.rule.enabledToastDetail') : undefined,
           },
         )
+        if (enabled) void warnIfAutoSendBlocked()
       } catch (e) {
         setSaved(before)
         patch({ enabled: before.enabled })

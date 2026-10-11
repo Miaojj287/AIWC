@@ -41,11 +41,10 @@ export const office: Messages['office'] = {
     manual: 'You can also install it in a terminal and try again:',
     copyCommand: 'Copy command',
     commandWhat: 'Install command',
-    privacy: 'Credentials stay on this Mac in the official CLI. AIWC never reads or uploads them.',
   },
   push: {
-    created: 'Pushed {rows} rows to {platform} {noun}',
-    appended: 'Appended {rows} rows to {platform} {noun}',
+    created: 'Pushed {rows, plural, one {# row} other {# rows}} to {platform} {noun}',
+    appended: 'Appended {rows, plural, one {# row} other {# rows}} to {platform} {noun}',
     open: 'Open in {platform}',
     copyLink: 'Copy table link',
     linkWhat: 'Table link',
@@ -53,16 +52,16 @@ export const office: Messages['office'] = {
   approval: {
     push: 'The table contents will be sent to your authorized {platform} account and saved in your cloud space.',
     connect:
-      'Opens the {platform} authorization page in your browser; credentials stay in the official CLI on this Mac.',
-    tableMeta: '{rows} rows · {columns} columns',
+      'Opens the {platform} authorization page in your browser; credentials stay in the official CLI on this computer.',
+    tableMeta: '{rows, plural, one {# row} other {# rows}} · {columns, plural, one {# column} other {# columns}}',
     appendTo: 'Append to an existing table',
-    moreRows: '{n} more rows not shown; all are pushed',
-    moreColumns: '{n} more columns not shown',
+    moreRows: '{n, plural, one {# more row} other {# more rows}} not shown; all are pushed when you approve',
+    moreColumns: '{n, plural, one {# more column} other {# more columns}} not shown',
     listSeparator: ', ',
   },
   settings: {
     title: 'Office platforms',
-    help: 'Once connected, the agent can push tables to Feishu Base, DingTalk AI Table and WeCom Smartsheet. Every call goes through the platform’s official CLI.',
+    help: "Once connected, the Agent can push tables to Feishu Base, DingTalk AI Table and WeCom Smartsheet. Every call goes through the platform's official CLI.",
     rowDesc: {
       feishu: 'Base · official lark-cli',
       dingtalk: 'AI Table · official dws; an org admin must enable CLI access',
@@ -81,18 +80,16 @@ export const office: Messages['office'] = {
     refresh: 'Refresh status',
     disconnectTitle: 'Disconnect {platform}?',
     disconnectBody:
-      'Clears the login stored by the official CLI on this Mac, so the agent can no longer push to {platform}. Tables already pushed are not affected.',
+      'Clears the login stored by the official CLI on this computer, so the Agent can no longer push to {platform}. Tables already pushed are not affected.',
     disconnected: 'Disconnected {platform}',
     noLogout: 'The WeCom CLI cannot log out. To unbind, delete the smart bot in WeCom',
     loadFailed: 'Could not read office platform status',
     actionFailed: 'Action failed',
-    dataNote:
-      'Table contents are sent to a platform only when you ask the agent to push; chat history itself is never uploaded.',
     cliVersion: 'CLI {version}',
     dialogTitle: 'Connect {platform}',
     recent: 'Recent pushes',
-    recentEmpty: 'Nothing pushed yet. Ask the agent to “turn … into a table on Feishu”.',
-    rows: '{rows} rows',
+    recentEmpty: 'Nothing pushed yet',
+    rows: '{rows, plural, one {# row} other {# rows}}',
   },
   errors: {
     unknownPlatform: 'Unsupported office platform',

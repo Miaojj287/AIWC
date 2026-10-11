@@ -1,9 +1,9 @@
 /**
  * 最近运行 — one row per run: status, trigger, when, how long, how many tool calls; the agent's closing
- * summary; the calls the task's mode did not allow, with a 改为 X 并重跑 shortcut when a higher mode
- * would have; 打开对话 jumps to the run's thread in the Agent panel.
+ * summary; the files it produced (open in the workspace); the calls the task's mode did not allow, with a 改为 X
+ * 并重跑 shortcut when a higher mode would have; 打开对话 jumps to the run's thread in the Agent panel.
  */
-import { Check, MessageSquare, SkipForward, Square, X } from 'lucide-react'
+import { CalendarX, Check, FileText, MessageSquare, SkipForward, Square, Unplug, X } from 'lucide-react'
 import {
   permissionModeFor,
   type PermissionMode,
@@ -27,6 +27,7 @@ import {
 } from '@/kit'
 import { formatDateTime, formatDuration } from '@/platform/format'
 import { stopTask } from '../TaskList'
+import { RunRecovery } from './RunRecovery'
 
 export interface RunsCardProps {
   task: ScheduledTask
@@ -40,16 +41,24 @@ const STATUS_ICON: Record<Exclude<TaskRunStatus, 'running'>, { icon: IconCompone
   failed: { icon: X, className: 'bg-danger/14 text-danger' },
   cancelled: { icon: Square, className: 'bg-line-8 text-fg-3' },
   skipped: { icon: SkipForward, className: 'bg-warn/14 text-warn' },
+  missed: { icon: CalendarX, className: 'bg-warn/14 text-warn' },
+  interrupted: { icon: Unplug, className: 'bg-line-8 text-fg-3' },
 }
 
 const MODE_RANK: Record<PermissionMode, number> = { ask: 0, bypass: 1, autopilot: 2 }
 
 export function RunsCard({ task, runs, busy, onRaiseMode }: RunsCardProps) {
   const t = useT()
-  if (!runs || runs.length === 0)
+  if (!runs)
     return (
       <Card>
-        <EmptyState compact variant={runs ? 'empty' : 'loading'} title={t('tasks.editor.runs.empty')} />
+        <EmptyState compact variant="loading" title={t('tasks.editor.runs.loading')} />
+      </Card>
+    )
+  if (runs.length === 0)
+    return (
+      <Card>
+        <EmptyState compact variant="empty" title={t('tasks.editor.runs.empty')} />
       </Card>
     )
   return (
@@ -88,15 +97,14 @@ function RunRow({ run, task, busy, onRaiseMode }: { run: TaskRun } & Omit<RunsCa
           ) : null}
           <span className="ml-auto text-micro text-fg-3">{meta}</span>
         </div>
+        <RunRecovery run={run} />
         {run.status === 'skipped' ? (
           <p className="text-caption text-fg-3">{t('tasks.editor.runs.skippedHint')}</p>
-        ) : run.status === 'failed' && run.error ? (
+        ) : run.status === 'failed' && run.error && !run.reason ? (
           <p className="text-caption text-danger">{run.error}</p>
         ) : null}
         {run.summary ? (
-          <p className="whitespace-pre-wrap text-caption text-fg-2" title={run.summary}>
-            {run.summary}
-          </p>
+          <p className="whitespace-pre-wrap break-words text-caption text-fg-2">{run.summary}</p>
         ) : run.status === 'done' ? (
           <p className="text-caption text-fg-3">{t('tasks.editor.runs.noSummary')}</p>
         ) : null}
@@ -114,6 +122,26 @@ function RunRow({ run, task, busy, onRaiseMode }: { run: TaskRun } & Omit<RunsCa
               ) : null}
             </div>
             {destructive ? <span className="text-micro text-fg-3">{t('tasks.editor.runs.deniedManual')}</span> : null}
+          </div>
+        ) : null}
+        {run.artifacts?.length ? (
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-micro text-fg-3">{t('tasks.editor.runs.filesTitle')}</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              {run.artifacts.map((file) => (
+                <Button
+                  key={file.path}
+                  variant="ghost"
+                  size="sm"
+                  icon={FileText}
+                  title={file.path}
+                  className="max-w-full"
+                  onClick={() => runCommand('tab.openFile', { path: file.path, title: file.title })}
+                >
+                  <span className="min-w-0 truncate">{file.title}</span>
+                </Button>
+              ))}
+            </div>
           </div>
         ) : null}
         <div className="flex items-center gap-1">

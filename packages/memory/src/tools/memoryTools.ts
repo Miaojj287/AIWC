@@ -1,6 +1,10 @@
 /**
  * memoryTools — remember / recall / forget / list_memories over services.memory (a MemoryStore).
  * Risk and profiles drive approval & mounting in the kernel; nothing here is channel specific.
+ *
+ * 设置 › 记忆 › 写入前需要确认 (`review.confirmBeforeWrite()`): `remember` does not write; it files the entry in the
+ * 待确认 list and the user accepts it there. The call then changes nothing on disk, so it is classified as a read
+ * and does not also ask for approval (one confirmation, not two).
  */
 import type { MemoryEntry, MemoryFile, MemoryStore, ToolContext, ToolResult } from '@aiwc/protocol'
 import { MEMORY_FILES, defineTool } from '@aiwc/protocol'
@@ -9,6 +13,7 @@ import { truncateChars } from '../internal/text'
 import { MEMORY_FILE_LABELS, usagePercent } from '../store/format'
 import { MemoryEntryMismatchError } from '../store/memoryStore'
 import type { AnyToolDefinition } from '../types'
+import type { AddProposalResult, NewMemoryProposal } from '../review/proposalStore'
 
 export interface MemoryToolServices {
   memory: MemoryStore
@@ -38,7 +43,17 @@ async function usageLine(memory: MemoryStore, file: MemoryFile): Promise<string>
 const ok = (content: string): ToolResult => ({ content })
 const fail = (content: string): ToolResult => ({ content, isError: true })
 
-export function memoryTools(): AnyToolDefinition<MemoryToolServices>[] {
+/** Host policy from 设置 › 记忆 (read per call, so a settings change applies to the next call). */
+export interface MemoryToolOptions {
+  review?: {
+    confirmBeforeWrite(): boolean
+    propose(input: NewMemoryProposal): Promise<AddProposalResult>
+  }
+}
+
+export function memoryTools(opts: MemoryToolOptions = {}): AnyToolDefinition<MemoryToolServices>[] {
+  const review = opts.review
+  const holdForReview = () => review?.confirmBeforeWrite() === true
   const remember = defineTool<{ file: 'MEMORY' | 'USER'; text: string }, MemoryToolServices>({
     name: 'remember',
     description:
@@ -50,13 +65,29 @@ export function memoryTools(): AnyToolDefinition<MemoryToolServices>[] {
     }),
     profiles: ['desktop-chat', 'cron'],
     risk: 'write',
+    classify: () => (holdForReview() ? { risk: 'read' } : { risk: 'write' }),
     parallelSafe: false,
     summarize: (i) => `写入 ${i.file}：${i.text.slice(0, 40)}${i.text.length > 40 ? '…' : ''}`,
     async execute(input, ctx) {
       const { memory } = ctx.services
-      const r = await memory.addEntry(input.file, input.text, { source: 'agent' })
+      if (review && holdForReview()) {
+        const p = await review.propose({ file: input.file, text: input.text, origin: 'agent', threadId: ctx.threadId })
+        if (p.ok)
+          return ok(
+            '用户开启了「写入前需要确认」：这条记忆已放进待确认列表，用户在「设置 › 记忆」确认后才会写入。不要重复提交，可以告诉用户去确认。',
+          )
+        if (p.reason === 'duplicate') return ok('待确认列表里已有内容相同的条目，无需重复提交。')
+        return fail('待确认列表已满：请告诉用户先到「设置 › 记忆」处理待确认的记忆，再继续记录。')
+      }
+      const r = await memory.addEntry(input.file, input.text, { source: 'agent', threadId: ctx.threadId })
       if (r.ok) return ok(`已写入 ${input.file}。${await usageLine(memory, input.file)}。这次写入已完成，不要重复。`)
       if (r.reason === 'duplicate') return ok(`${input.file} 里已有内容相同的条目，无需重复写入。`)
+      if (r.reason === 'over_count') {
+        const entries = await memory.entries(input.file)
+        return fail(
+          `${input.file} 已达到用户设置的条数上限（${entries.length} 条），没有写入。请先用 forget 删除过时或可合并的条目，再重试；或告诉用户可以在「设置 › 记忆」调高上限。\n${renderEntries(input.file, entries)}`,
+        )
+      }
       if (r.reason === 'blocked')
         return fail(`${input.file}.md 在磁盘上被外部修改，已自动备份；请用户到「设置 › 记忆」重新保存该文件后再写入。`)
       const entries = await memory.entries(input.file)

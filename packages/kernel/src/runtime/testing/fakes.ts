@@ -15,6 +15,7 @@ import {
   type ThreadSettings,
   type ToolResult,
   type ToolRisk,
+  type ToolSummary,
 } from '@aiwc/protocol'
 import type {
   ApprovalGate,
@@ -45,6 +46,8 @@ export interface FakeTool {
   name: string
   risk?: ToolRisk
   parallelSafe?: boolean
+  /** The summary as data (ToolDefinition.describe). */
+  describe?: (input: unknown) => ToolSummary
   execute: (input: unknown, ctx: { signal: AbortSignal; callId: string }) => Promise<ToolResult> | ToolResult
 }
 
@@ -73,6 +76,7 @@ export function createFakeRouterFactory(tools: FakeTool[]): FakeRouterFactory {
         risk: (name) => byName.get(name)?.risk ?? 'read',
         parallelSafe: (name) => byName.get(name)?.parallelSafe ?? false,
         summarize: (name, input) => `${name}(${JSON.stringify(input)})`,
+        describe: (name, input) => byName.get(name)?.describe?.(input),
         async dispatch(call, ctx: ToolDispatchContext): Promise<ToolDispatchOutcome> {
           const started = Date.now()
           factory.dispatchLog.push(call.toolName)
@@ -142,7 +146,7 @@ export function createFakeApprovalGate(): ApprovalGate & { cancelled: ThreadId[]
   return {
     cancelled: [],
     decide: () => 'approved',
-    ask: async () => 'allow_once',
+    ask: async () => ({ decision: 'allow_once' }),
     resolve: () => true,
     cancelAll(threadId) {
       this.cancelled.push(threadId)
@@ -262,7 +266,7 @@ export function createMemoryRolloutStore(opts: { rewrite?: boolean } = {}): Memo
       for (const t of threads.values()) {
         if (opts?.channel && t.meta.origin.channel !== opts.channel) continue
         if (opts?.excludeProfiles?.includes(t.meta.settings.profile)) continue
-        if (t.meta.archived && !opts?.includeArchived) continue
+        if (opts?.archivedOnly ? !t.meta.archived : t.meta.archived && !opts?.includeArchived) continue
         if (opts?.query && !t.meta.title.includes(opts.query)) continue
         const items = store.itemsOf(t.meta.threadId)
         out.push({

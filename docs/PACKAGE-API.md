@@ -71,8 +71,8 @@ export function substrateTools(): ToolDefinition<any, { substrate: SubstrateServ
 ```ts
 export function createMemoryStore(opts: { dir: string; limits?: Partial<Record<MemoryFile, number>> }): MemoryStore
 export function createRelationshipStore(opts: { dir: string }): RelationshipStore
-export function createDiaryStore(opts: { dir: string }): DiaryStore
-export function createDiaryPipeline(deps: { substrate: SubstrateService; memory: MemoryStore; diaries: DiaryStore; model: () => Promise<ModelClient>; rolloutSearch?: RolloutStore['search']; schedule: () => { enabled: boolean; hour: number; customPrompt?: string } }): DiaryPipeline & { start(): void; stop(): void }
+export function createTodoStore(opts: { dir: string; now?: () => Millis; logger?: Logger }): TodoStore
+export function createTodoScanner(deps: { substrate: SubstrateService; store: TodoStore; model: (sel?: ModelSelection) => Promise<ModelClient>; config: () => TodoConfig; onScanned?; onProgress? }): { scan(opts?): Promise<TodoScanResult>; cancel(): boolean; status(): Promise<TodoStatus>; start(): void; reschedule(): void; stop(): void }
 export function memoryFragmentProvider(store: MemoryStore): FragmentProvider      // stable tier: frozen snapshot
 export function relationshipFragmentProvider(store: RelationshipStore): FragmentProvider  // turn tier: profile of the origin peer
 export function memoryTools(): ToolDefinition<any, { memory: MemoryStore }>[]     // remember / recall / forget / list_memories
@@ -107,8 +107,8 @@ export function createAutoReplyRecordStore(opts: { dbPath: string }): AutoReplyR
 
 ## electron/main（组合根导出给 IPC 层）
 
-- `electron/main/composition.ts`：`createApp()` 把上面所有 `create*` 接起来，返回 `{ kernel, substrate, memory, gateway, diary, config, secrets }`。
-- `electron/main/ipc/*.ts`：每个 `InvokeMap` 前缀一个文件（`app`, `config`, `ai`, `substrate`, `agent`, `memory`, `clone`, `autoreply`, `gateway`, `diary`, `file`）。
+- `electron/main/composition.ts`：`createApp()` 把上面所有 `create*` 接起来，返回 `{ kernel, substrate, memory, gateway, todo, config, secrets }`。
+- `electron/main/ipc/*.ts`：每个 `InvokeMap` 前缀一个文件（`app`, `config`, `ai`, `substrate`, `agent`, `memory`, `clone`, `autoreply`, `gateway`, `todo`, `file`）。
 - `electron/main/index.ts` 支持 `--smoke`：启动 → 窗口 ready → 渲染层发 `app:getInfo` 成功 → 退出码 0；15 秒内没完成退出码 1。
 
 ## 补充约定（构建期收敛）

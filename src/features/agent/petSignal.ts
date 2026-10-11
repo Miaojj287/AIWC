@@ -1,7 +1,8 @@
 /**
  * Agent → pet signal. The pet reflects the active thread: working, waiting for 二次确认, and how the
  * latest turn ended. "Just finished" is recorded from live streaming → idle transitions (a store
- * subscription), so opening an old thread never replays a stale 完成了.
+ * subscription), so opening an old thread never replays a stale 完成了. `fleet` adds the counts across all threads
+ * (petFleet.ts) for the readout beside the pet.
  */
 import { useEffect, useMemo } from 'react'
 import { create } from 'zustand'
@@ -9,6 +10,7 @@ import type { AgentPetSignal, PetReaction } from '@/features/pets'
 import { t, type MessageKey } from '@/i18n'
 import { useAgentStore } from './agentStore'
 import type { ThreadItem, ThreadViewState } from './model'
+import { useAgentPetFleet } from './petFleet'
 
 export interface TurnOutcome {
   turnId?: string
@@ -105,6 +107,7 @@ export function useAgentPetSignal(): AgentPetSignal {
   const threadId = useAgentStore((s) => s.activeThreadId)
   const view = useAgentStore((s) => (s.activeThreadId ? s.views[s.activeThreadId] : undefined))
   const reaction = usePetReactionStore((s) => (threadId ? s.reactions[threadId] : undefined))
+  const fleet = useAgentPetFleet()
   return useMemo(
     () => ({
       threadId: threadId ?? undefined,
@@ -112,8 +115,9 @@ export function useAgentPetSignal(): AgentPetSignal {
       approval: view?.pendingApprovals[0]?.summary,
       activity: runningActivity(view),
       reaction,
+      fleet,
     }),
-    [threadId, view, reaction],
+    [threadId, view, reaction, fleet],
   )
 }
 

@@ -5,6 +5,8 @@
  */
 import { create } from 'zustand'
 import {
+  MAX_QUOTED_MESSAGES,
+  newClientInputId,
   newThreadId,
   type ApprovalDecision,
   type ApprovalId,
@@ -13,6 +15,7 @@ import {
   type Mention,
   type Op,
   type SkillSummary,
+  type ThreadExportOptions,
   type ThreadId,
   type ThreadSettings,
   type ThreadSummary,
@@ -24,7 +27,10 @@ import { getBridge } from '@/platform/bridge'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
 import { useShellStore } from '@/shell/shellStore'
-import { errorMessage, sortThreads, threadSettingsFromConfig } from './agentStoreSupport'
+import { errorMessage, sortThreads, THREAD_PAGE, threadSettingsFromConfig } from './agentStoreSupport'
+import { createEventHandler } from './agentEvents'
+import { conversationInitialState, createConversationOps, type ConversationState } from './agentConversationOps'
+import { createThreadOps, type StoreContext } from './agentThreadOps'
 import { activeTabContextRef, mentionFromContextRef, type ContextRef } from './contextRef'
 import { addMention, buildUserInput } from './mentions'
 import {
@@ -32,16 +38,19 @@ import {
   emptyDraft,
   isUntitledTitle,
   SCRATCH_DRAFT_KEY,
-  usageRatio,
-  USAGE_WARN_RATIO,
+  type ApprovalExtra,
   type ComposerDraft,
   type ThreadViewState,
 } from './model'
-import { findUserInput, reduceEvent, viewFromHistory } from './reducer'
+import { addPendingInput, sendModeFor, withoutPendingInput } from './pendingInputs'
+import { mergeRestoredDraft } from './restoreInput'
+import { reduceEvent } from './reducer'
+import { mergeLoadedView } from './threadLoad'
+import { clearSavedTabs, readSavedTabs, settleRestoredTabs, watchOpenTabs } from './threadRestore'
 
 export type ModelOption = InvokeRes<'agent:listModels'>[number]
 
-export interface AgentState {
+export interface AgentState extends ConversationState {
   /** Desktop threads, pinned first then most recent. */
   threads: ThreadSummary[]
   /** Threads shown as tabs in the panel strip (subset of `threads`). */
@@ -55,12 +64,23 @@ export interface AgentState {
   hydrated: boolean
   hydrating: boolean
   loadError?: string
+  /** The last history page was full: there may be older threads (loadMoreThreads). */
+  hasMoreThreads: boolean
+  loadingMoreThreads: boolean
+  /** History rows fetched so far: the offset of the next page. */
+  threadsOffset: number
   models: ModelOption[]
   skills: SkillSummary[]
   /** Mirrors the panel's collapsed prop so events can raise the unread dot. */
   collapsed: boolean
 
   hydrate(): Promise<void>
+  /** Next page of the history (older threads). */
+  loadMoreThreads(): Promise<void>
+  /** Open a thread scrolled to one of its items (a search hit). */
+  revealItem(threadId: ThreadId, itemId: string): void
+  /** The transcript scrolled to the revealed item (or gave up): forget the request. */
+  clearFocusItem(threadId: ThreadId): void
   loadThread(threadId: ThreadId): Promise<void>
   loadModels(): Promise<void>
   loadSkills(): Promise<void>
@@ -81,17 +101,22 @@ export interface AgentState {
    * tab (its context chip first, then the scratch mentions) and sends it.
    */
   sendDraft(): Promise<void>
-  /** 重试 / 重新生成: resubmit the user input of a turn. */
-  retryTurn(threadId: ThreadId, turnId?: string): Promise<void>
   interrupt(threadId: ThreadId): Promise<void>
-  resolveApproval(threadId: ThreadId, approvalId: ApprovalId, decision: ApprovalDecision): Promise<void>
+  resolveApproval(
+    threadId: ThreadId,
+    approvalId: ApprovalId,
+    decision: ApprovalDecision,
+    extra?: ApprovalExtra,
+  ): Promise<void>
   updateSettings(threadId: ThreadId, patch: Partial<ThreadSettings>): Promise<void>
-  compact(threadId: ThreadId): Promise<void>
+  /** `instructions`: what `/compact …` asked the summary to keep. */
+  compact(threadId: ThreadId, instructions?: string): Promise<void>
   clearContext(threadId: ThreadId): Promise<void>
   rename(threadId: ThreadId, title: string): Promise<void>
   pin(threadId: ThreadId, pinned: boolean): Promise<void>
   remove(threadId: ThreadId): Promise<void>
-  exportThread(threadId: ThreadId): Promise<void>
+  /** Options default to the privacy-safe export (SAFE_THREAD_EXPORT). */
+  exportThread(threadId: ThreadId, options?: ThreadExportOptions): Promise<void>
   /** Summary text of a compaction item (fetched from history when the live event only had an id). */
   loadCompactionSummary(threadId: ThreadId, itemId: string): Promise<string | undefined>
   setDraft(threadId: ThreadId, patch: Partial<ComposerDraft>): void
@@ -132,16 +157,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   const sending = new Set<ThreadId>()
   let ensuring: Promise<ThreadId> | undefined
   const summaryOf = (threadId: ThreadId) => get().threads.find((t) => t.threadId === threadId)
-
-  async function fetchSuggestions(threadId: ThreadId) {
-    const ref = summaryOf(threadId)?.contextRef
-    try {
-      const suggestions = await invoke('agent:suggestPrompts', { contextRef: ref })
-      patchView(threadId, (v) => (v.items.length === 0 ? { ...v, suggestions } : v))
-    } catch {
-      /* suggestions are optional */
-    }
-  }
+  const storeContext: StoreContext = { get, set, patchView, patchSummary, summaryOf }
 
   return {
     threads: [],
@@ -153,30 +169,44 @@ export const useAgentStore = create<AgentState>((set, get) => {
     focusSeq: 0,
     hydrated: false,
     hydrating: false,
+    hasMoreThreads: false,
+    loadingMoreThreads: false,
+    threadsOffset: 0,
     models: [],
     skills: [],
     collapsed: false,
+    ...createThreadOps(storeContext),
+    ...createConversationOps(storeContext),
+    handleEvent: createEventHandler(storeContext),
 
     async hydrate() {
       if ((get().hydrated && !get().loadError) || get().hydrating) return
       set({ hydrating: true, loadError: undefined })
       try {
-        const threads = sortThreads(await invoke('agent:listThreads', { channel: 'desktop', limit: 50 }))
+        const threads = sortThreads(await invoke('agent:listThreads', { channel: 'desktop', limit: THREAD_PAGE }))
         const first = threads[0]?.threadId ?? null
         const current = get()
         const merged = sortThreads([
           ...current.threads,
           ...threads.filter((t) => !current.threads.some((existing) => existing.threadId === t.threadId)),
         ])
-        const active = current.activeThreadId ?? first
+        // The tabs open at the last quit come back (threadRestore.ts); otherwise the newest thread.
+        const saved = current.openIds.length ? undefined : readSavedTabs()
+        const restored = saved?.openIds.length ? saved : undefined
+        const active = current.activeThreadId ?? restored?.activeThreadId ?? first
         set({
           threads: merged,
           hydrated: true,
           hydrating: false,
-          openIds: current.openIds.length ? current.openIds : first ? [first] : [],
+          hasMoreThreads: threads.length >= THREAD_PAGE,
+          threadsOffset: threads.length,
+          openIds: current.openIds.length ? current.openIds : (restored?.openIds ?? (first ? [first] : [])),
           activeThreadId: active,
         })
-        if (active && !get().views[active]?.loaded) void get().loadThread(active)
+        const missing = (restored?.openIds ?? []).filter((id) => !merged.some((x) => x.threadId === id))
+        if (active && !missing.includes(active) && !get().views[active]?.loaded) void get().loadThread(active)
+        if (missing.length) void settleRestoredTabs(useAgentStore, missing)
+        watchOpenTabs(useAgentStore)
       } catch (e) {
         set({ hydrating: false, hydrated: true, loadError: errorMessage(e) })
       }
@@ -189,20 +219,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (!get().views[threadId]) set((s) => ({ views: { ...s.views, [threadId]: createThreadView(threadId) } }))
       else patchView(threadId, (v) => ({ ...v, loaded: false, loadError: undefined }))
       try {
-        const { summary, items } = await invoke('agent:getThread', { threadId })
-        const live = get().views[threadId]
-        const view = viewFromHistory(threadId, items)
-        // keep live-only state that may have arrived while loading
-        const merged: ThreadViewState = live
-          ? {
-              ...view,
-              usage: live.usage ?? view.usage,
-              isStreaming: live.isStreaming,
-              currentTurnId: live.currentTurnId,
-              turnStartedAt: live.turnStartedAt,
-              pendingApprovals: live.pendingApprovals,
-            }
-          : view
+        const { summary, ...loaded } = await invoke('agent:getThread', { threadId })
+        const merged = mergeLoadedView(threadId, loaded, get().views[threadId])
         set((s) => ({
           views: { ...s.views, [threadId]: merged },
           threads: sortThreads(
@@ -213,7 +231,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
               : [...s.threads, summary],
           ),
         }))
-        if (merged.items.length === 0) void fetchSuggestions(threadId)
       } catch (e) {
         patchView(threadId, (v) => ({ ...v, loaded: true, loadError: errorMessage(e) }))
       }
@@ -289,7 +306,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const summary: ThreadSummary = {
         threadId,
         title: '',
-        origin: { channel: 'desktop' },
+        // The chip is stored with the thread (origin.contextRef), so it survives a restart.
+        origin: { channel: 'desktop', ...(contextRef ? { contextRef } : {}) },
         settings,
         createdAt: now,
         updatedAt: now,
@@ -308,7 +326,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
         focusSeq: opts.focus === false ? s.focusSeq : s.focusSeq + 1,
       }))
       set((s) => ({ localIds: [...s.localIds, threadId] }))
-      void fetchSuggestions(threadId)
       return threadId
     },
 
@@ -325,12 +342,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     async send(threadId, input) {
       const draft = input ?? get().drafts[threadId] ?? emptyDraft()
-      const userInput = buildUserInput(draft.text, draft.mentions)
+      const userInput = buildUserInput(draft.text, draft.mentions, draft.attachments)
       if (!userInput || sending.has(threadId)) return
       sending.add(threadId)
-      const view = get().views[threadId]
+      const mode = sendModeFor(get().views[threadId])
+      const clientInputId = newClientInputId()
       if (!input) set((s) => ({ drafts: { ...s.drafts, [threadId]: emptyDraft() } }))
-      patchView(threadId, (v) => ({ ...v, suggestions: undefined }))
+      // Shown at once (as the turn's prompt, or as a steer waiting for the current step) until item.user records it.
+      const pending = { clientInputId, ...userInput, mode, createdAt: Date.now() }
+      patchView(threadId, (v) => addPendingInput(v, pending))
       try {
         if (get().localIds.includes(threadId)) {
           const summary = summaryOf(threadId)!
@@ -345,22 +365,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
               t('agent.thread.attachmentTitle')
             : thread.title,
         }))
-        await submit({ type: 'turn.start', threadId, input: userInput, mode: view?.isStreaming ? 'steer' : 'start' })
+        await submit({ type: 'turn.start', threadId, input: userInput, mode, clientInputId })
         patchSummary(threadId, (t) => ({ ...t, updatedAt: Date.now() }))
       } catch (e) {
-        set((s) => {
-          const current = s.drafts[threadId] ?? emptyDraft()
-          const mentions = current.mentions.reduce((list, mention) => addMention(list, mention), draft.mentions)
-          return {
-            drafts: {
-              ...s.drafts,
-              [threadId]: {
-                text: current.text ? [draft.text, current.text].filter(Boolean).join('\n\n') : draft.text,
-                mentions,
-              },
-            },
-          }
-        })
+        patchView(threadId, (v) => ({ ...v, pendingInputs: withoutPendingInput(v.pendingInputs, clientInputId) }))
+        set((s) => ({ drafts: { ...s.drafts, [threadId]: mergeRestoredDraft(s.drafts[threadId], draft) } }))
         toast.error(t('agent.toast.sendFailed', { detail: errorMessage(e) }))
       } finally {
         sending.delete(threadId)
@@ -371,7 +380,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const { activeThreadId, openIds } = get()
       if (activeThreadId && openIds.includes(activeThreadId)) return get().send(activeThreadId)
       const scratch = get().drafts[SCRATCH_DRAFT_KEY] ?? emptyDraft()
-      if (!buildUserInput(scratch.text, scratch.mentions)) return
+      if (!buildUserInput(scratch.text, scratch.mentions, scratch.attachments)) return
       // createThread already toasts on failure; the scratch draft stays where it is
       const threadId = await get()
         .createThread({ contextRef: activeTabContextRef() })
@@ -381,18 +390,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const seeded = s.drafts[threadId] ?? emptyDraft()
         const mentions = scratch.mentions.reduce((list, m) => addMention(list, m), seeded.mentions)
         return {
-          drafts: { ...s.drafts, [threadId]: { text: scratch.text, mentions }, [SCRATCH_DRAFT_KEY]: emptyDraft() },
+          drafts: {
+            ...s.drafts,
+            [threadId]: { text: scratch.text, mentions, attachments: scratch.attachments },
+            [SCRATCH_DRAFT_KEY]: emptyDraft(),
+          },
         }
       })
       await get().send(threadId)
-    },
-
-    async retryTurn(threadId, turnId) {
-      const view = get().views[threadId]
-      const user = view ? (findUserInput(view.items, turnId as never) ?? findUserInput(view.items)) : undefined
-      if (!user) return
-      const text = user.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
-      await get().send(threadId, { text, mentions: user.mentions })
     },
 
     async interrupt(threadId) {
@@ -403,11 +408,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
     },
 
-    async resolveApproval(threadId, approvalId, decision) {
+    async resolveApproval(threadId, approvalId, decision, extra) {
       // optimistic: the popover closes at once, the kernel's approval.resolved is then a no-op
       patchView(threadId, (v) => reduceEvent(v, { type: 'approval.resolved', threadId, approvalId, decision }))
       try {
-        await submit({ type: 'approval.resolve', threadId, approvalId, decision })
+        await submit({ type: 'approval.resolve', threadId, approvalId, decision, ...extra })
       } catch (e) {
         toast.error(t('agent.toast.approvalFailed', { detail: errorMessage(e) }))
       }
@@ -423,10 +428,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
     },
 
-    async compact(threadId) {
+    async compact(threadId, instructions) {
       if (get().localIds.includes(threadId)) return
       try {
-        await submit({ type: 'thread.compact', threadId })
+        await submit({ type: 'thread.compact', threadId, ...(instructions ? { instructions } : {}) })
       } catch (e) {
         toast.error(t('agent.toast.compactFailed', { detail: errorMessage(e) }))
       }
@@ -435,102 +440,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
     async clearContext(threadId) {
       const previous = get().views[threadId]
       patchView(threadId, (v) => createThreadView(threadId, { loaded: true, usage: v.usage }))
-      if (get().localIds.includes(threadId)) {
-        void fetchSuggestions(threadId)
-        return
-      }
+      if (get().localIds.includes(threadId)) return
       try {
         await submit({ type: 'thread.clear', threadId })
         toast.success(t('agent.toast.cleared'))
-        void fetchSuggestions(threadId)
       } catch (e) {
         if (previous) set((s) => ({ views: { ...s.views, [threadId]: previous } }))
         toast.error(t('agent.toast.clearFailed', { detail: errorMessage(e) }))
-      }
-    },
-
-    async rename(threadId, title) {
-      const trimmed = title.trim()
-      if (!trimmed) return
-      const before = summaryOf(threadId)?.title
-      patchSummary(threadId, (t) => ({ ...t, title: trimmed }))
-      if (get().localIds.includes(threadId)) {
-        patchSummary(threadId, (t) => ({ ...t, settings: { ...t.settings, title: trimmed } }))
-        return
-      }
-      try {
-        await invoke('agent:renameThread', { threadId, title: trimmed })
-      } catch (e) {
-        if (before !== undefined) patchSummary(threadId, (t) => ({ ...t, title: before }))
-        toast.error(t('agent.toast.renameFailed', { detail: errorMessage(e) }))
-      }
-    },
-
-    async pin(threadId, pinned) {
-      patchSummary(threadId, (t) => ({ ...t, pinned }))
-      if (get().localIds.includes(threadId)) return
-      try {
-        await invoke('agent:pinThread', { threadId, pinned })
-      } catch (e) {
-        patchSummary(threadId, (t) => ({ ...t, pinned: !pinned }))
-        toast.error(t('common.operationFailedDetail', { detail: errorMessage(e) }))
-      }
-    },
-
-    async remove(threadId) {
-      if (get().localIds.includes(threadId)) {
-        get().closeThread(threadId)
-        return
-      }
-      try {
-        await invoke('agent:deleteThread', { threadId })
-      } catch (e) {
-        toast.error(t('agent.toast.deleteFailed', { detail: errorMessage(e) }))
-        return
-      }
-      get().closeThread(threadId)
-      set((s) => {
-        const views = { ...s.views }
-        const drafts = { ...s.drafts }
-        delete views[threadId]
-        delete drafts[threadId]
-        return { threads: s.threads.filter((t) => t.threadId !== threadId), views, drafts }
-      })
-      toast.success(t('agent.toast.deleted'))
-    },
-
-    async exportThread(threadId) {
-      try {
-        const { path } = await invoke('agent:exportThread', { threadId })
-        toast.success(t('agent.toast.exported'), {
-          detail: path,
-          action: { label: t('agent.toast.showExport'), onClick: () => void invoke('file:reveal', { path }) },
-        })
-      } catch (e) {
-        toast.error(t('agent.toast.exportFailed', { detail: errorMessage(e) }))
-      }
-    },
-
-    async loadCompactionSummary(threadId, itemId) {
-      const view = get().views[threadId]
-      const known = view?.items.find(
-        (it) => it.kind === 'compaction' && (it.id === itemId || it.summaryItemId === itemId),
-      )
-      if (known?.kind === 'compaction' && known.summary) return known.summary
-      try {
-        const { items } = await invoke('agent:getThread', { threadId })
-        const found = items.find((h) => h.type === 'compaction_summary' && h.id === itemId)
-        const summary = found?.type === 'compaction_summary' ? found.summary : undefined
-        if (summary)
-          patchView(threadId, (v) => ({
-            ...v,
-            items: v.items.map((it) =>
-              it.kind === 'compaction' && it.summaryItemId === itemId ? { ...it, summary } : it,
-            ),
-          }))
-        return summary
-      } catch {
-        return undefined
       }
     },
 
@@ -558,79 +474,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
     },
 
-    handleEvent(e) {
-      const { threadId } = e
-      switch (e.type) {
-        case 'thread.created': {
-          if (e.origin.channel !== 'desktop' || summaryOf(threadId)) return
-          const now = Date.now()
-          set((s) => ({
-            threads: sortThreads([
-              {
-                threadId,
-                title: e.settings.title ?? '',
-                origin: e.origin,
-                settings: e.settings,
-                createdAt: now,
-                updatedAt: now,
-                pinned: false,
-              },
-              ...s.threads,
-            ]),
-          }))
-          return
-        }
-        case 'thread.settings':
-          patchSummary(threadId, (t) => ({ ...t, settings: e.settings }))
-          return
-        case 'thread.title':
-          patchSummary(threadId, (t) => ({ ...t, title: e.title }))
-          return
-        case 'memory.written':
-          toast.success(
-            t('agent.toast.memoryWritten', { count: e.count, file: `${e.file}${e.file.endsWith('.md') ? '' : '.md'}` }),
-            {
-              action: { label: t('common.view'), onClick: () => runCommand('tab.openSettings', { page: 'memory' }) },
-            },
-          )
-          return
-        default:
-          break
-      }
-
-      const view = get().views[threadId]
-      if (!view) return
-      const next = reduceEvent(view, e)
-      if (next !== view) set((s) => ({ views: { ...s.views, [threadId]: next } }))
-
-      if (e.type === 'turn.completed' || e.type === 'item.user')
-        patchSummary(threadId, (t) => ({ ...t, updatedAt: Date.now() }))
-
-      // side effects decided from the event, never from inside the reducer
-      if (e.type === 'tool.call' && e.status === 'done' && e.artifacts?.length && view.loaded) {
-        for (const a of e.artifacts)
-          if (a.kind === 'file' && a.path) runCommand('tab.openFile', { path: a.path, title: a.title })
-      }
-      if (e.type === 'context.usage' && usageRatio(e.usage) >= USAGE_WARN_RATIO && !view.usageWarned) {
-        patchView(threadId, (v) => ({ ...v, usageWarned: true }))
-        toast.warning(t('agent.toast.usageHigh', { percent: Math.round(usageRatio(e.usage) * 100) }), {
-          action: { label: t('agent.context.compact'), onClick: () => void get().compact(threadId) },
-        })
-      }
-      if (
-        get().collapsed &&
-        (e.type === 'text.end' || e.type === 'turn.completed' || e.type === 'approval.requested' || e.type === 'error')
-      ) {
-        useShellStore.getState().setAgentUnread(true)
-      }
-    },
-
     async quote(payload) {
       const threadId = await get().ensureActiveThread()
-      const label = payload.messageIds?.length
-        ? t('agent.thread.quotedMessages', { label: payload.label, n: payload.messageIds.length })
-        : payload.label
-      get().addMentionToDraft(threadId, { kind: payload.kind, id: payload.id, label })
+      // The ids go to the kernel with the turn: the host injects those messages' text (prompts/mentionFragments).
+      const messageIds = payload.messageIds?.slice(0, MAX_QUOTED_MESSAGES)
+      const { kind, id, label } = payload
+      get().addMentionToDraft(threadId, { kind, id, label, ...(messageIds?.length ? { messageIds } : {}) })
       get().requestFocus()
     },
 
@@ -648,7 +497,9 @@ export function __resetAgentStoreForTests(): void {
   unsubscribe?.()
   unsubscribe = undefined
   subscribed = false
+  clearSavedTabs()
   useAgentStore.setState({
+    ...conversationInitialState,
     threads: [],
     localIds: [],
     openIds: [],
@@ -659,6 +510,9 @@ export function __resetAgentStoreForTests(): void {
     hydrated: false,
     hydrating: false,
     loadError: undefined,
+    hasMoreThreads: false,
+    loadingMoreThreads: false,
+    threadsOffset: 0,
     models: [],
     skills: [],
     collapsed: false,

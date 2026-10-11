@@ -53,6 +53,8 @@ export const READ_PROFILES_NO_BOT: readonly ToolProfile[] = ['desktop-chat', 'cr
 // ---------------------------------------------------------------------------------------------
 
 export const MAX_TEXT_CHARS = 200
+/** The anchor message of get_context is shown in full up to this: it is how the model reads a clipped message whole. */
+export const MAX_ANCHOR_TEXT_CHARS = 2_000
 export const MAX_QUOTE_CHARS = 80
 export const MAX_SNIPPET_CHARS = 200
 
@@ -175,6 +177,12 @@ export interface CompactMessage {
   isSelf: boolean
   kind: MessageKind
   text: string
+  /**
+   * `text` shows only the beginning of the message: nothing past the cut may be quoted. `fullChars` is the length of
+   * the whole text; get_context with this message as the anchor returns it in full.
+   */
+  truncated?: true
+  fullChars?: number
   quote?: { senderName?: string; text: string }
   media?: { kind: WxMedia['kind']; fileName?: string; durationMs?: number; sizeBytes?: number; hasTranscript?: boolean }
 }
@@ -242,8 +250,10 @@ export function messageText(m: WxMessage, max = MAX_TEXT_CHARS): string {
 }
 
 /** Compact, bounded, anchor-carrying view of a message. Never includes media paths or bytes. */
-export function compactMessage(m: WxMessage): CompactMessage {
+export function compactMessage(m: WxMessage, maxText = MAX_TEXT_CHARS): CompactMessage {
   const anchor = anchorOf(m)
+  const text = messageText(m, maxText)
+  const full = messageText(m, Number.POSITIVE_INFINITY)
   const out: CompactMessage = {
     anchor,
     cite: citeOf(anchor),
@@ -251,7 +261,11 @@ export function compactMessage(m: WxMessage): CompactMessage {
     senderName: displaySender(m),
     isSelf: m.isSelf,
     kind: m.kind,
-    text: messageText(m),
+    text,
+  }
+  if (text !== full) {
+    out.truncated = true
+    out.fullChars = full.length
   }
   if (m.quote) {
     out.quote = { text: squash(m.quote.text, MAX_QUOTE_CHARS) }

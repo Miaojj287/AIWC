@@ -52,11 +52,10 @@ export function AccountCard() {
           icon={Folder}
           label={t('onboarding.account.pathLabel')}
           help={t('onboarding.account.pathHelp')}
-          hint={t('onboarding.account.pathHint')}
           status={pathStatus}
           htmlFor="ob-dbroot"
         />
-        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content/60 p-2">
+        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content p-2">
           <Input
             id="ob-dbroot"
             mono
@@ -74,7 +73,13 @@ export function AccountCard() {
           <Button variant="ghost" icon={FolderOpen} onClick={() => void s.browse()} disabled={s.detecting}>
             {t('onboarding.account.browse')}
           </Button>
-          <Button icon={s.dbRootError ? RefreshCw : Sparkles} loading={s.detecting} onClick={() => void s.detect()}>
+          {/* Primary only while there is no path yet; once one is filled in, re-detecting is a secondary action. */}
+          <Button
+            variant={s.dbRoot && !s.dbRootError ? 'outline' : 'primary'}
+            icon={s.dbRootError ? RefreshCw : Sparkles}
+            loading={s.detecting}
+            onClick={() => void s.detect()}
+          >
             {s.detecting
               ? t('onboarding.account.detecting')
               : s.dbRootError
@@ -115,7 +120,7 @@ export function AccountCard() {
           hint={t('onboarding.account.cacheHint')}
           htmlFor="ob-cache"
         />
-        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content/60 p-2">
+        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content p-2">
           <Input
             id="ob-cache"
             mono
@@ -147,20 +152,23 @@ export function AccountCard() {
           hint={
             s.accounts.length === 0 && s.dbRoot && !s.accountsLoading
               ? t('onboarding.account.noAccountsHint')
-              : t('onboarding.account.accountsFound', { n: s.accounts.length })
+              : undefined
           }
           status={
-            verified
-              ? { kind: 'success', text: t('onboarding.account.verified') }
-              : s.verifyState === 'failed'
-                ? { kind: 'error', text: t('onboarding.account.unverified') }
-                : s.wxid
-                  ? { kind: 'warning', text: t('onboarding.account.unverified') }
-                  : undefined
+            verified ? (
+              // Verification is the one watched moment of this page: the status enters instead of swapping.
+              <InlineHint kind="success" className="kit-enter">
+                {t('onboarding.account.verified')}
+              </InlineHint>
+            ) : s.verifyState === 'failed' ? (
+              { kind: 'error', text: t('onboarding.account.unverified') }
+            ) : s.wxid ? (
+              { kind: 'warning', text: t('onboarding.account.unverified') }
+            ) : undefined
           }
           htmlFor="ob-wxid"
         />
-        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content/60 p-2">
+        <div className="flex items-center gap-2 rounded-item border border-line-6 bg-content p-2">
           <Select
             id="ob-wxid"
             options={accountOptions}
@@ -216,14 +224,7 @@ export function AccountCard() {
           <InlineHint kind="error">{s.accountsError}</InlineHint>
         ) : s.verifyState === 'failed' ? (
           <InlineHint kind="error">{s.verifyError ?? t('onboarding.account.verifyMismatch')}</InlineHint>
-        ) : verified ? (
-          <InlineHint kind="success">
-            {t('onboarding.account.accountVerified')}
-            {s.accounts.find((a) => a.wxid === s.wxid)?.nickname
-              ? ` · ${s.accounts.find((a) => a.wxid === s.wxid)?.nickname}`
-              : ''}
-          </InlineHint>
-        ) : s.wxid ? (
+        ) : verified ? null : s.wxid ? (
           <InlineHint kind="warning">{t('onboarding.account.verifyToContinue')}</InlineHint>
         ) : s.accounts.length > 1 ? (
           <InlineHint kind="info">{t('onboarding.account.chooseOne', { n: s.accounts.length })}</InlineHint>

@@ -5,7 +5,7 @@
  */
 import { lstat, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import { t } from '../i18n'
 
 export interface AllowList {
@@ -20,6 +20,8 @@ export interface AllowList {
 }
 
 export interface AllowListOptions {
+  /** Account boundaries take precedence even over explicit directory grants. */
+  denied?: readonly string[] | (() => readonly string[])
   /** Injected for tests; defaults to os.homedir(). */
   home?: string
 }
@@ -65,11 +67,17 @@ export function createAllowList(initial: readonly string[], opts: AllowListOptio
     roots.add(normalise(dir))
     return true
   }
+  const denied = (filePath: string): boolean => {
+    const excluded = typeof opts.denied === 'function' ? opts.denied() : (opts.denied ?? [])
+    const fold = (value: string) =>
+      process.platform === 'win32' || process.platform === 'darwin' ? value.toLowerCase() : value
+    return isWithinRoots(fold(filePath), excluded.map(fold))
+  }
   for (const dir of initial) add(dir)
   return {
     roots: () => [...roots],
     addRoot: add,
-    isAllowed: (filePath) => isWithinRoots(filePath, [...roots]),
+    isAllowed: (filePath) => isWithinRoots(filePath, [...roots]) && !denied(filePath),
   }
 }
 
@@ -149,6 +157,52 @@ export async function resolveAllowedWriteTarget(
   }
 }
 
+/** `p` with the symlinks of its deepest existing ancestor resolved (the path itself need not exist). */
+async function realpathLoose(p: string, fs: AllowListFs): Promise<string> {
+  const missing: string[] = []
+  let dir = normalise(p)
+  for (;;) {
+    try {
+      return join(await fs.realpath(dir), ...missing)
+    } catch (e) {
+      if (!isEnoent(e)) throw e
+    }
+    const parent = dirname(dir)
+    if (parent === dir) return normalise(p)
+    missing.unshift(basename(dir))
+    dir = parent
+  }
+}
+
+/** macOS and Windows filesystems are case-insensitive by default: `Extensions.json` IS `extensions.json`. */
+const foldsCase = (platform: NodeJS.Platform): boolean => platform === 'darwin' || platform === 'win32'
+
+/**
+ * Refuse a renderer-driven write landing inside one of `protectedPaths` (paths.ts protectedDataPaths:
+ * config, keys, extensions.json, task definitions…): those stores change what the app runs or sends
+ * and have their own validated IPC. `targets` are the requested path and the resolved write target;
+ * each protected path is compared both as given and with its symlinks resolved, case-insensitively
+ * where the filesystem usually is.
+ */
+export async function assertNotProtectedWrite(
+  targets: readonly string[],
+  protectedPaths: readonly string[],
+  opts: { fs?: AllowListFs; platform?: NodeJS.Platform } = {},
+): Promise<void> {
+  const fs = opts.fs ?? nodeFs
+  const fold = foldsCase(opts.platform ?? process.platform) ? (s: string) => s.toLowerCase() : (s: string) => s
+  const guarded = new Set<string>()
+  for (const p of protectedPaths) {
+    if (!p) continue
+    guarded.add(fold(normalise(p)))
+    guarded.add(fold(await realpathLoose(p, fs)))
+  }
+  for (const target of targets) {
+    const folded = fold(normalise(target))
+    for (const g of guarded) if (isWithinRoot(folded, g)) throw denied()
+  }
+}
+
 /**
  * Parse `aiwc-media://…` into an absolute file path.
  *   aiwc-media:///Users/me/x.jpg         → /Users/me/x.jpg
@@ -209,7 +263,15 @@ const MIME: Record<string, string> = {
   '.md': 'text/markdown; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.xml': 'text/xml; charset=utf-8',
+  '.m4v': 'video/mp4',
+  '.flac': 'audio/flac',
+  '.opus': 'audio/ogg',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 }
 
 export function mediaTypeFor(filePath: string): string {

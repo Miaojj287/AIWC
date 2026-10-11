@@ -30,8 +30,12 @@ export function resolveCitation(ref: CitationRef): Promise<ResolvedCitation> {
   const message = remember(messages, `${ref.sessionId}|${ref.messageId}`, () =>
     invoke('substrate:getMessage', { sessionId: ref.sessionId, messageId: ref.messageId }),
   )
-  const session = remember(sessions, ref.sessionId, () => invoke('substrate:getSession', { id: ref.sessionId }))
-  return Promise.all([message, session]).then(([m, s]) => ({ message: m, session: s }))
+  return Promise.all([message, resolveSession(ref.sessionId)]).then(([m, s]) => ({ message: m, session: s }))
+}
+
+/** A chat by id (name, avatar, kind) through the same cache: citation chips and send previews share the lookups. */
+export function resolveSession(sessionId: string): Promise<WxSession | undefined> {
+  return remember(sessions, sessionId, () => invoke('substrate:getSession', { id: sessionId }))
 }
 
 /** Tests only. */

@@ -1,3 +1,27 @@
+import { z } from 'zod'
+
+/** Validated account selection for connection and credential staging. */
+export const AccountTargetSchema = z.strictObject({
+  wxid: z
+    .string()
+    .min(1)
+    .max(512)
+    .refine((value) => !/[\\/\0]/.test(value) && value !== '.' && value !== '..'),
+  cacheDir: z
+    .string()
+    .max(4096)
+    .refine((value) => !value.includes('\0'))
+    .optional(),
+  dbRoot: z
+    .string()
+    .min(1)
+    .max(4096)
+    .refine((value) => !value.includes('\0')),
+})
+
+/** Account connection and credential staging target. */
+export type AccountTarget = z.infer<typeof AccountTargetSchema>
+
 /** Shared, browser-safe parsing for manually pasted WeChat keys. Never include key material in errors. */
 export type WechatKeyKind = 'db_key' | 'image_xor' | 'image_aes'
 export type WechatKeyValidation = { ok: true; hex: string } | { ok: false; error: string }

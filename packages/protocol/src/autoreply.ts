@@ -8,8 +8,10 @@
  */
 import type { Millis } from './ids'
 import type { SessionSource } from './gateway'
+import type { JevDecision, JevRuleConfig } from './jev'
 
-export type ReplySource = 'fixed' | 'ai'
+/** 'jev' = the candidate replies of `jev` are chosen between by Jev (自动回复的 Jev（beta）回复方式); see jev.ts. */
+export type ReplySource = 'fixed' | 'ai' | 'jev'
 
 /**
  * How a rule's reply leaves the machine.
@@ -39,8 +41,10 @@ export interface AutoReplyRule {
   fixedText?: string
   /** source 'ai': the system prompt the reply is written under */
   prompt?: string
-  /** source 'ai': how many past messages of this chat the model sees */
+  /** source 'ai' / 'jev': how many past messages of this chat the model sees */
   historyCount: number
+  /** source 'jev': the candidates Jev chooses between, and how sure it must be. */
+  jev?: JevRuleConfig
   /** 'confirm' waits for the user's click, 'auto' counts down and sends. */
   sendMode: ReplySendMode
   updatedAt: Millis
@@ -67,6 +71,8 @@ export interface AutoReplyRecord {
   draftId?: string
   /** How the reply was to leave: 'confirm' needs a click, 'auto' counts down. */
   sendMode?: ReplySendMode
+  /** What Jev answered (source 'jev'): the pick, every option's probability, the outcome. */
+  jev?: JevDecision
 }
 
 export type DraftState = 'pending' | 'approved' | 'sending' | 'sent' | 'rejected' | 'expired' | 'failed'

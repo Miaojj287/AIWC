@@ -1,11 +1,19 @@
 import type { ThreadSummary } from '@aiwc/protocol'
-import type { ThreadRecord } from '@aiwc/kernel'
+import type { Kernel, ThreadRecord } from '@aiwc/kernel'
 import type { AppContext } from '../contracts'
-import { threadToMarkdown, writeExport } from '../services/exporter'
+import { SAFE_THREAD_EXPORT, THREAD_SEARCH_MARKS, ThreadExportOptionsSchema } from '@aiwc/protocol'
+import { writeExport } from '../services/exporter'
+import { renderThreadExport } from '../services/threadExport'
+import { safeUsername } from '../services/diagnostics'
+import { groupThreadHits, ROWS_PER_THREAD, searchLimit, searchQuery } from '../services/threadSearch'
 import { guardRendererOp } from './agentOpGuard'
 import type { Handle, HostBridge } from './register'
 // `tr`, not `t`: handlers below name their thread records `t`.
 import { t as tr } from '../i18n'
+
+/** A page of the conversation history (the renderer asks for the next page with `offset`). */
+const LIST_DEFAULT_LIMIT = 50
+const LIST_MAX_LIMIT = 200
 
 /** Placeholder title older builds stored for untitled threads — data persisted in rollouts, not copy. */
 // eslint-disable-next-line aiwc/no-hardcoded-cjk -- legacy sentinel value read from user data
@@ -20,41 +28,36 @@ export function toThreadSummary(r: ThreadRecord): ThreadSummary {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     pinned: r.pinned,
-    contextRef:
-      r.origin.channel === 'desktop' && r.origin.chatId
-        ? { kind: 'session', id: r.origin.chatId, label: r.title }
-        : undefined,
+    ...(r.archived ? { archived: true } : {}),
+    contextRef: contextRefOf(r),
   }
 }
 
-/** Starter prompts shown in an empty Agent thread. UI copy, not data. */
-export function suggestPrompts(kind: 'session' | 'file' | 'contact' | undefined): string[] {
-  switch (kind) {
-    case 'session':
-      return [
-        tr('main.agent.suggestions.sessionSummary'),
-        tr('main.agent.suggestions.sessionUnanswered'),
-        tr('main.agent.suggestions.sessionTopics'),
-      ]
-    case 'contact':
-      return [
-        tr('main.agent.suggestions.contactRelationship'),
-        tr('main.agent.suggestions.contactFollowUps'),
-        tr('main.agent.suggestions.contactDraftReply'),
-      ]
-    case 'file':
-      return [
-        tr('main.agent.suggestions.fileKeyPoints'),
-        tr('main.agent.suggestions.fileShareable'),
-        tr('main.agent.suggestions.fileTodos'),
-      ]
-    default:
-      return [
-        tr('main.agent.suggestions.generalUnanswered'),
-        tr('main.agent.suggestions.generalWeekly'),
-        tr('main.agent.suggestions.generalMeetings'),
-      ]
-  }
+/** The chip a desktop thread was opened on: stored in its origin; older threads only had a chat id. */
+function contextRefOf(r: ThreadRecord): ThreadSummary['contextRef'] {
+  if (r.origin.channel !== 'desktop') return undefined
+  const stored = r.origin.contextRef
+  if (stored) return { kind: stored.kind, id: stored.id, label: stored.label }
+  return r.origin.chatId ? { kind: 'session', id: r.origin.chatId, label: r.title } : undefined
+}
+
+/** A listed thread's summary; an untitled one is named after its first prompt (a history row needs a name). */
+export async function listedSummary(kernel: Pick<Kernel, 'getThread'>, r: ThreadRecord): Promise<ThreadSummary> {
+  if (r.title.trim() && r.title !== LEGACY_UNTITLED) return toThreadSummary(r)
+  const thread = await kernel.getThread(r.threadId)
+  const first = thread?.items.find((item) => item.type === 'user_message')
+  const title =
+    first?.type === 'user_message'
+      ? first.content
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .join(' ')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 24) ||
+        first.mentions[0]?.label ||
+        tr('main.agent.attachmentThread')
+      : tr('main.agent.threadRecord')
+  return toThreadSummary({ ...r, title })
 }
 
 export function registerAgentIpc(ctx: AppContext, _host: HostBridge, handle: Handle): void {
@@ -83,33 +86,37 @@ export function registerAgentIpc(ctx: AppContext, _host: HostBridge, handle: Han
       }
       throw new Error(verdict.message)
     }
-    await kernel.submit(verdict.op)
+    try {
+      await kernel.submit(verdict.op)
+    } catch (e) {
+      // The kernel's refusal codes become a sentence; anything else passes through (register.ts localizes it).
+      if ((e as { code?: unknown } | null)?.code === 'rollback_target_missing')
+        throw new Error(tr('main.agent.rollbackTargetMissing'), { cause: e })
+      throw e
+    }
   })
 
   handle('agent:listThreads', async (opts) => {
-    const records = await kernel.listThreads({ ...opts, limit: undefined })
-    const summaries = await Promise.all(
-      records
-        .filter((r) => r.itemCount > 0)
-        .map(async (r) => {
-          if (r.title.trim() && r.title !== LEGACY_UNTITLED) return toThreadSummary(r)
-          const thread = await kernel.getThread(r.threadId)
-          const first = thread?.items.find((item) => item.type === 'user_message')
-          const title =
-            first?.type === 'user_message'
-              ? first.content
-                  .map((part) => (part.type === 'text' ? part.text : ''))
-                  .join(' ')
-                  .trim()
-                  .replace(/\s+/g, ' ')
-                  .slice(0, 24) ||
-                first.mentions[0]?.label ||
-                tr('main.agent.attachmentThread')
-              : tr('main.agent.threadRecord')
-          return toThreadSummary({ ...r, title })
-        }),
-    )
-    return summaries.slice(0, opts?.limit ?? 50)
+    const records = await kernel.listThreads({
+      channel: opts?.channel,
+      query: opts?.query,
+      limit: Math.max(1, Math.min(LIST_MAX_LIMIT, Math.floor(opts?.limit ?? LIST_DEFAULT_LIMIT))),
+      offset: Math.max(0, Math.floor(opts?.offset ?? 0)),
+      nonEmpty: true,
+    })
+    return Promise.all(records.map((r) => listedSummary(kernel, r)))
+  })
+
+  handle('agent:searchThreads', async (req) => {
+    const query = searchQuery(req?.query)
+    if (!query) return []
+    const limit = searchLimit(req?.limit)
+    const hits = await kernel.searchThreads(query, {
+      channel: 'desktop',
+      limit: limit * ROWS_PER_THREAD,
+      marks: THREAD_SEARCH_MARKS,
+    })
+    return groupThreadHits(hits, limit)
   })
 
   handle('agent:getThread', async ({ threadId }) => {
@@ -129,7 +136,12 @@ export function registerAgentIpc(ctx: AppContext, _host: HostBridge, handle: Han
           first.mentions[0]?.label ||
           tr('main.agent.attachmentThread')
     }
-    return { summary, items: t.items }
+    return {
+      summary,
+      items: t.items,
+      running: t.running,
+      ...(t.pendingAsks?.length ? { pendingAsks: t.pendingAsks } : {}),
+    }
   })
 
   handle('agent:renameThread', ({ threadId, title }) =>
@@ -138,16 +150,14 @@ export function registerAgentIpc(ctx: AppContext, _host: HostBridge, handle: Han
   handle('agent:pinThread', ({ threadId, pinned }) => kernel.updateMeta(threadId, { pinned }))
   handle('agent:deleteThread', ({ threadId }) => kernel.removeThread(threadId))
 
-  handle('agent:exportThread', async ({ threadId }) => {
+  handle('agent:exportThread', async ({ threadId, options }) => {
+    // Anything missing or malformed falls back to the privacy-safe choice for that field.
+    const chosen = ThreadExportOptionsSchema.catch(SAFE_THREAD_EXPORT).parse(options ?? {})
     const t = await kernel.getThread(threadId)
     if (!t) throw new Error(tr('main.agent.threadNotFound'))
-    const path = writeExport(
-      ctx.paths.exportsDir,
-      t.record.title || 'agent-thread',
-      'md',
-      threadToMarkdown(t.record.title || tr('main.agent.exportTitle'), t.items),
-    )
-    return { path }
+    const title = t.record.title || tr('main.agent.exportTitle')
+    const out = renderThreadExport(title, t.items, chosen, { username: safeUsername() })
+    return { path: writeExport(ctx.paths.exportsDir, t.record.title || 'agent-thread', out.ext, out.content) }
   })
 
   handle('agent:listSkills', () =>
@@ -157,6 +167,4 @@ export function registerAgentIpc(ctx: AppContext, _host: HostBridge, handle: Han
   )
 
   handle('agent:listModels', () => ctx.models.list())
-
-  handle('agent:suggestPrompts', ({ contextRef }) => suggestPrompts(contextRef?.kind))
 }

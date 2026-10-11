@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MessageAnchor, SearchHit, SyncStatus, WxMessage } from '@aiwc/protocol'
-import { Button, DangerDialog, toast } from '@/kit'
+import { DangerDialog, toast } from '@/kit'
 import { useT } from '@/i18n'
 import { runCommand } from '@/app/commands'
 import { detectMac } from '@/app/shortcuts'
@@ -14,7 +14,7 @@ import type { TabRendererProps } from '@/workspace/tabRegistry'
 import { BottomBar, SearchBar, SelectionBar } from './ChatBars'
 import { ChatHeader } from './ChatHeader'
 import { ExportDialog } from './ExportDialog'
-import { Lightbox } from './Lightbox'
+import { Lightbox, type LightboxItem } from './Lightbox'
 import { MessageStream } from './MessageStream'
 import { SyncBar } from './SyncBar'
 import type { SenderOption } from './SenderFilter'
@@ -273,10 +273,9 @@ export function ChatTab({ tab, update }: TabRendererProps) {
   /* ---------------------------------------------------------------------------- dialogs */
   const [exportOpen, setExportOpen] = useState(false)
   const [exportMode, setExportMode] = useState<ExportRangeMode | undefined>()
-  const [deleteIds, setDeleteIds] = useState<string[] | null>(null)
   const [removeIndexOpen, setRemoveIndexOpen] = useState(false)
   const [removingIndex, setRemovingIndex] = useState(false)
-  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
+  const [lightbox, setLightbox] = useState<LightboxItem | null>(null)
 
   /* ---------------------------------------------------------------------------- actions */
   const title = session?.title ?? tab.title
@@ -359,8 +358,7 @@ export function ChatTab({ tab, update }: TabRendererProps) {
       onQuote: (m: WxMessage) => quote([m.id]),
       onToggleSelect: toggleSelect,
       onJumpToTime,
-      onDeleteLocal: (m: WxMessage) => setDeleteIds([m.id]),
-      onOpenImage: (src: string, alt: string) => setLightbox({ src, alt }),
+      onOpenImage: setLightbox,
     }),
     [onCopy, quote, toggleSelect, onJumpToTime],
   )
@@ -412,11 +410,11 @@ export function ChatTab({ tab, update }: TabRendererProps) {
         <SelectionBar
           count={selected.size}
           onQuote={() => quote([...selected])}
+          onCopy={() => void copySelection()}
           onExport={() => {
             setExportMode('selected')
             setExportOpen(true)
           }}
-          onDelete={() => setDeleteIds([...selected])}
           onCancel={clearSelection}
         />
       ) : null}
@@ -445,6 +443,7 @@ export function ChatTab({ tab, update }: TabRendererProps) {
         senderAvatars={new Map(members.map((m) => [m.id, m.src]))}
         mac={mac}
         filtered={isFiltered(filters)}
+        quoteSource={{ id: sessionId, label: title }}
         {...messageActions}
       />
       <BottomBar
@@ -454,7 +453,6 @@ export function ChatTab({ tab, update }: TabRendererProps) {
           setExportMode(undefined)
           setExportOpen(true)
         }}
-        onDelete={() => setDeleteIds(selected.size ? [...selected] : selectableIds(stream.messages))}
         onQuote={() => quote([...selected])}
         disabled={streamEmpty}
         selectedCount={selected.size}
@@ -471,26 +469,6 @@ export function ChatTab({ tab, update }: TabRendererProps) {
         totalCount={counts?.total ?? session?.indexedCount}
         initialMode={exportMode}
       />
-      <DangerDialog
-        open={deleteIds !== null}
-        onOpenChange={(o) => !o && setDeleteIds(null)}
-        title={t('chat.deleteDialog.title', { n: deleteIds?.length ?? 0 })}
-        description={t('chat.deleteDialog.description')}
-        confirmLabel={t('common.delete')}
-        onConfirm={() => {
-          // TODO(substrate owner): per-message local deletion has no IPC yet (substrate:removeIndex is per session).
-          setDeleteIds(null)
-          toast.info(t('chat.deleteDialog.unsupported'), { detail: t('chat.deleteDialog.unsupportedDetail') })
-        }}
-      >
-        {deleteIds && deleteIds.length > 0 ? (
-          <div className="flex justify-end">
-            <Button variant="link" size="sm" onClick={() => void copySelection()}>
-              {t('chat.deleteDialog.copyFirst')}
-            </Button>
-          </div>
-        ) : null}
-      </DangerDialog>
       <DangerDialog
         open={removeIndexOpen}
         onOpenChange={setRemoveIndexOpen}

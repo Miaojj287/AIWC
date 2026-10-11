@@ -122,7 +122,7 @@ describe('mock bridge', () => {
     const hits = await bridge.invoke('substrate:search', { query: '收到', limit: 10 })
     expect(hits.length).toBeGreaterThan(0)
     expect(hits.length).toBeLessThanOrEqual(10)
-    expect(hits[0]!.snippet).toContain('<b>收到</b>')
+    expect(hits[0]!.snippet).toContain('[收到]')
     expect(hits[0]!.source).toBe('fts')
     const overview = await bridge.invoke('substrate:stats', { metric: 'overview' })
     expect(overview.total).toBe(demoFixture.messages.filter((m) => m.kind !== 'system').length)
@@ -325,18 +325,21 @@ describe('mock bridge', () => {
     expect(budget.limitChars).toBeGreaterThan(budget.usedChars)
   })
 
-  it("generates a diary from the day's messages and tests models", async () => {
-    const day = new Date(NOW - 2 * 86_400_000)
-    const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-    const progress: number[] = []
-    const off = bridge.on('diary:progress', (p) => progress.push(p.fraction))
-    const entry = await bridge.invoke('diary:generate', { date })
+  it('keeps a checklist and scans only picked group chats once 每日待办 is on, and tests models', async () => {
+    const group = [...demoFixture.sessions].find((s) => s.kind === 'group')!
+    expect((await bridge.invoke('todo:scan', undefined)).failure).toBe('disabled')
+    await bridge.invoke('config:set', { todo: { enabled: true, sources: [{ id: group.id, title: group.title }] } })
+    const steps: string[] = []
+    const off = bridge.on('todo:progress', (p) => steps.push(p.step))
+    const result = await bridge.invoke('todo:scan', undefined)
     off()
-    expect(progress.at(-1)).toBe(1)
-    expect(entry.date).toBe(date)
-    expect(entry.cues.length).toBeGreaterThanOrEqual(3)
-    expect(entry.markdown).toContain('## 记忆线索')
-    expect(await bridge.invoke('diary:list', undefined)).toHaveLength(1)
+    expect(result).toMatchObject({ ok: true, scanned: 1 })
+    expect(steps).toEqual(['collect', 'summarize', 'save'])
+    const added = await bridge.invoke('todo:add', { text: '买牛奶' })
+    const checked = await bridge.invoke('todo:update', { id: added.id, done: true })
+    expect(checked.done).toBe(true)
+    expect(await bridge.invoke('todo:clearDone', undefined)).toEqual({ removed: 1 })
+    expect((await bridge.invoke('todo:list', undefined)).some((i) => i.id === added.id)).toBe(false)
     const provider = { id: 'p', kind: 'openai' as const, label: 'x', models: [] }
     expect((await bridge.invoke('ai:testModel', { provider, modelId: 'm' })).ok).toBe(true)
     expect(

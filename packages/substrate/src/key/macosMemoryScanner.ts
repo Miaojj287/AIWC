@@ -47,12 +47,18 @@ function parseHelperPayload(stdout: string): HelperPayload | null {
   }
 }
 
-async function runHelper(helper: string, args: string[], timeoutMs: number): Promise<HelperPayload | null> {
+async function runHelper(
+  helper: string,
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<HelperPayload | null> {
   try {
     const { stdout } = await execFileAsync(helper, args, {
       timeout: Math.max(10_000, timeoutMs),
       maxBuffer: 4 * 1024 * 1024,
       encoding: 'utf8',
+      signal,
     })
     return parseHelperPayload(stdout)
   } catch (error) {
@@ -94,11 +100,12 @@ export async function scanMacDbKey(
   sessionDbPath: string,
   nativeDir: string,
   timeoutMs = 25_000,
+  signal?: AbortSignal,
 ): Promise<MacScanResult> {
   const helper = helperPath(nativeDir)
   if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
   if (!Number.isInteger(pid) || pid <= 0) return { error: '未找到微信进程' }
-  const payload = await runHelper(helper, [String(pid), sessionDbPath], timeoutMs)
+  const payload = await runHelper(helper, [String(pid), sessionDbPath], timeoutMs, signal)
   const key = toKey(payload)
   if (key) return { key }
   // attachCode set (and not attached) means task_for_pid was denied → user must authorize / disable SIP.
@@ -117,12 +124,13 @@ export async function scanMacDbKeyFromDumps(
   sessionDbPath: string,
   nativeDir: string,
   timeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<MacScanResult> {
   const helper = helperPath(nativeDir)
   if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
   const dumpPath = crashDumpDir()
   if (!existsSync(dumpPath)) return {}
-  const payload = await runHelper(helper, ['--dump', dumpPath, sessionDbPath], timeoutMs)
+  const payload = await runHelper(helper, ['--dump', dumpPath, sessionDbPath], timeoutMs, signal)
   const key = toKey(payload)
   return key ? { key } : {}
 }
@@ -133,6 +141,7 @@ export async function scanMacImageAesKey(
   ciphertext: Buffer,
   nativeDir: string,
   timeoutMs = 30_000,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   const helper = helperPath(nativeDir)
   if (!helper || ciphertext.length < 16 || pid <= 0) return null
@@ -144,6 +153,7 @@ export async function scanMacImageAesKey(
         timeout: Math.max(10_000, timeoutMs),
         maxBuffer: 1024 * 1024,
         encoding: 'utf8',
+        signal,
       },
     )
     const payload = parseHelperPayload(stdout)
@@ -152,7 +162,7 @@ export async function scanMacImageAesKey(
       return Buffer.from(keyHex, 'hex').toString('ascii')
     }
   } catch {
-    // helper unavailable / timed out
+    // helper unavailable / timed out / aborted — the caller falls back to XOR-only
   }
   return null
 }
@@ -161,15 +171,44 @@ export async function scanMacImageAesKey(
 
 export interface MacHookCaptureResult {
   key?: string
-  /** helper error code (ATTACH_FAILED / PROCESS_NOT_FOUND / SCAN_FAILED / HOOK_FAILED / …). */
+  /**
+   * helper error code (ATTACH_FAILED / PROCESS_NOT_FOUND / SCAN_FAILED / HOOK_FAILED / …), or ours:
+   * PROCESS_EXITED (WeChat quit while the hook waited), ABORTED (cancelled), SPAWN_FAILED.
+   */
   code?: string
   error?: string
   /** true when the failure is a denied attach — the user must disable SIP / grant debugger access. */
   needsAuthorization?: boolean
 }
 
+export interface MacHookCaptureOptions {
+  /** How long the armed hook waits for a login before the helper gives up. */
+  timeoutMs?: number
+  signal?: AbortSignal
+  /** Fires once the hook is armed; `waitUntil` is the epoch-ms deadline for the user to log in. */
+  onArmed?: (waitUntil: number) => void
+  /** Liveness probe for the hooked process (injected in tests); default `process.kill(pid, 0)`. */
+  isProcessAlive?: (pid: number) => boolean
+  now?: () => number
+}
+
+/** How often the armed hook checks that WeChat is still running. */
+const HOOK_LIVENESS_POLL_MS = 1_000
+/** Grace after the helper's own deadline before we kill it. */
+const HOOK_KILL_GRACE_MS = 10_000
+
 function xkeyHelperPath(nativeDir: string): string | null {
   return resolveOptionalNative(nativeDir, 'wechat_xkey_helper', 'AIWC_WX_XKEY_HELPER_PATH')
+}
+
+/** `kill(pid, 0)`: ESRCH = gone; EPERM = alive but not ours (WeChat runs as the same user, still alive). */
+function defaultIsProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === 'EPERM'
+  }
 }
 
 /** Extract a 64-hex key from any JSON `{success,key}` fragment the helper prints. */
@@ -226,36 +265,62 @@ function mapHookError(code?: string, detail?: string): string {
  * installs a hook, and returns the key the next time the user logs in (or logs out then back in).
  *
  * It needs debugger access (SIP disabled, or the packaged app's debugger entitlement + Developer
- * Tools grant). `onStatus` fires with the interim messages so the UI can prompt the user to log in;
- * `hook installed` on the helper's stderr means it is armed and waiting.
+ * Tools grant). `onArmed` fires when the helper prints `hook installed` — from then on the user has
+ * to log in. The helper is killed when `signal` aborts, when WeChat quits while it waits (the user
+ * quit the app instead of logging out — the hooked process is gone, so waiting longer is pointless),
+ * or shortly after its own deadline.
  */
 export async function captureMacDbKeyViaHook(
   pid: number,
   nativeDir: string,
-  onStatus?: (message: string) => void,
-  timeoutMs = 60_000,
+  options: MacHookCaptureOptions = {},
 ): Promise<MacHookCaptureResult> {
   if (process.platform !== 'darwin') return { error: 'macOS only' }
   const helper = xkeyHelperPath(nativeDir)
   if (!helper) return { error: '缺少 wechat_xkey_helper' }
   if (!Number.isInteger(pid) || pid <= 0) return { code: 'PROCESS_NOT_FOUND', error: '未找到微信主进程' }
-  const waitMs = Math.max(timeoutMs, 30_000)
+  return runHookHelper(helper, pid, options)
+}
 
-  onStatus?.(`已找到微信进程 PID=${pid}，正在安装挂钩…`)
+/** Spawns the hook helper and supervises it (abort / liveness / deadline). Exported for tests. */
+export function runHookHelper(
+  helper: string,
+  pid: number,
+  options: MacHookCaptureOptions = {},
+): Promise<MacHookCaptureResult> {
+  const { signal, onArmed } = options
+  const isAlive = options.isProcessAlive ?? defaultIsProcessAlive
+  const now = options.now ?? Date.now
+  const waitMs = Math.max(options.timeoutMs ?? 60_000, 30_000)
+  if (signal?.aborted) return Promise.resolve({ code: 'ABORTED' })
+
   return new Promise<MacHookCaptureResult>((resolve) => {
     const child = spawn(helper, [String(pid), String(waitMs)], { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     let stderrBuf = ''
     let settled = false
+    /** Set when we stopped the helper ourselves, so its exit is reported as that reason. */
+    let stoppedFor: 'ABORTED' | 'PROCESS_EXITED' | undefined
+    const stop = (reason: 'ABORTED' | 'PROCESS_EXITED' | 'DEADLINE') => {
+      if (reason !== 'DEADLINE') stoppedFor ??= reason
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        // already gone
+      }
+    }
+    const onAbort = () => stop('ABORTED')
     const finish = (result: MacHookCaptureResult) => {
       if (settled) return
       settled = true
       clearTimeout(killTimer)
+      clearInterval(livenessTimer)
+      signal?.removeEventListener('abort', onAbort)
       resolve(result)
     }
     const onHelperLine = (line: string) => {
-      if (line.includes('hook installed')) onStatus?.('已准备就绪，现在登录微信，或退出登录后重新登录微信')
+      if (line.includes('hook installed')) onArmed?.(now() + waitMs)
     }
     child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString()
@@ -268,7 +333,9 @@ export async function captureMacDbKeyViaHook(
       stderrBuf = parts.pop() || ''
       for (const line of parts) onHelperLine(line.trim())
     })
-    child.on('error', (error) => finish({ error: error instanceof Error ? error.message : String(error) }))
+    child.on('error', (error) =>
+      finish({ code: 'SPAWN_FAILED', error: error instanceof Error ? error.message : String(error) }),
+    )
     child.on('close', () => {
       if (stderrBuf.trim()) onHelperLine(stderrBuf.trim())
       const parsed = parseHookResult(stdout || stderr)
@@ -276,16 +343,18 @@ export async function captureMacDbKeyViaHook(
         finish({ key: parsed.key })
         return
       }
+      if (stoppedFor) {
+        finish({ code: stoppedFor })
+        return
+      }
       const needsAuthorization = parsed.code === 'ATTACH_FAILED'
       finish({ code: parsed.code, needsAuthorization, error: mapHookError(parsed.code, parsed.detail) })
     })
-    const killTimer = setTimeout(() => {
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        // already gone
-      }
-    }, waitMs + 10_000)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const livenessTimer = setInterval(() => {
+      if (!isAlive(pid)) stop('PROCESS_EXITED')
+    }, HOOK_LIVENESS_POLL_MS)
+    const killTimer = setTimeout(() => stop('DEADLINE'), waitMs + HOOK_KILL_GRACE_MS)
   })
 }
 

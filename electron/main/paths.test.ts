@@ -2,7 +2,17 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createPaths, defaultAllowedRoots, ensureDirs, platformArchKey } from './paths'
+import { decryptedCopyDir } from '@aiwc/substrate'
+import {
+  createPaths,
+  defaultAllowedRoots,
+  ensureDirs,
+  extensionsFile,
+  platformArchKey,
+  protectedDataPaths,
+  resetMarkerFile,
+  substrateCacheDir,
+} from './paths'
 
 let dir: string
 beforeEach(() => {
@@ -64,7 +74,7 @@ describe('paths', () => {
       p.rolloutsDir,
       p.memoryDir,
       p.relationshipsDir,
-      p.diariesDir,
+      p.todoDir,
       p.skillsUserDir,
       p.skillsAgentDir,
       p.mediaCacheDir,
@@ -80,5 +90,77 @@ describe('paths', () => {
       '/Volumes/ext/cache',
     ])
     expect(defaultAllowedRoots(p, { cacheDir: p.cacheDir })).toEqual([p.dataRoot, p.cacheDir])
+  })
+
+  it('keeps the user data and the plaintext databases out of the shell tool, and the workspace in it', () => {
+    const p = createPaths({
+      userData: dir,
+      isPackaged: false,
+      resourcesPath: '/unused',
+      appPath: '/repo',
+      platform: 'darwin',
+      arch: 'arm64',
+    })
+    const protectedPaths = protectedDataPaths(p)
+
+    // Conversation history, memory, clone dossiers, todos (and old diaries), the key store and the channel token.
+    for (const secret of [
+      decryptedCopyDir(p.cacheDir),
+      p.secretsFile,
+      p.configFile,
+      p.mirrorDb,
+      p.indexDb,
+      p.recordsDb,
+      p.usageDb,
+      p.rolloutsDir,
+      p.memoryDir,
+      p.relationshipsDir,
+      p.todoDir,
+      p.legacyDiariesDir,
+      p.gatewayStateDir,
+      p.changesDir,
+      `${p.mirrorDb}-wal`,
+      `${p.usageDb}-shm`,
+      extensionsFile(p),
+      p.tasksDir,
+      p.mobileDir,
+      p.composerDraftsFile,
+      p.exportsDir,
+      p.logsDir,
+      resetMarkerFile(p),
+    ]) {
+      expect(protectedPaths).toContain(secret)
+    }
+    // Denying these would break the tool itself: the workspace is where it runs.
+    expect(protectedPaths).not.toContain(p.workspaceDir)
+    expect(protectedPaths).not.toContain(p.dataRoot)
+    // Everything is inside userData: the data root, or the reset marker right beside it.
+    expect(protectedPaths.every((entry) => entry.startsWith(dir))).toBe(true)
+    expect(resetMarkerFile(p)).toBe(join(dir, 'aiwc-reset.json'))
+  })
+
+  it('protects the plaintext copies where the engine writes them, including a custom cache dir', () => {
+    const p = createPaths({
+      userData: dir,
+      isPackaged: false,
+      resourcesPath: '/unused',
+      appPath: '/repo',
+      platform: 'darwin',
+      arch: 'arm64',
+    })
+    // Default: the engine gets <cache>/media, so the copies live in <cache>/media/wcdb-plain.
+    const engineDefault = substrateCacheDir(p, undefined)
+    expect(engineDefault).toBe(p.mediaCacheDir)
+    expect(protectedDataPaths(p)).toContain(join(p.cacheDir, 'media', 'wcdb-plain'))
+    expect(protectedDataPaths(p)).toContain(decryptedCopyDir(engineDefault))
+
+    // A custom cache dir moves the engine and the protected entry together; the old location stays denied.
+    const custom = join(dir, 'custom-cache')
+    const engineCustom = substrateCacheDir(p, custom)
+    const withCustom = protectedDataPaths(p, custom)
+    expect(engineCustom).toBe(custom)
+    expect(withCustom).toContain(join(custom, 'wcdb-plain'))
+    expect(withCustom).toContain(decryptedCopyDir(p.mediaCacheDir))
+    expect(new Set(withCustom).size).toBe(withCustom.length)
   })
 })

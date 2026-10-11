@@ -73,7 +73,7 @@ export function EmptyState({
         className={cn(
           'flex shrink-0 items-center justify-center rounded-card',
           meta.box,
-          compact ? 'size-9' : 'size-11',
+          compact ? 'size-9' : 'mb-2 size-14',
         )}
       >
         <Icon
@@ -83,10 +83,10 @@ export function EmptyState({
           className={meta.spin ? 'animate-spin' : undefined}
         />
       </div>
-      <div className={cn('font-medium text-fg', compact ? 'text-body' : 'text-bubble')}>{title}</div>
-      {description ? <div className="max-w-[320px] text-caption text-fg-3">{description}</div> : null}
+      <div className={cn('font-semibold text-fg', compact ? 'text-body' : 'text-title')}>{title}</div>
+      {description ? <div className="max-w-[320px] text-caption leading-5 text-fg-3">{description}</div> : null}
       {showActions ? (
-        <div className="mt-1 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
           {action ? (
             <Button
               variant={action.variant ?? meta.button}

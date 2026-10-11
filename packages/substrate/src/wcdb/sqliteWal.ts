@@ -49,10 +49,22 @@ export function walChecksum(data: Buffer, bigEndian: boolean, seed0: number, see
 }
 
 /**
- * Parse `walPath` and return the committed frames, or null when there is no usable WAL (missing,
- * empty, foreign page size, corrupt header, or no complete commit yet).
+ * Upper bound on the database size a commit in this WAL can legitimately claim: every page of the
+ * committed image lives either in the main file or in one of the WAL's frames. The commit size is a
+ * plain uint32 behind a non-cryptographic checksum, so without this bound a corrupt (or forged)
+ * header would have callers size their per-page bookkeeping off a number nobody ever wrote.
  */
-export function readWalSnapshot(walPath: string, pageSize: number): WalSnapshot | null {
+export function walPageCeiling(mainFileSize: number, walFileSize: number, pageSize: number): number {
+  const frames = Math.floor(Math.max(0, walFileSize - WAL_HEADER_SIZE) / (WAL_FRAME_HEADER_SIZE + pageSize))
+  return Math.floor(Math.max(0, mainFileSize) / pageSize) + frames
+}
+
+/**
+ * Parse `walPath` and return the committed frames, or null when there is no usable WAL (missing,
+ * empty, foreign page size, corrupt header, or no complete commit yet). Commits claiming more than
+ * `maxPages` end the chain, the same way a broken checksum does.
+ */
+export function readWalSnapshot(walPath: string, pageSize: number, maxPages: number): WalSnapshot | null {
   let size: number
   try {
     size = statSync(walPath).size
@@ -96,6 +108,7 @@ export function readWalSnapshot(walPath: string, pageSize: number): WalSnapshot 
       if (pageNumber < 1) break
       pending.set(pageNumber, { pageNumber, offset: at + WAL_FRAME_HEADER_SIZE })
       const committedSize = frame.readUInt32BE(4)
+      if (committedSize > maxPages) break
       if (committedSize > 0) {
         for (const [page, entry] of pending) frames.set(page, entry)
         pending.clear()

@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { WxMessage } from '@aiwc/protocol'
+import { onCommand } from '@/app/commands'
 import { clearToasts, getToasts } from '@/kit'
 import { invoke } from '@/platform/hooks'
 import { FileBody, ImageBody } from './MessageMedia'
@@ -45,4 +46,21 @@ it('plays sticker originals first and uses a local thumbnail if the original fai
   expect(img.getAttribute('src')).toBe('aiwc-media:///full.png')
   fireEvent.error(img)
   expect(img.getAttribute('src')).toBe('aiwc-media:///thumb.png')
+})
+
+it('previews a file attachment in the app from the staged copy (WeChat folders stay off the allow-list)', async () => {
+  vi.mocked(invoke).mockImplementationOnce(async () => ({
+    path: '/data/cache/previews/k/report.pdf',
+    fileName: 'report.pdf',
+  }))
+  const opened = vi.fn()
+  const off = onCommand('tab.openFile', opened)
+  const message = { id: 'f2', sessionId: 's', kind: 'file', media: { fileName: 'report.pdf' } } as WxMessage
+  render(<FileBody message={message} self={false} />)
+  fireEvent.click(screen.getByRole('button', { name: /report\.pdf/ }))
+  await waitFor(() =>
+    expect(opened).toHaveBeenCalledWith({ path: '/data/cache/previews/k/report.pdf', title: 'report.pdf' }),
+  )
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith('file:stageChatFile', { sessionId: 's', messageId: 'f2' })
+  off()
 })

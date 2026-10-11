@@ -54,12 +54,11 @@ export const chat: Messages['chat'] = {
     never: 'Not synced yet',
     syncedJustNow: 'Synced just now',
     syncedAgo: 'Synced {when}',
-    syncedAt: 'Last synced: {when}',
+    syncedAt: 'Last synced {when}',
     syncedDetail: 'Last synced {time} · Click to sync now',
     clickToSync: 'Click to sync now',
     progress: 'Sync progress',
-    countsSummary:
-      '{messages, plural, one {{messagesText} message} other {{messagesText} messages}} / {images, plural, one {{imagesText} image} other {{imagesText} images}} / {files, plural, one {{filesText} file} other {{filesText} files}} / {voices, plural, one {{voicesText} voice message} other {{voicesText} voice messages}}',
+    countsSummary: '{messages, plural, one {{messagesText} message} other {{messagesText} messages}}',
   },
   dateRange: {
     label: 'Date range',
@@ -147,6 +146,8 @@ export const chat: Messages['chat'] = {
     pause: 'Pause',
     transcribe: 'Transcribe',
     transcript: 'Transcript',
+    previewFile: 'Preview {name} in the app',
+    openFile: 'Open {name} in the default app',
   },
   lightbox: {
     media: 'Media',
@@ -241,16 +242,11 @@ export const chat: Messages['chat'] = {
     removedFromIndex: 'Removed "{title}" from the index',
     removeFailed: 'Remove failed: {error}',
   },
-  deleteDialog: {
-    title: '{n, plural, one {Delete # local record?} other {Delete # local records?}}',
-    description: "Only deletes AIWC's local index. Original messages in WeChat are unaffected. This can't be undone.",
-    unsupported: "Deleting single local records isn't supported yet",
-    unsupportedDetail: 'Use "Remove from index" in the chat menu to remove the whole chat',
-    copyFirst: 'Copy these messages first',
-  },
+  deleteUnsupported:
+    'Deleting single local records isn\'t supported yet. Use "Remove from index" in the chat menu to remove the whole chat.',
   removeIndexDialog: {
     title: 'Remove "{title}" from the index?',
     description:
-      'Deletes the local index and cache on this device. WeChat data is unaffected, and you can re-index later.',
+      'Deletes the local index and cache on this computer. WeChat data is unaffected, and you can re-index later.',
   },
 }

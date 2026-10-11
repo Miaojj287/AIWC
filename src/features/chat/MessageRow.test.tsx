@@ -20,7 +20,6 @@ it('renders pats as centered notices with no sender avatar or chat bubble', () =
       onQuote={noop}
       onToggleSelect={noop}
       onJumpToTime={noop}
-      onDeleteLocal={noop}
       onOpenImage={noop}
     />,
   )

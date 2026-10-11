@@ -3,14 +3,21 @@
  * API metadata takes precedence over these documented compatibility profiles.
  */
 import type { ModelCapabilities, ModelEntry, ProviderConfig, ReasoningEffort } from './config'
+import { compatProfileCapabilities } from './modelProfiles'
+
+/** Kind decides the request format; vendor / base URL pick the OpenAI-compatible dialect (modelProfiles.ts). */
+export type CapabilityProvider = Pick<ProviderConfig, 'kind'> & Partial<Pick<ProviderConfig, 'vendor' | 'baseUrl'>>
 
 export function modelCapabilities(
-  provider: Pick<ProviderConfig, 'kind'>,
+  provider: CapabilityProvider,
   model: Pick<ModelEntry, 'modelId' | 'capabilities'>,
 ): ModelCapabilities {
-  if (model.capabilities) return model.capabilities
+  // Stored capabilities from an older build that knew nothing about the model fall through to today's profiles.
+  if (model.capabilities && model.capabilities.source !== 'unknown') return model.capabilities
   const id = model.modelId.toLowerCase().replace(/^models\//, '')
   const c: ModelCapabilities = { reasoning: [], thinking: 'none', fast: false, temperature: false, source: 'unknown' }
+  if (provider.kind === 'openai-compatible' || provider.kind === 'ollama')
+    return compatProfileCapabilities(provider, model.modelId) ?? model.capabilities ?? c
   const levels: ReasoningEffort[] = ['low', 'medium', 'high']
   if (provider.kind === 'openai') {
     if (/^gpt-(4(?:\.|o|-)|3\.5)/.test(id)) Object.assign(c, { source: 'profile', temperature: true })
@@ -83,7 +90,7 @@ export function modelCapabilities(
   return c
 }
 
-export function validModelSettings(provider: Pick<ProviderConfig, 'kind'>, model: ModelEntry): ModelEntry {
+export function validModelSettings(provider: CapabilityProvider, model: ModelEntry): ModelEntry {
   const c = modelCapabilities(provider, model)
   return {
     ...model,
@@ -103,5 +110,26 @@ export function validModelSettings(provider: Pick<ProviderConfig, 'kind'>, model
       model.maxOutputTokens === undefined
         ? undefined
         : Math.min(model.maxOutputTokens, c.outputLimit ?? model.maxOutputTokens),
+  }
+}
+
+/** Context budget a new model starts with: its limit, capped (a 1M window is rarely worth the cost by default). */
+export const DEFAULT_CONTEXT_BUDGET = 128_000
+
+/**
+ * 智能配置 on add / discover: fill the context budget and image input from the model's capabilities. Values the
+ * user already set are kept (`keep`), so a re-sync never overrides an override.
+ */
+export function applyModelProfile(
+  provider: CapabilityProvider,
+  model: ModelEntry,
+  keep?: Pick<ModelEntry, 'contextWindow' | 'supportsVision'>,
+): ModelEntry {
+  const c = modelCapabilities(provider, model)
+  // Profile capabilities are not stored: they are recomputed per request, so a newer profile table applies.
+  return {
+    ...model,
+    contextWindow: keep?.contextWindow ?? Math.min(c.contextLimit ?? model.contextWindow, DEFAULT_CONTEXT_BUDGET),
+    supportsVision: keep?.supportsVision ?? c.vision ?? model.supportsVision,
   }
 }

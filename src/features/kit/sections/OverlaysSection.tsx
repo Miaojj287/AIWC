@@ -23,6 +23,7 @@ import {
   PopoverTrigger,
   ProgressDialog,
   Select,
+  TaskProgress,
   SkeletonListRows,
   type MenuSpec,
   type ProgressStep,
@@ -222,6 +223,29 @@ export function OverlaysSection() {
         >
           <SkeletonListRows rows={6} />
         </Drawer>
+      </Item>
+      <Item label="行内长任务 · TaskProgress（运行中 / 失败）">
+        <div className="flex w-[420px] flex-col gap-3">
+          <TaskProgress
+            state="running"
+            title="请重新登录微信"
+            hint="在微信中退出登录再登录，不要退出微信应用 · 剩余 1:42"
+            meta="0:38"
+            steps={STEPS}
+            onCancel={() => undefined}
+          />
+          <TaskProgress
+            state="failed"
+            title="未能获取数据库密钥"
+            steps={STEPS.map((s) => (s.status === 'doing' ? { ...s, status: 'failed' as const } : s))}
+            error="没有等到重新登录。重试后，在微信中退出登录再登录。"
+            actions={
+              <Button variant="outline" size="sm">
+                重试
+              </Button>
+            }
+          />
+        </div>
       </Item>
     </Section>
   )

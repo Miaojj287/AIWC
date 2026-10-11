@@ -32,7 +32,9 @@ export function paletteTokens(p: Palette): Record<string, string> {
     '--bg-overlay': mix(bg, surface, 0.7),
     '--fg': fg,
     '--fg-2': mix(bg, fg, 0.704 + strength * 0.1),
-    '--fg-3': mix(bg, fg, 0.5 + strength * 0.18),
+    // 0.62 at the light default (contrast 35) keeps 12px weak text ≥ 4.5:1 on every light surface; the dark default
+    // (contrast 81) lands where it always did.
+    '--fg-3': mix(bg, fg, 0.6 + strength * 0.06),
     '--accent': accent,
     '--accent-hover': mix(accent, fg, 0.12),
     '--accent-active': mix(accent, bg, 0.12),

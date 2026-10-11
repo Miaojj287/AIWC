@@ -45,7 +45,8 @@ export function skillTools(index: SkillIndexExt): AnyToolDefinition[] {
     parallelSafe: true,
     summarize: (i) => `查看技能 ${i.name}`,
     async execute(input) {
-      if (!index.get(input.name)) return err(`未找到技能：${input.name}`)
+      // Switched off in 设置 › 技能, or broken: the model may not load it (the index does not list it either).
+      if (!index.list().some((s) => s.name === input.name)) return err(`未找到技能：${input.name}`)
       try {
         return { content: await index.read(input.name) }
       } catch (e) {

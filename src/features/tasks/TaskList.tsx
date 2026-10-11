@@ -32,6 +32,7 @@ import {
   type MenuSpec,
 } from '@/kit'
 import { invoke } from '@/platform/hooks'
+import { listKeyNav } from '@/platform/listNavigation'
 import type { ObjectListProps } from '@/shell/objectListRegistry'
 import { useListCounts } from '@/shell/objectList/listHeaderContext'
 import { useShellStore } from '@/shell/shellStore'
@@ -62,7 +63,7 @@ export function TaskList({ query, activeObjectId }: ObjectListProps) {
   useListCounts(counts)
   const rows = useMemo(() => filterTasks(tasks, query, segment), [tasks, query, segment])
 
-  if (loading && !loaded) return <SkeletonListRows rows={5} className="px-2.5 py-2" />
+  if (loading && !loaded) return <SkeletonListRows rows={5} className="px-5 pt-2" />
   if (error && !loaded)
     return (
       <EmptyState
@@ -77,7 +78,12 @@ export function TaskList({ query, activeObjectId }: ObjectListProps) {
   return (
     <>
       <ScrollArea className="h-full">
-        <div className="flex flex-col gap-1 px-2 py-1.5" role="list" aria-label={t('tasks.list.ariaLabel')}>
+        <div
+          className="flex flex-col gap-1 px-2 py-1.5"
+          role="group"
+          aria-label={t('tasks.list.ariaLabel')}
+          onKeyDown={listKeyNav}
+        >
           <Button variant="outline" icon={Plus} className="w-full justify-start" onClick={() => openNewTask()}>
             {t('tasks.list.new')}
           </Button>
@@ -94,7 +100,6 @@ export function TaskList({ query, activeObjectId }: ObjectListProps) {
                 compact
                 variant="no-results"
                 title={query.trim() ? t('tasks.list.noMatch', { query }) : t('tasks.list.noneInSegment')}
-                description={segment !== 'all' ? t('tasks.list.switchToAllHint') : undefined}
                 action={
                   segment !== 'all' ? { label: t('tasks.list.viewAll'), onClick: () => setSegment(null) } : undefined
                 }
@@ -161,7 +166,11 @@ export async function runTaskNow(task: ScheduledTask, t: ReturnType<typeof useT>
 }
 
 export async function stopTask(task: ScheduledTask, t: ReturnType<typeof useT>): Promise<void> {
-  if (await invoke('task:cancel', { id: task.id })) toast.info(t('tasks.editor.toasts.stopped', { name: task.name }))
+  try {
+    if (await invoke('task:cancel', { id: task.id })) toast.info(t('tasks.editor.toasts.stopped', { name: task.name }))
+  } catch (e) {
+    toast.error(t('tasks.editor.toasts.stopFailed'), { detail: errorText(e) })
+  }
 }
 
 /** Shared by the list row and the editor's `···`: regular → cross-feature → danger (CLAUDE.md §4.2). */
@@ -213,19 +222,20 @@ function TaskRow({ task, selected, onDelete }: { task: ScheduledTask; selected: 
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <ListItem
-          role="listitem"
           leading={<TaskTile running={Boolean(task.running)} paused={!task.enabled} />}
           title={task.name}
           subtitle={
             <span
               className={cn(
                 'flex min-w-0 items-center gap-1.5',
-                status.kind === 'running' && 'text-accent',
-                status.kind === 'failed' && 'text-danger',
+                status.kind === 'running' && 'text-accent-ink',
+                status.kind === 'failed' && 'text-danger-ink',
               )}
             >
               {/* The schedule is short and identifies the row; the status is what gives when space runs out. */}
-              <span className="shrink-0 truncate max-w-[60%]">{describeSchedule(task.schedule, t)}</span>
+              <span className="max-w-[60%] min-w-0 shrink truncate" title={describeSchedule(task.schedule, t)}>
+                {describeSchedule(task.schedule, t)}
+              </span>
               <span aria-hidden className="shrink-0 text-fg-3/60">
                 ·
               </span>

@@ -9,7 +9,14 @@
  */
 import { z } from 'zod'
 import {
+  APPROVAL_REASON_MAX_CHARS,
+  checkAttachments,
+  COMPACT_INSTRUCTIONS_MAX_CHARS,
+  MAX_QUOTED_MESSAGES,
   PermissionModeSchema,
+  QUESTION_MAX_OPTIONS,
+  ReasoningEffortSchema,
+  type AttachmentPart,
   type ChannelKind,
   type Op,
   type ThreadId,
@@ -27,25 +34,56 @@ const PROFILES = ['desktop-chat', 'wechat-bot', 'cron', 'subagent', 'persona'] a
 const id = z.string().min(1).max(128)
 const shortText = z.string().max(2_000)
 
+const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/)
 const contentPart = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('text'), text: z.string() }),
-  z.strictObject({ type: z.literal('image'), mediaType: shortText, data: z.string(), name: shortText.optional() }),
-  z.strictObject({ type: z.literal('file'), mediaType: shortText, data: z.string(), name: shortText }),
+  z.strictObject({ type: z.literal('image'), mediaType: shortText, data: base64, name: shortText.optional() }),
+  z.strictObject({ type: z.literal('file'), mediaType: shortText, data: base64, name: shortText }),
 ])
 
 const mention = z.strictObject({
   kind: z.enum(['session', 'file', 'contact', 'memory']),
   id: shortText,
   label: shortText,
+  messageIds: z.array(id).max(MAX_QUOTED_MESSAGES).optional(),
 })
 
-const userInput = z.strictObject({ content: z.array(contentPart).min(1), mentions: z.array(mention) })
+// Attachment count / size limits are the composer's (checkAttachments); a renderer that skips them stops here.
+const userInput = z
+  .strictObject({ content: z.array(contentPart).min(1), mentions: z.array(mention) })
+  .superRefine((input, ctx) => {
+    const violation = checkAttachments(input.content.filter((p): p is AttachmentPart => p.type !== 'text'))
+    if (violation) ctx.addIssue({ code: 'custom', path: ['content'], message: violation.code })
+  })
 
-const origin = z.strictObject({ channel: z.enum(CHANNELS), chatId: shortText.optional(), peerId: shortText.optional() })
+/** An answer to `ask_user`: a numbered option, free text (其他), or no answer. */
+const questionAnswer = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('option'),
+    index: z
+      .number()
+      .int()
+      .min(0)
+      .max(QUESTION_MAX_OPTIONS - 1),
+    label: shortText,
+  }),
+  z.strictObject({ kind: z.literal('other'), text: z.string().trim().min(1).max(2_000) }),
+  z.strictObject({ kind: z.literal('dismissed') }),
+])
+
+const contextRef = z.strictObject({ kind: z.enum(['session', 'file', 'contact']), id: shortText, label: shortText })
+
+const origin = z.strictObject({
+  channel: z.enum(CHANNELS),
+  chatId: shortText.optional(),
+  peerId: shortText.optional(),
+  contextRef: contextRef.optional(),
+})
 
 const settingsFields = {
   permissionMode: PermissionModeSchema,
   model: z.strictObject({ providerId: shortText, modelId: shortText }).optional(),
+  reasoningEffort: ReasoningEffortSchema.nullable().optional(),
   profile: z.enum(PROFILES),
   allowAlways: z.array(shortText).max(200),
   title: shortText.optional(),
@@ -60,6 +98,7 @@ export const opSchema = z.discriminatedUnion('type', [
     threadId: id,
     input: userInput,
     mode: z.enum(['start', 'steer']).optional(),
+    clientInputId: z.string().min(1).max(64).optional(),
   }),
   z.strictObject({ type: z.literal('turn.interrupt'), threadId: id }),
   z.strictObject({
@@ -67,12 +106,24 @@ export const opSchema = z.discriminatedUnion('type', [
     threadId: id,
     approvalId: id,
     decision: z.enum(['allow_once', 'allow_always', 'deny']),
+    reason: z.string().max(APPROVAL_REASON_MAX_CHARS).optional(),
+    scope: z.enum(['thread', 'global']).optional(),
   }),
   z.strictObject({ type: z.literal('thread.settings'), threadId: id, patch: settingsPatch }),
-  z.strictObject({ type: z.literal('thread.compact'), threadId: id }),
-  z.strictObject({ type: z.literal('thread.rollback'), threadId: id, turns: z.number().int().min(1).max(1_000) }),
+  z.strictObject({
+    type: z.literal('thread.compact'),
+    threadId: id,
+    instructions: z.string().max(COMPACT_INSTRUCTIONS_MAX_CHARS).optional(),
+  }),
+  z.strictObject({
+    type: z.literal('thread.rollback'),
+    threadId: id,
+    turns: z.number().int().min(1).max(1_000),
+    fromItemId: id.optional(),
+  }),
   z.strictObject({ type: z.literal('thread.clear'), threadId: id }),
   z.strictObject({ type: z.literal('thread.shutdown'), threadId: id }),
+  z.strictObject({ type: z.literal('question.answer'), threadId: id, questionId: id, answer: questionAnswer }),
 ])
 
 /** Ops the renderer may send to any thread, including host-owned bot / cron threads. */

@@ -6,6 +6,7 @@
  */
 import type { ComponentType } from 'react'
 import type { Translator } from '@/i18n'
+import type { IconComponent } from '@/kit'
 import type { ApprovalRequest, ToolCallView } from './model'
 
 export interface ToolCardProps {
@@ -18,7 +19,20 @@ export interface ApprovalBodyProps {
   request: ApprovalRequest
 }
 
-const cards = new Map<string, ComponentType<ToolCardProps>>()
+/**
+ * `inline` cards stay visible under the row (a live authorization link must not hide behind a click); `detail` cards
+ * replace the input / output JSON when the row is expanded (a command and its output).
+ */
+export type ToolCardPlacement = 'inline' | 'detail'
+
+interface RegisteredCard {
+  card: ComponentType<ToolCardProps>
+  placement: ToolCardPlacement
+  /** The row's kind icon when the tool says more than its risk does (a terminal for `shell`); else the risk's icon. */
+  icon?: IconComponent
+}
+
+const cards = new Map<string, RegisteredCard>()
 const notes = new Map<string, ApprovalNote>()
 const bodies = new Map<string, ComponentType<ApprovalBodyProps>>()
 
@@ -34,15 +48,37 @@ export function approvalBodyFor(toolName: string): ComponentType<ApprovalBodyPro
   return bodies.get(toolName)
 }
 
-export function registerToolCard(toolName: string, card: ComponentType<ToolCardProps>): () => void {
-  cards.set(toolName, card)
+export function registerToolCard(
+  toolName: string,
+  card: ComponentType<ToolCardProps>,
+  placement: ToolCardPlacement = 'inline',
+  icon?: IconComponent,
+): () => void {
+  cards.set(toolName, { card, placement, icon })
   return () => {
-    if (cards.get(toolName) === card) cards.delete(toolName)
+    if (cards.get(toolName)?.card === card) cards.delete(toolName)
   }
 }
 
-export function toolCardFor(toolName: string): ComponentType<ToolCardProps> | undefined {
+export function toolCardFor(toolName: string): RegisteredCard | undefined {
   return cards.get(toolName)
+}
+
+const prefixIcons = new Map<string, IconComponent>()
+
+/** The kind icon for a family of tools named by prefix (`mcp__` → a plug), when no card names the tool itself. */
+export function registerToolIconPrefix(prefix: string, icon: IconComponent): () => void {
+  prefixIcons.set(prefix, icon)
+  return () => {
+    if (prefixIcons.get(prefix) === icon) prefixIcons.delete(prefix)
+  }
+}
+
+export function toolIconFor(toolName: string): IconComponent | undefined {
+  const own = cards.get(toolName)?.icon
+  if (own) return own
+  for (const [prefix, icon] of prefixIcons) if (toolName.startsWith(prefix)) return icon
+  return undefined
 }
 
 export function registerApprovalNote(toolName: string, note: ApprovalNote): () => void {

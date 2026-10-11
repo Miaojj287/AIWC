@@ -121,6 +121,24 @@ export function commandWords(args: readonly string[]): string[] {
   return words
 }
 
+/**
+ * Every word of an argv that is neither a flag nor a flag's value: `aitable --base-id b record delete`
+ * → `aitable record delete`. `commandWords` stops at the first flag, which is right for deciding what
+ * a command *is*, but wrong for deciding what it may do — a delete written after a global flag would
+ * never be seen. A token directly after a flag is that flag's value (`--title remove-old`), so it is
+ * skipped and cannot make a harmless value look like a verb.
+ */
+export function argWords(args: readonly string[]): string[] {
+  const words: string[] = []
+  for (const [i, arg] of args.entries()) {
+    if (arg.startsWith('-')) continue
+    const previous = args[i - 1]
+    if (previous?.startsWith('-') && !previous.includes('=')) continue
+    words.push(arg)
+  }
+  return words
+}
+
 export const startsWithFlag = (args: readonly string[]): boolean => Boolean(args[0]?.startsWith('-'))
 
 export const REFUSE_LEADING_FLAG = '把子命令写在 args 最前面，全局参数放在后面'
@@ -141,6 +159,8 @@ export function isDeleteVerb(word: string | undefined): boolean {
   return Boolean(word && DELETE_VERB.test(word))
 }
 
-export const REFUSE_CREDENTIALS = '账号授权和凭证管理走 office_connect；直接改 CLI 的 auth / config / profile 需要用户逐次确认'
+export const REFUSE_CREDENTIALS =
+  '账号授权和凭证管理走 office_connect；直接改 CLI 的 auth / config / profile 需要用户逐次确认'
 export const REFUSE_DELETE = '删除 / 撤回类操作不可恢复，每次都要用户确认'
 export const REFUSE_DAEMON = '常驻监听 / 自更新类命令会长期占用或改变 CLI 本身'
+export const REFUSE_CLI_CREDENTIALS = '涉及办公平台 CLI 的登录凭证目录'

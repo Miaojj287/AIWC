@@ -95,7 +95,7 @@ describe('appearance palettes', () => {
       '--bg-overlay': '#2f2f2f',
       '--fg': '#ffffff',
       '--fg-2': '#cdcdcd',
-      '--fg-3': '#adadad',
+      '--fg-3': '#aeaeae',
       '--accent': '#4e82ef',
     })
     expect(paletteTokens(DEFAULT_PALETTES.light)).toMatchObject({
@@ -106,7 +106,7 @@ describe('appearance palettes', () => {
       '--bg-overlay': '#f0f0f0',
       '--fg': '#000000',
       '--fg-2': '#434343',
-      '--fg-3': '#6f6f6f',
+      '--fg-3': '#616161',
       '--accent': '#4e82ef',
     })
   })

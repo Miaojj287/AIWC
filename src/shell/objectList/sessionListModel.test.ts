@@ -96,7 +96,7 @@ describe('sessionListModel', () => {
     const last = spec[spec.length - 1]
     expect(last && 'danger' in last && last.danger).toBe(true)
     const quote = spec.find((it) => 'id' in it && it.id === 'quote')
-    expect(quote).toMatchObject({ shortcut: '⌘⇧A' })
+    expect(quote).toMatchObject({ shortcut: '⇧⌘A' })
 
     const pin = spec[0]
     if (pin && 'onSelect' in pin) pin.onSelect?.()

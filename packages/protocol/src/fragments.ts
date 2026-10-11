@@ -65,6 +65,7 @@ export function createFragment(kind: string, marker: string, tokenCap: number, r
   }
 }
 
+import type { Mention } from './history'
 import type { ThreadId } from './ids'
 import type { ThreadOrigin, ThreadSettings } from './ops'
 
@@ -74,6 +75,8 @@ export interface FragmentProviderContext {
   settings: ThreadSettings
   /** text of the current user turn (empty for stable-tier providers) */
   userText: string
+  /** What the user referenced with @ / 引用到 Agent in this turn (turn tier only). */
+  mentions?: readonly Mention[]
 }
 
 /**

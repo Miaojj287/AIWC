@@ -32,82 +32,241 @@ export function parseCitationHref(href: string): CitationRef | undefined {
   return { sessionId: rest.slice(0, slash), messageId: rest.slice(slash + 1) }
 }
 
-/** Pairs of quotation marks a Chinese or English reply may use around verbatim text. */
-const QUOTE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+/** Opening quotation mark → its closing mark, for the marks a Chinese or English reply may put around verbatim text. */
+const QUOTE_MARKS: ReadonlyMap<string, string> = new Map([
   ['“', '”'],
   ['「', '」'],
   ['『', '』'],
   ['‘', '’'],
   ['"', '"'],
-]
+])
 
-/** Quoted segments in `text`, grouped by quote style; segments shorter than 2 characters are ignored. */
-export function extractQuotes(text: string): string[] {
-  const out: string[] = []
-  for (const [open, close] of QUOTE_PAIRS) {
-    let from = 0
-    for (;;) {
-      const start = text.indexOf(open, from)
-      if (start < 0) break
-      const end = text.indexOf(close, start + open.length)
-      if (end < 0) break
-      const inner = text.slice(start + open.length, end).trim()
-      if ([...inner].length >= 2) out.push(inner)
-      from = end + close.length
+/** Quotes shorter than this (in characters, before normalization) carry too little to check. */
+const MIN_QUOTE_CHARS = 2
+
+/** A quoted segment and where it sits in the text it was found in (`end` is just past the closing mark). */
+export interface QuoteSpan {
+  text: string
+  start: number
+  end: number
+}
+
+/** Quoted segments of `text` in reading order; a quote nested inside another counts once, as the outer one. */
+export function quoteSpans(text: string): QuoteSpan[] {
+  const out: QuoteSpan[] = []
+  let i = 0
+  while (i < text.length) {
+    const close = QUOTE_MARKS.get(text[i]!)
+    const end = close === undefined ? -1 : text.indexOf(close, i + 1)
+    if (end < 0) {
+      i++
+      continue
     }
+    const inner = text.slice(i + 1, end).trim()
+    if ([...inner].length >= MIN_QUOTE_CHARS) out.push({ text: inner, start: i, end: end + 1 })
+    i = end + 1
   }
   return out
 }
 
-/** Case-, width- and punctuation-insensitive form used for containment checks. */
+/** Zero-width / format characters and emoji variation selectors: invisible, but they would break a match. */
+const INVISIBLE = /[\p{Cf}︀-️]/gu
+/** WeChat emoji codes and the tools' media placeholders: `[捂脸]`, `[语音]`, `[Facepalm]`. */
+const BRACKET_CODE = /\[[^[\]\n]{1,12}\]/g
+/** A sender written inside the quote: 「庄曼琦：今天会有下午茶吗」. */
+const SENDER_PREFIX = /^[^：:\n「」“”]{1,20}[：:]\s*/
+/** An elision inside a quote: the parts on both sides must appear, in order. */
+const ELLIPSIS = /…+|\.{3,}|⋯+/
+
+/** Case-, width-, punctuation- and invisible-character-insensitive form used for containment checks. */
 export function normalizeForMatch(text: string): string {
   return text
     .normalize('NFKC')
     .toLowerCase()
+    .replace(INVISIBLE, '')
     .replace(/[\s\p{P}\p{S}]+/gu, '')
 }
 
-/** Everything a message "says": its text plus a voice transcript and the quoted reply, if any. */
-export function messageHaystack(message: Pick<WxMessage, 'text' | 'media' | 'quote'>): string {
-  return [message.text, message.media?.transcript, message.quote?.text].filter(Boolean).join('\n')
+type MatchableMessage = Pick<WxMessage, 'text' | 'media' | 'quote' | 'rich'>
+
+/** Everything a message "says": its text, a voice transcript, a file name, a link title and the quoted reply. */
+export function messageHaystack(message: MatchableMessage): string {
+  return [
+    message.text,
+    message.media?.transcript,
+    message.media?.fileName,
+    message.rich?.title,
+    message.rich?.description,
+    message.quote?.text,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
-/** Quoted segments of `context` that do not occur in the message. */
-export function unmatchedQuotes(context: string, message: Pick<WxMessage, 'text' | 'media' | 'quote'>): string[] {
-  const hay = normalizeForMatch(messageHaystack(message))
-  return extractQuotes(context).filter((q) => {
-    const needle = normalizeForMatch(q)
-    return needle.length > 0 && !hay.includes(needle)
-  })
+/** The message normalized as written, and again without its emoji codes / placeholders (a quote may drop them). */
+function haystacks(message: MatchableMessage): string[] {
+  const raw = messageHaystack(message)
+  const withoutCodes = raw.replace(BRACKET_CODE, '')
+  return withoutCodes === raw ? [normalizeForMatch(raw)] : [normalizeForMatch(raw), normalizeForMatch(withoutCodes)]
+}
+
+/** Ways a quote may have been written: as is, without emoji codes / placeholders, without a sender prefix. Each is split at elisions. */
+function quoteForms(quote: string): string[][] {
+  const forms = new Set([quote, quote.replace(BRACKET_CODE, ''), quote.replace(SENDER_PREFIX, '')])
+  const out: string[][] = []
+  for (const form of forms) {
+    const pieces = form
+      .split(ELLIPSIS)
+      .map(normalizeForMatch)
+      .filter((piece) => piece.length > 0)
+    if (pieces.length) out.push(pieces)
+  }
+  return out
+}
+
+function containsInOrder(hay: string, pieces: readonly string[]): boolean {
+  let from = 0
+  for (const piece of pieces) {
+    const at = hay.indexOf(piece, from)
+    if (at < 0) return false
+    from = at + piece.length
+  }
+  return true
+}
+
+/** Whether the quoted words occur in the message. A quote that normalizes to nothing (an emoji) passes. */
+export function quoteMatches(quote: string, message: MatchableMessage): boolean {
+  const forms = quoteForms(quote)
+  if (forms.length === 0) return true
+  const hays = haystacks(message)
+  return forms.some((pieces) => hays.some((hay) => containsInOrder(hay, pieces)))
 }
 
 export type QuoteVerdict = 'verbatim' | 'mismatch' | 'unquoted'
 
 /**
- * 'verbatim' when every quoted segment occurs in the message, 'mismatch' when at least one does not,
- * 'unquoted' when the context carried no quotation to check.
+ * Checks the quotes a citation vouches for. A quote passes when it is in the cited message, or in another message of
+ * the same citation run (「A」「B」 followed by [b][a]: the pairing slipped, the words are real). 'unquoted' when the
+ * citation vouches for no quote.
  */
-export function verifyQuotes(context: string, message: Pick<WxMessage, 'text' | 'media' | 'quote'>): QuoteVerdict {
-  if (extractQuotes(context).length === 0) return 'unquoted'
-  return unmatchedQuotes(context, message).length === 0 ? 'verbatim' : 'mismatch'
+export function verifyClaim(
+  quotes: readonly string[],
+  cited: MatchableMessage,
+  siblings: readonly MatchableMessage[] = [],
+): { verdict: QuoteVerdict; unmatched: string[] } {
+  if (quotes.length === 0) return { verdict: 'unquoted', unmatched: [] }
+  const unmatched = quotes.filter((q) => !quoteMatches(q, cited) && !siblings.some((m) => quoteMatches(q, m)))
+  return { verdict: unmatched.length ? 'mismatch' : 'verbatim', unmatched }
 }
+
+/** A piece of one Markdown block in reading order: plain text, or a `wx://` citation link. */
+export type CitationToken =
+  { kind: 'text'; text: string } | ({ kind: 'cite'; label: string; link: string } & CitationRef)
 
 export interface CitationClaim extends CitationRef {
   /** Link text as written. */
   label: string
   /** The raw link, for quoting back to the model. */
   link: string
-  /** Text written since the previous citation in the same block — the quotes a citation vouches for. */
-  context: string
+  /** The quotes this citation vouches for. */
+  quotes: string[]
+  /** Every citation written together with this one (itself included), in order. */
+  run: CitationRef[]
+}
+
+/** Text that keeps two citations in one run: nothing but whitespace and punctuation, a few characters at most. */
+const RUN_SEPARATOR = /^[\s\p{P}\p{S}]{0,4}$/u
+/**
+ * Visible characters allowed between a quote and the citation run it belongs to (or the next quote of the same
+ * group): 「原文」——庄曼琦 [cite] still belongs together; a quoted nickname earlier in the sentence does not.
+ */
+export const QUOTE_ATTACH_GAP = 20
+
+const visibleLength = (text: string): number => [...text.replace(/\s+/g, '')].length
+
+/** The quotes directly before a citation run: the nearest one, and each earlier one close to the next. */
+function attachedQuotes(window: string): string[] {
+  const spans = quoteSpans(window)
+  const out: string[] = []
+  let boundary = window.length
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const span = spans[i]!
+    if (visibleLength(window.slice(span.end, boundary)) > QUOTE_ATTACH_GAP) break
+    out.unshift(span.text)
+    boundary = span.start
+  }
+  return out
+}
+
+/**
+ * Pairs the quotes of one block with its citations. Citations written next to each other form a run; the quotes
+ * attached to a run are handed out in order (the first quote to the first citation…), the last citation taking any
+ * extra quotes. The Agent panel and the host's Stop-hook audit both judge citations through this function.
+ */
+export function planCitations(tokens: readonly CitationToken[]): CitationClaim[] {
+  const claims: CitationClaim[] = []
+  let pending = ''
+  let window = ''
+  let run: Array<Extract<CitationToken, { kind: 'cite' }>> = []
+  const closeRun = () => {
+    if (run.length === 0) return
+    const quotes = attachedQuotes(window)
+    const refs = run.map(({ sessionId, messageId }) => ({ sessionId, messageId }))
+    run.forEach((cite, i) => {
+      const last = i === run.length - 1
+      const assigned = last ? quotes.slice(i) : quotes[i] !== undefined ? [quotes[i]] : []
+      claims.push({
+        sessionId: cite.sessionId,
+        messageId: cite.messageId,
+        label: cite.label,
+        link: cite.link,
+        quotes: assigned,
+        run: refs,
+      })
+    })
+    run = []
+  }
+  for (const token of tokens) {
+    if (token.kind === 'text') {
+      pending += token.text
+      continue
+    }
+    if (run.length > 0 && RUN_SEPARATOR.test(pending)) {
+      run.push(token)
+      pending = ''
+      continue
+    }
+    closeRun()
+    window = pending
+    pending = ''
+    run = [token]
+  }
+  closeRun()
+  return claims
 }
 
 const CITATION_LINK = /\[([^\]]+)\]\((wx:\/\/[^)\s]+)\)/g
 const BLOCK_START = /^\s{0,3}(?:#{1,6}\s|>|[-*+]\s|\d+[.)]\s)/
 
+/** Splits one Markdown block into text and citation tokens. */
+function tokenizeBlock(block: string): CitationToken[] {
+  const tokens: CitationToken[] = []
+  let last = 0
+  for (const match of block.matchAll(CITATION_LINK)) {
+    const ref = parseCitationHref(match[2]!)
+    if (!ref) continue
+    const at = match.index ?? 0
+    tokens.push({ kind: 'text', text: block.slice(last, at) })
+    tokens.push({ kind: 'cite', label: match[1]!, link: match[0], ...ref })
+    last = at + match[0].length
+  }
+  tokens.push({ kind: 'text', text: block.slice(last) })
+  return tokens
+}
+
 /**
- * Every citation in a Markdown reply with the text it vouches for. Mirrors how the Agent panel scopes a
- * chip's check: context resets at each citation and at every block (paragraph, list item, heading,
- * quote); fenced code is skipped because it never renders links.
+ * Every citation in a Markdown reply with the quotes it vouches for. Blocks (paragraph, list item, heading, quote)
+ * are planned separately; fenced code is skipped because it never renders links.
  */
 export function findCitationClaims(markdown: string): CitationClaim[] {
   const blocks: string[] = []
@@ -134,16 +293,5 @@ export function findCitationClaims(markdown: string): CitationClaim[] {
     current.push(line)
   }
   flush()
-
-  const claims: CitationClaim[] = []
-  for (const block of blocks) {
-    let last = 0
-    for (const match of block.matchAll(CITATION_LINK)) {
-      const ref = parseCitationHref(match[2]!)
-      const at = match.index ?? 0
-      if (ref) claims.push({ ...ref, label: match[1]!, link: match[0], context: block.slice(last, at) })
-      last = at + match[0].length
-    }
-  }
-  return claims
+  return blocks.flatMap((block) => planCitations(tokenizeBlock(block)))
 }

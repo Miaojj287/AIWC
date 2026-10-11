@@ -5,6 +5,7 @@
  * ONE compaction_summary item that forPrompt() places first.
  */
 import {
+  COMPACT_INSTRUCTIONS_MAX_CHARS,
   estimateTokens,
   newItemId,
   newTurnId,
@@ -108,6 +109,8 @@ function itemToTranscriptLine(item: HistoryItem): string {
       return `前情摘要：${item.summary}`
     case 'turn_aborted':
       return `（上一轮中止：${item.reason}）`
+    case 'turn_check':
+      return ''
   }
 }
 
@@ -136,10 +139,21 @@ export function renderTranscript(items: readonly HistoryItem[]): string {
   return [head, ...kept].filter(Boolean).join('\n')
 }
 
+/**
+ * The system prompt with the user's `/compact …` focus note appended. The note is bounded and can add emphasis but
+ * not lift the keep-rules above (evidence anchors and open tasks are kept regardless).
+ */
+export function compactionSystemPrompt(instructions?: string): string {
+  const note = instructions?.trim().slice(0, COMPACT_INSTRUCTIONS_MAX_CHARS)
+  if (!note) return COMPACTION_SYSTEM_PROMPT
+  return `${COMPACTION_SYSTEM_PROMPT}\n\n用户对这次压缩的额外要求（在不违背上面保留规则的前提下优先照做）：\n${note}`
+}
+
 export async function summarizeWithModel(
   model: ModelClient,
   transcript: string,
   signal?: AbortSignal,
+  instructions?: string,
 ): Promise<string> {
   const prompt: UserMessageItem = {
     type: 'user_message',
@@ -155,11 +169,13 @@ export async function summarizeWithModel(
   let text = ''
   try {
     for await (const part of model.sample({
-      system: COMPACTION_SYSTEM_PROMPT,
+      system: compactionSystemPrompt(instructions),
       history: [prompt],
       tools: [],
       toolChoice: 'none',
       signal: controller.signal,
+      reasoningEffort: 'lowest',
+      purpose: { feature: 'compaction' },
     })) {
       if (part.type === 'text.delta') text += part.delta
       else if (part.type === 'error') throw Object.assign(new Error(part.error.message), { modelError: part.error })
@@ -191,6 +207,8 @@ export interface CompactInput {
   signal?: AbortSignal
   /** The thread's model selection; the summary is written by a model with the same locality. */
   primaryModel?: { providerId: string; modelId: string }
+  /** Manual `/compact …`: what the summary should keep or focus on. */
+  instructions?: string
 }
 
 /** Runs one compaction. Resolves with the summary item, or undefined when there is nothing to fold. */
@@ -203,7 +221,7 @@ export async function compactContext(
   if (!split) return undefined
   await deps.hooks.run('PreCompact', { threadId: input.threadId })
   const model = await deps.models.resolveAuxiliary(input.primaryModel)
-  const summary = await summarizeWithModel(model, renderTranscript(split.prefix), input.signal)
+  const summary = await summarizeWithModel(model, renderTranscript(split.prefix), input.signal, input.instructions)
   const prefixTokens = split.prefix.reduce((n, it) => n + input.context.tokensOf(it), 0)
   const last = split.prefix[split.prefix.length - 1]!
   const item: CompactionSummaryItem = {

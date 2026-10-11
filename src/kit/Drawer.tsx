@@ -3,7 +3,8 @@ import { Dialog as Radix } from 'radix-ui'
 import type { ReactNode } from 'react'
 import { useT } from '@/i18n'
 import { cn } from './cn'
-import { ICON_SIZE, ICON_STROKE } from './icon'
+import { ICON_SIZE } from './icon'
+import { IconButton } from './IconButton'
 
 export interface DrawerProps {
   open: boolean
@@ -39,11 +40,14 @@ export function Drawer({ open, onOpenChange, title, actions, children, footer, w
             <Radix.Title className="min-w-0 flex-1 truncate text-tab font-medium">{title}</Radix.Title>
             <Radix.Description className="sr-only">{title}</Radix.Description>
             {actions}
-            <Radix.Close
-              aria-label={t('kit.close')}
-              className="inline-flex size-6 items-center justify-center rounded-control text-fg-3 outline-none hover:bg-line-8 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
-            >
-              <X size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden />
+            <Radix.Close asChild>
+              <IconButton
+                size="sm"
+                icon={X}
+                iconSize={ICON_SIZE.menuAux}
+                label={t('kit.close')}
+                className="text-fg-3"
+              />
             </Radix.Close>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>

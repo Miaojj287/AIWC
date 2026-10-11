@@ -1,29 +1,41 @@
 /**
- * 定时任务 scheduler. Each enabled task holds one croner job; a fire (or 立即执行) creates a fresh
- * kernel thread on the 'cron' channel in the task's permission mode and runs the prompt to completion
- * with `kernel.runOnce`. The cron channel never asks: a call the mode does not cover is denied and the
- * model is told to report it, so the run's `denied` list says which mode the next run would need.
+ * 定时任务 scheduler. taskTicker.ts wakes at the soonest due slot; a slot that is due fires a run, a slot that passed
+ * while the app was closed or the machine asleep is recorded as missed (with why) and, under the task's catch-up
+ * policy, run once late. A run creates a fresh kernel thread on the 'cron' channel in the task's permission mode and
+ * runs the prompt to completion with `kernel.runOnce` (a reminder task only notifies, no model). The cron channel
+ * never asks: a call the mode does not cover is denied and reported. A run that failed on a rate limit or the network
+ * without changing anything is tried again later (taskRecovery.ts); a run the app quit during is `interrupted`.
  *
- * Storage: <tasksDir>/tasks.json (definitions) and <tasksDir>/runs.jsonl (history, append-only,
- * compacted when it grows past RUNS_KEEP). Nothing here is UI copy — the renderer localizes
- * statuses; only the thread title comes from the host through `threadTitle`.
+ * Storage is taskFiles.ts. Nothing here is UI copy — the renderer localizes statuses and reasons; only the thread
+ * title comes from the host through `threadTitle`.
  */
-import { Cron } from 'croner'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { appendFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   ScheduledTaskInputSchema,
-  type Event,
   type ScheduledTask,
-  type ScheduledTaskInput,
+  type ScheduledTaskDraft,
   type TaskRun,
-  type TaskSchedule,
   type TaskTemplate,
   type UserInput,
 } from '@aiwc/protocol'
 import type { Kernel } from '@aiwc/kernel'
+import { runArtifacts } from './taskArtifacts'
+import { createTaskFiles, HEARTBEAT_FILE, RUNS_KEEP, type StoredTask } from './taskFiles'
+import {
+  catchUpDecision,
+  LATE_GRACE_MS,
+  MAX_TASK_RETRIES,
+  missedReason,
+  reasonForRunError,
+  shouldRetryRun,
+  taskRetryDelayMs,
+} from './taskRecovery'
+import { watchRun, type RunWatch } from './taskRunWatch'
+import { createTaskTicker, defaultSetTimer, type SetTimer } from './taskTicker'
+import { missedSlots, nextFireAt, previewSchedule } from './taskTiming'
+
+export { cronPatternFor, nextIntervalAt, previewSchedule } from './taskTiming'
 
 export type TaskLogger = (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
 
@@ -34,17 +46,21 @@ export interface TaskSchedulerDeps {
   input: (task: ScheduledTask, firedAt: Date) => UserInput
   /** Title of the run's thread as shown in the Agent panel (localized by the host). */
   threadTitle: (task: ScheduledTask) => string
+  /** Delivers a `remind` task (notification, toast, a note in its source thread). */
+  remind?: (task: ScheduledTask) => Promise<void>
   templates?: readonly TaskTemplate[]
   onChanged?: (change: { reason: 'saved' | 'deleted' | 'toggled' | 'scheduled'; id: string }) => void
   onRun?: (run: TaskRun) => void
   logger?: TaskLogger
   now?: () => number
+  /** Timer factory (tests drive the clock through it). */
+  setTimer?: SetTimer
 }
 
 export interface TaskScheduler {
   list(): ScheduledTask[]
   get(id: string): { task: ScheduledTask; runs: TaskRun[] } | undefined
-  save(input: ScheduledTaskInput): Promise<ScheduledTask>
+  save(input: ScheduledTaskDraft): Promise<ScheduledTask>
   remove(id: string): Promise<void>
   setEnabled(id: string, enabled: boolean): Promise<ScheduledTask>
   /** Start a run now; resolves once the run has started (not finished). */
@@ -52,84 +68,21 @@ export interface TaskScheduler {
   cancel(id: string): boolean
   runs(opts?: { id?: string; limit?: number }): TaskRun[]
   templates(): TaskTemplate[]
-  /** Arm every enabled task. Idempotent. */
+  /** Arm every enabled task and look for slots missed since the last session. Idempotent. */
   start(): void
-  /** Disarm everything and abort in-flight runs. */
+  /** Disarm everything and abort in-flight runs (they are recorded as interrupted). */
   stop(): void
+  /** Resolves once queued task / run writes have reached disk; await it before quitting or reopening the folder. */
+  flush(): Promise<void>
 }
 
-/** Runs kept in memory and in runs.jsonl after compaction. */
-export const RUNS_KEEP = 500
 /** The agent's final message is stored capped; the transcript has the rest. */
 export const SUMMARY_MAX_CHARS = 1_200
-const PREVIEW_COUNT = 3
-const TASKS_FILE = 'tasks.json'
-const RUNS_FILE = 'runs.jsonl'
 
-type StoredTask = Omit<ScheduledTask, 'nextRunAt' | 'running'> & {
-  /** When the current schedule was set — interval tasks count from here, not from the last edit. */
-  scheduleSince: number
-}
+type RunExtra = Partial<Pick<TaskRun, 'reason' | 'scheduledFor' | 'missedCount' | 'attempt' | 'maxAttempts'>>
 
-interface TasksFile {
-  version: 1
-  tasks: StoredTask[]
-}
-
-/** croner (6-field, seconds first) pattern for the calendar kinds; interval is timer-driven. */
-export function cronPatternFor(schedule: TaskSchedule): string | undefined {
-  switch (schedule.kind) {
-    case 'daily': {
-      const [h, m] = schedule.time.split(':').map(Number)
-      return `0 ${m} ${h} * * *`
-    }
-    case 'weekly': {
-      const [h, m] = schedule.time.split(':').map(Number)
-      const days = [...new Set(schedule.days)].sort((a, b) => a - b).join(',')
-      return `0 ${m} ${h} * * ${days}`
-    }
-    case 'cron':
-      return schedule.expression
-    case 'interval':
-      return undefined
-  }
-}
-
-/** Next multiple of the interval after `now`, counted from `since`. */
-export function nextIntervalAt(everyMinutes: number, since: number, now: number): number {
-  const step = everyMinutes * 60_000
-  if (now < since) return since
-  const k = Math.floor((now - since) / step) + 1
-  return since + k * step
-}
-
-export type SchedulePreview = { ok: true; next: number[] } | { ok: false; error: string }
-
-/** The next `count` fire times of a schedule; `{ ok: false }` when a cron expression is invalid. */
-export function previewSchedule(schedule: TaskSchedule, now: number, count = PREVIEW_COUNT): SchedulePreview {
-  if (schedule.kind === 'interval') {
-    const next: number[] = []
-    let t = now
-    for (let i = 0; i < count; i++) {
-      t = nextIntervalAt(schedule.everyMinutes, now, t)
-      next.push(t)
-    }
-    return { ok: true, next }
-  }
-  const pattern = cronPatternFor(schedule)
-  if (!pattern) return { ok: false, error: 'unsupported schedule' }
-  try {
-    const job = new Cron(pattern, { paused: true })
-    const runs = job.nextRuns(count, new Date(now)).map((d) => d.getTime())
-    job.stop()
-    if (runs.length === 0) return { ok: false, error: 'never fires' }
-    return { ok: true, next: runs }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-const sameSchedule = (a: TaskSchedule, b: TaskSchedule): boolean => JSON.stringify(a) === JSON.stringify(b)
+const sameSchedule = (a: StoredTask['schedule'], b: StoredTask['schedule']): boolean =>
+  JSON.stringify(a) === JSON.stringify(b)
 
 const clip = (text: string, max: number): string => {
   const trimmed = text.trim()
@@ -139,95 +92,42 @@ const clip = (text: string, max: number): string => {
 export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
   const log = deps.logger ?? (() => {})
   const now = deps.now ?? (() => Date.now())
-  const tasksPath = join(deps.dir, TASKS_FILE)
-  const runsPath = join(deps.dir, RUNS_FILE)
+  const setTimer = deps.setTimer ?? defaultSetTimer
+  const files = createTaskFiles(deps.dir, now, log)
 
   const tasks = new Map<string, StoredTask>()
-  let runs: TaskRun[] = []
-  const jobs = new Map<string, Cron>()
+  /** Next due slot of every armed task. */
+  const due = new Map<string, number>()
   const active = new Map<string, { run: TaskRun; controller: AbortController }>()
+  /** Pending retry timers per task. */
+  const retries = new Map<string, () => void>()
   let started = false
-  let writing: Promise<void> = Promise.resolve()
+  let stopping = false
+  /** Last moment the app was known to be running: a missed slot after it means the app was closed. */
+  let aliveAt: number | undefined
 
-  // ---- persistence --------------------------------------------------------------------------------
-
-  const load = (): void => {
-    mkdirSync(deps.dir, { recursive: true })
-    if (existsSync(tasksPath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(tasksPath, 'utf8')) as Partial<TasksFile>
-        for (const raw of parsed.tasks ?? []) {
-          const checked = ScheduledTaskInputSchema.safeParse(raw)
-          if (!checked.success || !raw.id) {
-            log('warn', 'tasks: dropping invalid task record', { id: raw.id })
-            continue
-          }
-          tasks.set(raw.id, {
-            ...checked.data,
-            id: raw.id,
-            createdAt: raw.createdAt ?? now(),
-            updatedAt: raw.updatedAt ?? now(),
-            scheduleSince: raw.scheduleSince ?? raw.updatedAt ?? now(),
-            ...(raw.lastRunAt ? { lastRunAt: raw.lastRunAt } : {}),
-            ...(raw.lastRunStatus ? { lastRunStatus: raw.lastRunStatus } : {}),
-          })
-        }
-      } catch (e) {
-        log('error', 'tasks: tasks.json unreadable', e)
+  for (const task of files.loadTasks()) tasks.set(task.id, task)
+  const loaded = files.loadRuns()
+  let runs: TaskRun[] = loaded.runs
+  if (loaded.interrupted > 0) {
+    for (const run of runs) {
+      const task = tasks.get(run.taskId)
+      if (run.status === 'interrupted' && task && (task.lastRunAt ?? 0) <= run.startedAt) {
+        task.lastRunAt = run.startedAt
+        task.lastRunStatus = 'interrupted'
       }
     }
-    if (existsSync(runsPath)) {
-      try {
-        const lines = readFileSync(runsPath, 'utf8').split('\n').filter(Boolean)
-        for (const line of lines) {
-          try {
-            const run = JSON.parse(line) as TaskRun
-            if (run.id && run.taskId) runs.push(run.status === 'running' ? { ...run, status: 'failed' } : run)
-          } catch {
-            /* a torn last line after a crash */
-          }
-        }
-        runs = runs.slice(-RUNS_KEEP)
-      } catch (e) {
-        log('error', 'tasks: runs.jsonl unreadable', e)
-      }
-    }
+    void files.compactRuns(runs)
+    void files.persistTasks([...tasks.values()])
   }
 
-  const persistTasks = (): Promise<void> => {
-    const file: TasksFile = { version: 1, tasks: [...tasks.values()] }
-    const body = JSON.stringify(file, null, 2)
-    writing = writing.then(async () => {
-      const tmp = `${tasksPath}.tmp`
-      await writeFile(tmp, body, 'utf8')
-      await rename(tmp, tasksPath)
-    })
-    return writing.catch((e) => log('error', 'tasks: save failed', e))
-  }
-
-  const appendRun = (run: TaskRun): Promise<void> => {
-    writing = writing.then(async () => {
-      await appendFile(runsPath, `${JSON.stringify(run)}\n`, 'utf8')
-    })
-    return writing.catch((e) => log('error', 'tasks: run log append failed', e))
-  }
-
-  const compactRuns = (): Promise<void> => {
-    runs = runs.slice(-RUNS_KEEP)
-    const body = runs.map((r) => JSON.stringify(r)).join('\n') + (runs.length ? '\n' : '')
-    writing = writing.then(async () => {
-      const tmp = `${runsPath}.tmp`
-      await writeFile(tmp, body, 'utf8')
-      await rename(tmp, runsPath)
-    })
-    return writing.catch((e) => log('error', 'tasks: run log compaction failed', e))
-  }
+  const persistTasks = (): Promise<void> => files.persistTasks([...tasks.values()])
 
   // ---- views ----------------------------------------------------------------------------------------
 
   const view = (stored: StoredTask): ScheduledTask => {
-    const { scheduleSince: _since, ...rest } = stored
-    const next = jobs.get(stored.id)?.nextRun()?.getTime()
+    const { scheduleSince: _since, lastSlotAt: _slot, ...rest } = stored
+    const next = due.get(stored.id)
     return {
       ...rest,
       ...(next ? { nextRunAt: next } : {}),
@@ -243,35 +143,66 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
 
   // ---- scheduling -----------------------------------------------------------------------------------
 
-  const disarm = (id: string): void => {
-    jobs.get(id)?.stop()
-    jobs.delete(id)
+  /** Plan the task's next slot after `from`. */
+  const arm = (task: StoredTask, from: number = now()): void => {
+    const next = started && task.enabled ? nextFireAt(task.schedule, task.scheduleSince, from) : undefined
+    if (next === undefined) due.delete(task.id)
+    else due.set(task.id, next)
   }
 
-  const arm = (task: StoredTask): void => {
-    disarm(task.id)
-    if (!started || !task.enabled) return
-    const fire = (): void => {
-      // Interval jobs are one-shot timers: re-arm for the next slot before the run so nextRunAt stays visible.
-      if (task.schedule.kind === 'interval') arm(task)
-      void fireTask(task.id, 'schedule')
-    }
-    const opts = {
-      protect: true,
-      catch: (e: unknown) => log('error', 'tasks: scheduled fire threw', { id: task.id, error: String(e) }),
-    }
-    try {
-      if (task.schedule.kind === 'interval') {
-        const at = nextIntervalAt(task.schedule.everyMinutes, task.scheduleSince, now())
-        jobs.set(task.id, new Cron(new Date(at), opts, fire))
-      } else {
-        const pattern = cronPatternFor(task.schedule)
-        if (!pattern) return
-        jobs.set(task.id, new Cron(pattern, opts, fire))
+  /** A one-shot task has had its slot: it switches itself off. */
+  const finishOneShot = (task: StoredTask): void => {
+    if (task.schedule.kind !== 'once') return
+    task.enabled = false
+    due.delete(task.id)
+  }
+
+  const onWake = (at: number, sleptFrom: number | undefined): void => {
+    let changed = false
+    for (const [id, slot] of [...due]) {
+      if (slot > at) continue
+      const task = tasks.get(id)
+      if (!task) {
+        due.delete(id)
+        continue
       }
-    } catch (e) {
-      log('warn', 'tasks: cannot arm task', { id: task.id, error: String(e) })
+      changed = true
+      if (at - slot <= LATE_GRACE_MS) {
+        task.lastSlotAt = slot
+        arm(task, at)
+        finishOneShot(task)
+        void fireTask(id, 'schedule', { scheduledFor: slot })
+        continue
+      }
+      const missed = missedSlots(task.schedule, task.scheduleSince, slot - 1, at)
+      const latest = missed.latest ?? slot
+      const extra: RunExtra = {
+        reason: missedReason(latest, aliveAt, sleptFrom),
+        scheduledFor: latest,
+        missedCount: Math.max(1, missed.count),
+      }
+      task.lastSlotAt = latest
+      arm(task, at)
+      finishOneShot(task)
+      if (catchUpDecision(task, { count: missed.count, latest }, at) === 'run') void fireTask(id, 'catch_up', extra)
+      else recordMissed(task, extra)
     }
+    aliveAt = at
+    if (changed) void persistTasks()
+  }
+
+  const ticker = createTaskTicker({
+    now,
+    nextDue: () => (due.size ? Math.min(...due.values()) : undefined),
+    onWake,
+    heartbeatPath: join(deps.dir, HEARTBEAT_FILE),
+    setTimer: deps.setTimer,
+    logger: log,
+  })
+
+  const cancelRetry = (id: string): void => {
+    retries.get(id)?.()
+    retries.delete(id)
   }
 
   // ---- running --------------------------------------------------------------------------------------
@@ -283,42 +214,59 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
     deps.onRun?.(run)
   }
 
-  const fireTask = async (id: string, trigger: TaskRun['trigger']): Promise<TaskRun> => {
+  const instantRun = (task: StoredTask, trigger: TaskRun['trigger'], status: TaskRun['status'], extra: RunExtra) => {
+    const at = now()
+    const run: TaskRun = {
+      id: randomUUID(),
+      taskId: task.id,
+      trigger,
+      status,
+      startedAt: at,
+      finishedAt: at,
+      durationMs: 0,
+      denied: [],
+      toolCalls: 0,
+      ...extra,
+    }
+    recordRunUpdate(run)
+    void files.appendRun(run)
+    return run
+  }
+
+  const recordMissed = (task: StoredTask, extra: RunExtra): void => {
+    const run = instantRun(task, 'schedule', 'missed', extra)
+    task.lastRunAt = run.startedAt
+    task.lastRunStatus = 'missed'
+    log('info', 'tasks: slot missed', { id: task.id, reason: extra.reason, count: extra.missedCount })
+    deps.onChanged?.({ reason: 'scheduled', id: task.id })
+  }
+
+  const fireTask = async (id: string, trigger: TaskRun['trigger'], extra: RunExtra = {}): Promise<TaskRun> => {
     const task = tasks.get(id)
     if (!task) throw new Error(`unknown task: ${id}`)
-    const startedAt = now()
     const current = active.get(id)
     if (current) {
       if (trigger === 'manual') return current.run
-      const skipped: TaskRun = {
-        id: randomUUID(),
-        taskId: id,
-        trigger,
-        status: 'skipped',
-        startedAt,
-        finishedAt: startedAt,
-        durationMs: 0,
-        denied: [],
-        toolCalls: 0,
-      }
-      recordRunUpdate(skipped)
-      void appendRun(skipped)
       log('info', 'tasks: previous run still going, skipped', { id })
-      return skipped
+      return instantRun(task, trigger, 'skipped', { ...extra, reason: 'previous_running' })
     }
+    if (trigger !== 'retry') cancelRetry(id)
 
     const run: TaskRun = {
       id: randomUUID(),
       taskId: id,
       trigger,
       status: 'running',
-      startedAt,
+      startedAt: now(),
       denied: [],
       toolCalls: 0,
+      ...extra,
     }
     const controller = new AbortController()
     active.set(id, { run, controller })
     recordRunUpdate(run)
+    // Written now so a crash mid-run is found at the next launch and shown as interrupted.
+    void files.appendRun(run)
     deps.onChanged?.({ reason: 'scheduled', id })
 
     // Runs finish in the background; the caller only waits for the thread to exist.
@@ -326,43 +274,80 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
     return run
   }
 
+  const runAgent = async (task: StoredTask, run: TaskRun, signal: AbortSignal, watch: (w: RunWatch) => void) => {
+    const threadId = await deps.kernel.ensureThread(
+      { channel: 'cron' },
+      {
+        profile: 'cron',
+        permissionMode: task.permissionMode,
+        allowAlways: [],
+        ...(task.model ? { model: task.model } : {}),
+        title: deps.threadTitle(view(task)),
+      },
+    )
+    run.threadId = threadId
+    recordRunUpdate({ ...run })
+    watch(watchRun(deps.kernel.events, threadId, run))
+    const result = await deps.kernel.runOnce(threadId, deps.input(view(task), new Date(run.startedAt)), { signal })
+    run.summary = clip(result.text, SUMMARY_MAX_CHARS)
+    run.artifacts = runArtifacts(result.artifacts)
+    // A run that produced nothing is not a success, whatever the turn said.
+    if (result.text.trim()) run.status = 'done'
+    else Object.assign(run, { status: 'failed', reason: 'empty_result' })
+  }
+
+  const scheduleRetry = (task: StoredTask, run: TaskRun, retryAfterMs: number | undefined): void => {
+    const attempt = (run.attempt ?? 0) + 1
+    const delay = taskRetryDelayMs(attempt, retryAfterMs)
+    run.retryAt = now() + delay
+    run.maxAttempts = MAX_TASK_RETRIES
+    cancelRetry(task.id)
+    retries.set(
+      task.id,
+      setTimer(() => {
+        retries.delete(task.id)
+        if (!started || !tasks.has(task.id)) return
+        void fireTask(task.id, 'retry', {
+          attempt,
+          maxAttempts: MAX_TASK_RETRIES,
+          ...(run.scheduledFor ? { scheduledFor: run.scheduledFor } : {}),
+        })
+      }, delay),
+    )
+    log('info', 'tasks: retry scheduled', { id: task.id, attempt, delay })
+  }
+
   const execute = async (task: StoredTask, run: TaskRun, controller: AbortController): Promise<void> => {
-    let off: (() => void) | undefined
+    let watch: RunWatch | undefined
     try {
-      const threadId = await deps.kernel.ensureThread(
-        { channel: 'cron' },
-        {
-          profile: 'cron',
-          permissionMode: task.permissionMode,
-          allowAlways: [],
-          ...(task.model ? { model: task.model } : {}),
-          title: deps.threadTitle(view(task)),
-        },
-      )
-      run.threadId = threadId
-      recordRunUpdate({ ...run })
-      off = deps.kernel.events.on((e: Event) => {
-        if (e.type !== 'tool.call' || e.threadId !== threadId) return
-        if (e.status === 'running') run.toolCalls += 1
-        else if (e.status === 'denied' && !run.denied.some((d) => d.key === (e.allowKey ?? e.toolName)))
-          run.denied.push({ tool: e.toolName, key: e.allowKey ?? e.toolName, risk: e.risk, summary: e.summary })
-      })
-      const result = await deps.kernel.runOnce(threadId, deps.input(view(task), new Date(run.startedAt)), {
-        signal: controller.signal,
-      })
-      run.status = 'done'
-      run.summary = clip(result.text, SUMMARY_MAX_CHARS)
+      if (task.action === 'remind') {
+        if (!deps.remind) throw new Error('reminders are not available in this host')
+        await deps.remind(view(task))
+        run.status = 'done'
+        run.summary = clip(task.prompt, SUMMARY_MAX_CHARS)
+      } else {
+        await runAgent(task, run, controller.signal, (w) => (watch = w))
+      }
     } catch (e) {
       const err = e as Error & { text?: string }
-      run.status = controller.signal.aborted ? 'cancelled' : 'failed'
-      run.error = err?.message ?? String(e)
+      run.status = stopping ? 'interrupted' : controller.signal.aborted ? 'cancelled' : 'failed'
+      if (run.status === 'interrupted') run.reason = 'app_quit'
+      else if (run.status === 'failed') run.reason = reasonForRunError(watch?.lastError) ?? run.reason
+      run.error = watch?.lastError?.message ?? err?.message ?? String(e)
       if (err?.text) run.summary = clip(err.text, SUMMARY_MAX_CHARS)
-      log(run.status === 'cancelled' ? 'info' : 'warn', `tasks: run ${run.status}`, { id: task.id, error: run.error })
+      log(run.status === 'failed' ? 'warn' : 'info', `tasks: run ${run.status}`, { id: task.id, reason: run.reason })
     } finally {
-      off?.()
+      watch?.stop()
       run.finishedAt = now()
       run.durationMs = run.finishedAt - run.startedAt
       active.delete(task.id)
+      if (
+        run.status === 'failed' &&
+        started &&
+        tasks.has(task.id) &&
+        shouldRetryRun(run.reason, watch?.sideEffects ?? 0, run.attempt ?? 0)
+      )
+        scheduleRetry(task, run, watch?.lastError?.retryAfterMs)
       const stored = tasks.get(task.id)
       if (stored) {
         stored.lastRunAt = run.startedAt
@@ -370,13 +355,14 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
         void persistTasks()
       }
       recordRunUpdate({ ...run })
-      await appendRun(run)
-      if (runs.length > RUNS_KEEP * 2) await compactRuns()
+      await files.appendRun(run)
+      if (runs.length > RUNS_KEEP * 2) {
+        runs = runs.slice(-RUNS_KEEP)
+        await files.compactRuns(runs)
+      }
       deps.onChanged?.({ reason: 'scheduled', id: task.id })
     }
   }
-
-  load()
 
   return {
     list: () => [...tasks.values()].map(view).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -392,17 +378,24 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
       const at = now()
       const existing = data.id ? tasks.get(data.id) : undefined
       const id = existing?.id ?? data.id ?? randomUUID()
-      const preview = previewSchedule(data.schedule, at, 1)
-      if (!preview.ok) throw new Error(`invalid schedule: ${preview.error}`)
+      // A finished one-shot (switched off) may still be renamed or edited without moving its time.
+      if (data.enabled || data.schedule.kind !== 'once') {
+        const preview = previewSchedule(data.schedule, at, 1)
+        if (!preview.ok) throw new Error(`invalid schedule: ${preview.error}`)
+      }
+      const keep = existing && sameSchedule(existing.schedule, data.schedule)
+      const { lastSlotAt: _slot, ...base } = existing ?? { createdAt: at, lastSlotAt: undefined }
       const stored: StoredTask = {
-        ...(existing ?? { createdAt: at }),
+        ...base,
         ...data,
         id,
         updatedAt: at,
-        scheduleSince: existing && sameSchedule(existing.schedule, data.schedule) ? existing.scheduleSince : at,
+        scheduleSince: keep ? existing.scheduleSince : at,
+        ...(keep && existing.lastSlotAt ? { lastSlotAt: existing.lastSlotAt } : {}),
       }
       tasks.set(id, stored)
-      arm(stored)
+      arm(stored, at)
+      ticker.replan()
       await persistTasks()
       deps.onChanged?.({ reason: 'saved', id })
       return view(stored)
@@ -412,8 +405,10 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
       const task = tasks.get(id)
       if (!task) return
       this.cancel(id)
-      disarm(id)
+      cancelRetry(id)
+      due.delete(id)
       tasks.delete(id)
+      ticker.replan()
       await persistTasks()
       deps.onChanged?.({ reason: 'deleted', id })
     },
@@ -423,7 +418,11 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
       if (task.enabled !== enabled) {
         task.enabled = enabled
         task.updatedAt = now()
+        // Slots while paused are not "missed": counting starts again from now.
+        if (enabled) task.lastSlotAt = task.updatedAt
+        else cancelRetry(id)
         arm(task)
+        ticker.replan()
         await persistTasks()
         deps.onChanged?.({ reason: 'toggled', id })
       }
@@ -433,6 +432,7 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
     runNow: (id) => fireTask(id, 'manual'),
 
     cancel(id) {
+      cancelRetry(id)
       const current = active.get(id)
       if (!current) return false
       current.controller.abort()
@@ -450,14 +450,22 @@ export function createTaskScheduler(deps: TaskSchedulerDeps): TaskScheduler {
     start() {
       if (started) return
       started = true
-      for (const task of tasks.values()) arm(task)
-      log('info', 'tasks: scheduler started', { tasks: tasks.size, armed: jobs.size })
+      stopping = false
+      aliveAt = ticker.previousAliveAt
+      for (const task of tasks.values()) arm(task, task.lastSlotAt ?? task.lastRunAt ?? task.scheduleSince)
+      log('info', 'tasks: scheduler started', { tasks: tasks.size, armed: due.size })
+      ticker.start()
     },
 
     stop() {
       started = false
-      for (const id of [...jobs.keys()]) disarm(id)
+      stopping = true
+      ticker.stop()
+      due.clear()
+      for (const id of [...retries.keys()]) cancelRetry(id)
       for (const { controller } of active.values()) controller.abort()
     },
+
+    flush: () => files.flush(),
   }
 }

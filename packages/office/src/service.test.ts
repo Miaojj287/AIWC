@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { OfficeConnectSession, ToolContext } from '@aiwc/protocol'
@@ -116,8 +116,11 @@ describe('connect sessions', () => {
       },
     })
     const { svc, openExternal } = await service({ feishu: module })
-    await svc.connect({ platform: 'feishu' }).done
+    const final = await svc.connect({ platform: 'feishu' }).done
     expect(openExternal).not.toHaveBeenCalled()
+    // And the flow ends right away instead of waiting out the CLI on a link nobody will ever see.
+    expect(final.state).toBe('failed')
+    expect(final.error?.code).toBe('cli_error')
   })
 
   it('cancel aborts the flow and marks the session cancelled', async () => {
@@ -306,7 +309,6 @@ describe('pushTable', () => {
     })
     const tool = officeTools(svc).find((t) => t.name === 'office_push_table')!
     expect(tool.risk).toBe('send')
-    expect(tool.profiles).toEqual(['desktop-chat'])
     expect(tool.summarize?.({ platform: 'feishu', title: '周报', columns, rows: [{ 事项: 'a' }] })).toBe(
       '推送 1 行 × 2 列到飞书多维表格「周报」',
     )
@@ -320,18 +322,52 @@ describe('pushTable', () => {
   })
 })
 
+describe('tool mounting', () => {
+  it('lets scheduled tasks push tables, and keeps the browser flow to the desktop', async () => {
+    const { svc } = await service({})
+    const tools = officeTools(svc)
+    expect(tools.find((t) => t.name === 'office_push_table')?.profiles).toEqual(['desktop-chat', 'cron'])
+    expect(tools.find((t) => t.name === 'office_connect')?.profiles).toEqual(['desktop-chat'])
+    // Never on WeChat bot threads: a remote contact must not be able to push local chat data out.
+    for (const tool of tools) expect(tool.profiles).not.toContain('wechat-bot')
+  })
+})
+
 describe('commandClassifier (for the shell tool)', () => {
   it('grades vendor CLI command lines by verb and leaves other programs alone', async () => {
     const { svc } = await service({})
     const classify = svc.commandClassifier()
-    expect(classify(['lark-cli', 'base', '+table-list', '--base-token', 'b'])).toMatchObject({ risk: 'read', allowKey: 'lark-cli base +table-list' })
+    expect(classify(['lark-cli', 'base', '+table-list', '--base-token', 'b'])).toMatchObject({
+      risk: 'read',
+      allowKey: 'lark-cli base +table-list',
+    })
     expect(classify(['/usr/local/bin/lark-cli', 'skills', 'read', 'lark-base'])).toMatchObject({ risk: 'read' })
-    expect(classify(['lark-cli', 'base', '+record-batch-create', '--json', '@x'])).toMatchObject({ risk: 'write', allowKey: 'lark-cli base +record-batch-create' })
+    // Anything that is not a known read writes into the vendor's cloud: an outward send, never
+    // pre-approvable (the matrix lets `write` run unattended in bypass / cron).
+    expect(classify(['lark-cli', 'base', '+record-batch-create', '--json', '@x'])).toMatchObject({
+      risk: 'send',
+      allowKey: 'lark-cli base +record-batch-create',
+    })
+    expect(classify(['lark-cli', 'im', 'message', 'create', '--content', 'hi'])).toMatchObject({ risk: 'send' })
     expect(classify(['lark-cli', 'auth', 'logout'])).toMatchObject({ risk: 'destructive' })
     expect(classify(['dws', 'aitable', '+record-delete', '--record-ids', 'r'])).toMatchObject({ risk: 'destructive' })
+    // A delete that hides behind an earlier flag is still a delete.
+    expect(classify(['dws', 'aitable', '--base-id', 'b', 'record', 'delete'])).toMatchObject({ risk: 'destructive' })
     expect(classify(['dws', 'aitable', 'record', 'query', '--base-id', 'b'])).toMatchObject({ risk: 'read' })
-    expect(classify(['wecom-cli', 'smartsheet', 'records', 'add', '--json', '{}'])).toMatchObject({ risk: 'write' })
+    expect(classify(['wecom-cli', 'smartsheet', 'records', 'add', '--json', '{}'])).toMatchObject({ risk: 'send' })
     expect(classify(['git', 'status'])).toBeUndefined()
     expect(svc.writableRoots().some((r) => r.endsWith('.lark-cli'))).toBe(true)
+  })
+
+  it('treats the CLI credential directories like any other secret file', async () => {
+    const { svc } = await service({})
+    const classify = svc.commandClassifier()
+    expect(classify(['cat', `${homedir()}/.lark-cli/config.json`])).toMatchObject({ risk: 'destructive' })
+    expect(classify(['cat', '~/.dws/credentials.json'])).toMatchObject({ risk: 'destructive' })
+    expect(classify(['ls', '~/.config/wecom'])).toMatchObject({ risk: 'destructive' })
+    expect(classify(['lark-cli', 'api', 'POST', '/x', '--data', '@~/.dws/credentials.json'])).toMatchObject({
+      risk: 'destructive',
+    })
+    expect(classify(['cat', 'notes/dwsomething.md'])).toBeUndefined()
   })
 })

@@ -5,7 +5,7 @@ import { HelpTip } from './HelpTip'
 export interface SettingRowProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   /** 13 Medium. */
   title: ReactNode
-  /** 11.5 weak, directly under the title (CLAUDE.md §2.3). */
+  /** 12 weak / 20, directly under the title (CLAUDE.md §2.3). */
   description?: ReactNode
   /** Badge next to the title (e.g. 本地). */
   badge?: ReactNode
@@ -40,22 +40,26 @@ export function SettingRow({
   ...rest
 }: SettingRowProps) {
   const text = (
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
       <div className="flex items-center gap-2">
-        <label htmlFor={htmlFor} className="min-w-0 truncate text-body font-medium leading-4.5 text-fg">
+        <label
+          htmlFor={htmlFor}
+          className="min-w-0 truncate text-body font-medium leading-5 text-fg"
+          title={typeof title === 'string' ? title : undefined}
+        >
           {title}
         </label>
         {badge}
         {help ? <HelpTip content={help} subject={typeof title === 'string' ? title : undefined} /> : null}
       </div>
-      {description ? <div className="text-note leading-4 text-fg-3">{description}</div> : null}
+      {description ? <div className="text-caption leading-5 text-fg-3">{description}</div> : null}
     </div>
   )
   return (
     <div
       aria-disabled={disabled || undefined}
       className={cn(
-        '@container flex flex-col gap-2.5 px-4 py-3 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-line-6',
+        '@container flex flex-col gap-3 px-4 py-4 [&:not(:last-child)]:border-b [&:not(:last-child)]:border-line-6',
         disabled && 'pointer-events-none opacity-40',
         className,
       )}
@@ -69,7 +73,7 @@ export function SettingRow({
       ) : (
         // Below ~380px (a narrow settings column at the minimum window size) the control drops under the text:
         // squeezing the text column is what used to wrap titles one character per line.
-        <div className="flex flex-col items-start gap-2.5 @min-[380px]:flex-row @min-[380px]:items-center @min-[380px]:gap-4">
+        <div className="flex flex-col items-start gap-2.5 @min-[380px]:flex-row @min-[380px]:flex-wrap @min-[380px]:items-center @min-[380px]:gap-4 @min-[380px]:[&>div:first-child]:min-w-32">
           {text}
           {children ? <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{children}</div> : null}
         </div>

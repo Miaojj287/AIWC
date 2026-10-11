@@ -61,6 +61,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   'wechat-ui': '微信（界面注入）',
   cron: '定时任务',
   observed: '观察流',
+  'wechat-remote': '主人用自己手机微信遥控（回复会以纯文本发回主人自己的微信，保持简短，不要用表格）',
 }
 
 const MENTION_LABEL: Record<Mention['kind'], string> = {
@@ -68,6 +69,25 @@ const MENTION_LABEL: Record<Mention['kind'], string> = {
   file: '文件',
   contact: '联系人',
   memory: '记忆',
+}
+
+/** Longest name or id written into the context tier; a chat name is third-party text. */
+const MENTION_FIELD_MAX = 120
+
+/** One line, no tag characters: a chat name or path must not be able to forge or close a prompt section. */
+const inlineField = (text: string): string =>
+  text.replace(/\s+/g, ' ').replace(/</g, '＜').replace(/>/g, '＞').trim().slice(0, MENTION_FIELD_MAX)
+
+/**
+ * `@会话「产品群」（id: 123@chatroom，引用其中 3 条消息）` — the id is what the tools take; quoted messages themselves
+ * arrive as a turn fragment from the host.
+ */
+function renderMention(m: Mention): string {
+  const notes: string[] = []
+  if (m.kind !== 'memory' && m.id) notes.push(`id: ${inlineField(m.id)}`)
+  if (m.kind === 'session' && m.messageIds?.length) notes.push(`引用其中 ${m.messageIds.length} 条消息`)
+  const label = `@${MENTION_LABEL[m.kind]}「${inlineField(m.label)}」`
+  return notes.length ? `${label}（${notes.join('，')}）` : label
 }
 
 function renderMany(fragments: readonly ContextFragment[], onError?: (e: unknown) => void): string[] {
@@ -164,10 +184,10 @@ export class PromptBuilder {
       const seen = new Set<string>()
       const labels: string[] = []
       for (const m of input.mentions) {
-        const key = `${m.kind}:${m.id}`
+        const key = `${m.kind}:${m.id}:${m.messageIds?.length ? 'quote' : ''}`
         if (seen.has(key)) continue
         seen.add(key)
-        labels.push(`@${MENTION_LABEL[m.kind]}「${m.label}」`)
+        labels.push(renderMention(m))
       }
       lines.push(`本轮引用：${labels.join('，')}`)
     }

@@ -1,10 +1,10 @@
 /**
  * Thread-level dialogs (CLAUDE.md §4.4): rename (form), compact (confirm '压缩上下文？'), clear and
- * delete (danger), and the compaction summary viewer. Controlled by the panel via `dialog`.
+ * delete (danger), the compaction summary viewer and 导出会话 (ThreadExportDialog). Controlled by the panel via `dialog`.
  */
-import { Layers } from 'lucide-react'
+import { Layers, Undo2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { ThreadId } from '@aiwc/protocol'
+import type { ThreadExportOptions, ThreadId, UserInput } from '@aiwc/protocol'
 import { useT } from '@/i18n'
 import {
   Button,
@@ -20,24 +20,40 @@ import {
   Input,
 } from '@/kit'
 import { isUntitledTitle } from './model'
+import { ThreadExportDialog } from './ThreadExportDialog'
 
 export type ThreadDialog =
   | { kind: 'rename'; threadId: ThreadId; title: string }
-  | { kind: 'compact'; threadId: ThreadId }
+  /** `instructions`: what `/compact …` asked the summary to keep. */
+  | { kind: 'compact'; threadId: ThreadId; instructions?: string }
   | { kind: 'clear'; threadId: ThreadId }
   | { kind: 'delete'; threadId: ThreadId; title: string }
   | { kind: 'summary'; threadId: ThreadId; summary: string | undefined }
+  | { kind: 'export'; threadId: ThreadId }
+  /** 编辑 / 重新生成 an earlier turn: the turns after it are discarded too. */
+  | { kind: 'rewind'; threadId: ThreadId; fromItemId: string; input: UserInput; laterTurns: number }
 
 export interface ThreadDialogsProps {
   dialog: ThreadDialog | undefined
   onClose: () => void
   onRename: (id: ThreadId, title: string) => Promise<void> | void
-  onCompact: (id: ThreadId) => Promise<void> | void
+  onCompact: (id: ThreadId, instructions?: string) => Promise<void> | void
   onClear: (id: ThreadId) => Promise<void> | void
   onDelete: (id: ThreadId) => Promise<void> | void
+  onRewind: (id: ThreadId, fromItemId: string, input: UserInput) => Promise<unknown> | void
+  onExport: (id: ThreadId, options: ThreadExportOptions) => Promise<void> | void
 }
 
-export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, onDelete }: ThreadDialogsProps) {
+export function ThreadDialogs({
+  dialog,
+  onClose,
+  onRename,
+  onCompact,
+  onClear,
+  onDelete,
+  onRewind,
+  onExport,
+}: ThreadDialogsProps) {
   const t = useT()
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
@@ -46,7 +62,7 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
     setBusy(false)
   }, [dialog])
 
-  const run = async (fn: () => Promise<void> | void) => {
+  const run = async (fn: () => Promise<unknown> | void) => {
     setBusy(true)
     try {
       await fn()
@@ -91,11 +107,31 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
         icon={Layers}
         tone="accent"
         title={t('agent.dialog.compactTitle')}
-        description={t('agent.dialog.compactDescription')}
+        description={
+          dialog?.kind === 'compact' && dialog.instructions
+            ? `${t('agent.dialog.compactDescription')} ${t('agent.dialog.compactFocus', { text: dialog.instructions })}`
+            : t('agent.dialog.compactDescription')
+        }
         confirmLabel={t('agent.dialog.compactConfirm')}
         loading={busy}
         onConfirm={() => {
-          if (dialog?.kind === 'compact') void run(() => onCompact(dialog.threadId))
+          if (dialog?.kind === 'compact') void run(() => onCompact(dialog.threadId, dialog.instructions))
+        }}
+      />
+
+      <ConfirmDialog
+        open={dialog?.kind === 'rewind'}
+        onOpenChange={openChange}
+        icon={Undo2}
+        tone="warn"
+        title={t('agent.stream.rewind.confirmTitle')}
+        description={
+          dialog?.kind === 'rewind' ? t('agent.stream.rewind.confirmDescription', { n: dialog.laterTurns }) : undefined
+        }
+        confirmLabel={t('agent.stream.rewind.confirm')}
+        loading={busy}
+        onConfirm={() => {
+          if (dialog?.kind === 'rewind') void run(() => onRewind(dialog.threadId, dialog.fromItemId, dialog.input))
         }}
       />
 
@@ -128,6 +164,18 @@ export function ThreadDialogs({ dialog, onClose, onRename, onCompact, onClear, o
           if (dialog?.kind === 'delete') void run(() => onDelete(dialog.threadId))
         }}
       />
+
+      {dialog?.kind === 'export' ? (
+        <ThreadExportDialog
+          key={dialog.threadId}
+          open
+          onOpenChange={openChange}
+          onExport={async (options) => {
+            await onExport(dialog.threadId, options)
+            onClose()
+          }}
+        />
+      ) : null}
 
       <Dialog open={dialog?.kind === 'summary'} onOpenChange={openChange}>
         <DialogContent size="lg">

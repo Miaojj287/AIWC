@@ -2,13 +2,26 @@
  * autoreply:* (rules, drafts, records — all in memory; enabling a rule produces a draft for that
  * session shortly after) and gateway:* (adapter states with a mocked iLink login).
  */
-import type { AdapterState, AutoReplyRecord, AutoReplyRule, ChannelKind, ReplyDraft, WxMessage } from '@aiwc/protocol'
+import {
+  JEV_SILENCE_OPTION,
+  jevCandidateOption,
+  normaliseJevRuleConfig,
+  type AdapterState,
+  type AutoReplyRecord,
+  type AutoReplyRule,
+  type ChannelKind,
+  type JevDecision,
+  type ReplyDraft,
+  type WxMessage,
+} from '@aiwc/protocol'
 import type { HandlersFor, MockContext } from './core'
 import { qrPlaceholderSvg } from './media'
 
-export interface AutoReplyModule extends HandlersFor<'autoreply'>, HandlersFor<'gateway'> {
+export interface AutoReplyModule extends HandlersFor<'autoreply'>, HandlersFor<'gateway'>, HandlersFor<'jev'> {
   rules(): AutoReplyRule[]
 }
+
+const JEV_MOCK_MODEL = 'jev-1.13.0'
 
 const RECALL_WINDOW_MS = 2 * 60_000
 
@@ -61,6 +74,52 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
     return trigger.senderName && data.sessions.get(rule.sessionId)?.kind === 'group'
       ? `@${trigger.senderName} ${base}`
       : base
+  }
+
+  /**
+   * A made-up Jev answer: a random candidate leads with a random confidence, the rest share the
+   * remainder; the outcome follows the rule's threshold exactly like the real decider.
+   */
+  function fakeJevDecision(rule: AutoReplyRule, trigger: WxMessage): { decision: JevDecision; text?: string } {
+    const config = normaliseJevRuleConfig(rule.jev)
+    const options: Record<string, string> = {}
+    config.candidates.forEach((text, i) => {
+      options[jevCandidateOption(i)] = fillTemplate(text, rule, trigger)
+    })
+    const ids = Object.keys(options)
+    if (config.allowSilence) ids.push(JEV_SILENCE_OPTION)
+    const winner = ctx.rng.chance(0.8) && Object.keys(options).length ? ctx.rng.pick(Object.keys(options)) : ids.at(-1)!
+    const lead = 0.45 + ctx.rng.next() * 0.5
+    const probabilities: Record<string, number> = {}
+    const rest = ids.filter((id) => id !== winner)
+    let remaining = 1 - lead
+    rest.forEach((id, i) => {
+      const share = i === rest.length - 1 ? remaining : remaining * ctx.rng.next() * 0.7
+      probabilities[id] = Number(share.toFixed(3))
+      remaining -= share
+    })
+    probabilities[winner] = Number(lead.toFixed(3))
+    const confidence = Number((lead * 0.9).toFixed(2))
+    const confident = confidence >= config.minConfidence
+    const fallback = Object.keys(options).sort((a, b) => (probabilities[b] ?? 0) - (probabilities[a] ?? 0))[0]
+    const picked = winner === JEV_SILENCE_OPTION ? fallback : winner
+    const outcome: JevDecision['outcome'] =
+      (winner === JEV_SILENCE_OPTION && confident) || picked === undefined ? 'silence' : confident ? 'send' : 'confirm'
+    return {
+      decision: {
+        model: JEV_MOCK_MODEL,
+        choice: winner,
+        confidence,
+        probabilities,
+        options,
+        needsReply: Number((0.3 + ctx.rng.next() * 0.7).toFixed(2)),
+        threshold: config.minConfidence,
+        outcome,
+        latencyMs: ctx.rng.int(90, 420),
+        inputTokens: ctx.rng.int(200, 900),
+      },
+      text: outcome === 'silence' || picked === undefined ? undefined : options[picked],
+    }
   }
 
   /** The audit record behind a draft: created pending with the draft, then settled by send / reject. */
@@ -121,9 +180,40 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
     const trigger = latestTrigger(rule.sessionId)
     if (!trigger) return
     const session = data.sessions.get(rule.sessionId)
-    const text =
-      current.source === 'fixed' ? fillTemplate(current.fixedText ?? '', current, trigger) : aiDraft(current, trigger)
-    const mode: ReplyDraft['mode'] = current.sendMode === 'confirm' ? 'confirm' : 'auto'
+    let jev: JevDecision | undefined
+    let text: string
+    if (current.source === 'jev') {
+      const decided = fakeJevDecision(current, trigger)
+      jev = decided.decision
+      if (decided.text === undefined) {
+        // Silence: recorded as "no reply needed", no draft.
+        const silent: AutoReplyRecord = {
+          id: ctx.id('rec'),
+          ruleId: current.id,
+          sessionId: current.sessionId,
+          triggerMessage: {
+            id: trigger.id,
+            localId: trigger.id,
+            text: trigger.text,
+            senderName: trigger.senderName,
+            at: trigger.createdAt,
+          },
+          replyText: '',
+          at: ctx.now(),
+          status: 'rejected',
+          error: `Jev 判断这条不用回（置信度 ${Math.round(jev.confidence * 100)}%）`,
+          jev,
+        }
+        records.unshift(silent)
+        ctx.emit('autoreply:record', { ...silent })
+        return
+      }
+      text = decided.text
+    } else {
+      text =
+        current.source === 'fixed' ? fillTemplate(current.fixedText ?? '', current, trigger) : aiDraft(current, trigger)
+    }
+    const mode: ReplyDraft['mode'] = jev?.outcome === 'confirm' || current.sendMode === 'confirm' ? 'confirm' : 'auto'
     const now = ctx.now()
     const countdownMs = ctx.config().autoReply.countdownMs
     for (const d of drafts.values())
@@ -159,7 +249,9 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
       countdownEndsAt: mode === 'auto' ? now + countdownMs : undefined,
     }
     drafts.set(draft.id, draft)
-    ctx.emit('autoreply:record', { ...recordFor(draft) })
+    const record = recordFor(draft)
+    if (jev) record.jev = jev
+    ctx.emit('autoreply:record', { ...record })
     emitDraft(draft)
     ctx.emit('gateway:event', { type: 'autoreply.queued', draftId: draft.id })
     if (mode === 'confirm')
@@ -331,6 +423,25 @@ export function autoreplyHandlers(ctx: MockContext): AutoReplyModule {
     'autoreply:resume': () => {
       halted = false
       ctx.emit('app:toast', { kind: 'success', text: '自动回复已恢复' })
+    },
+
+    'jev:test': async ({ apiKey }) => {
+      await ctx.delay(600)
+      if (!apiKey && !ctx.config().ai.jev.apiKeyRef)
+        return { ok: false, code: 'no_key', error: '尚未填写 Jev API Key，请到「设置 › AI 接入 › Jev」填写' }
+      return { ok: true, latencyMs: ctx.rng.int(80, 260), models: ['jev-latest', 'jev-preview'] }
+    },
+    'jev:preview': async ({ sessionId, rule }) => {
+      await ctx.delay(700)
+      const trigger = latestTrigger(sessionId)
+      if (!trigger) throw new Error('最后一条是你发的，没有待回复的消息')
+      const decided = fakeJevDecision({ ...rule, sessionId }, trigger)
+      return {
+        decision: decided.decision,
+        text: decided.text,
+        trigger: { text: trigger.text, senderName: trigger.senderName, at: trigger.createdAt },
+        stateChars: ctx.rng.int(600, 2400),
+      }
     },
 
     'gateway:status': () =>

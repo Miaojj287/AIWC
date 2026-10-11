@@ -141,6 +141,63 @@ describe('createAutoReplyService', () => {
     h.records.close()
   })
 
+  it('a generator that skips records the silence with its reason and produces no draft', async () => {
+    const jev = {
+      model: 'jev',
+      choice: 'none',
+      confidence: 0.9,
+      probabilities: { none: 0.9, c1: 0.1 },
+      options: { c1: '好的' },
+      threshold: 0.6,
+      outcome: 'silence' as const,
+      latencyMs: 80,
+    }
+    const h = setup({ rules: [rule('u_alice', { source: 'jev' })], generate: async () => ({ skip: '不用回', jev }) })
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    expect(h.drafts).toHaveLength(0)
+    expect(h.records.listRecords({ sessionId: 'u_alice' })[0]).toMatchObject({
+      status: 'rejected',
+      error: '不用回',
+      jev,
+    })
+    // Silence answered the message: the same trigger is not retried on the next pass.
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    expect(h.records.listRecords({ sessionId: 'u_alice' })).toHaveLength(1)
+    h.records.close()
+  })
+
+  it('a generator asking for confirmation parks the reply even under a full-auto rule, keeping its decision', async () => {
+    const jev = {
+      model: 'jev',
+      choice: 'c1',
+      confidence: 0.4,
+      probabilities: { c1: 0.5, none: 0.5 },
+      options: { c1: '好的' },
+      threshold: 0.6,
+      outcome: 'confirm' as const,
+      latencyMs: 80,
+    }
+    const h = setup({
+      rules: [rule('u_alice', { source: 'jev', sendMode: 'auto' })],
+      generate: async () => ({ text: '好的', jev, confirm: true }),
+    })
+    await h.service.handle(ev(), { reply: true, reason: 'ok' }, KEY)
+    expect(h.lastDraft()).toMatchObject({
+      state: 'pending',
+      mode: 'confirm',
+      draft: '好的',
+      countdownEndsAt: undefined,
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(h.sent).toHaveLength(0)
+    expect(h.records.listRecords({ sessionId: 'u_alice' })[0]).toMatchObject({
+      status: 'pending',
+      sendMode: 'confirm',
+      jev,
+    })
+    h.records.close()
+  })
+
   it('auto mode: fixed text with variables → countdown → send → records sent', async () => {
     const { service, sent, drafts, recs, events, records } = setup({ countdownMs: 3000 })
     await service.handle(ev(), { reply: true, reason: 'ok' }, KEY)

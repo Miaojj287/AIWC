@@ -41,7 +41,7 @@
 :root[data-theme='light'] {
   --fill-13: rgb(0 0 0 / 0.10);
   --line-16: rgb(0 0 0 / 0.14);
-  --fill-20: rgb(0 0 0 / 0.16);
+  --fill-20: rgb(0 0 0 / 0.22);
   --line-25: rgb(0 0 0 / 0.22);
   --fill-28: rgb(0 0 0 / 0.22);
   --line-40: rgb(0 0 0 / 0.36);
@@ -56,12 +56,12 @@
   to { opacity: 0; }
 }
 @keyframes kit-pop-in {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
 }
 @keyframes kit-pop-out {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
 }
 @keyframes kit-slide-in-right {
   from { transform: translateX(100%); }
@@ -71,14 +71,6 @@
   from { transform: translateX(0); }
   to { transform: translateX(100%); }
 }
-@keyframes kit-toast-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes kit-menu-in {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
-}
 @keyframes kit-indeterminate {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(300%); }
@@ -87,19 +79,87 @@
 /* Scrim: the single shared overlay behind dialogs and drawers. */
 .kit-overlay { background: var(--scrim); }
 
-/* Radix data-state hooks: opening / closing motion for floating layers */
-.kit-overlay[data-state='open'] { animation: kit-fade-in var(--dur-base) ease-out; }
-.kit-overlay[data-state='closed'] { animation: kit-fade-out var(--dur-fast) ease-in; }
-.kit-dialog[data-state='open'] { animation: kit-pop-in var(--dur-base) ease-out; }
-.kit-dialog[data-state='closed'] { animation: kit-pop-out var(--dur-fast) ease-in; }
-.kit-drawer[data-state='open'] { animation: kit-slide-in-right var(--dur-base) ease-out; }
-.kit-drawer[data-state='closed'] { animation: kit-slide-out-right var(--dur-fast) ease-in; }
-.kit-menu[data-state='open'] { animation: kit-menu-in var(--dur-fast) ease-out; }
-.kit-toast { animation: kit-toast-in var(--dur-base) ease-out; }
-.kit-indeterminate { animation: kit-indeterminate 1.4s ease-in-out infinite; }
+/* Radix Presence keeps occasional surfaces mounted until their exit animation finishes.
+ * Translation belongs to Tailwind's independent translate property; only scale animates here. */
+.kit-overlay[data-state='open'] { animation: kit-fade-in var(--dur-surface) var(--ease-out); }
+.kit-overlay[data-state='closed'] { animation: kit-fade-out var(--dur-fast) var(--ease-out); }
+.kit-dialog[data-state='open'] { animation: kit-pop-in var(--dur-surface) var(--ease-out); }
+.kit-dialog[data-state='closed'] { animation: kit-pop-out var(--dur-fast) var(--ease-out); }
+.kit-drawer[data-state='open'] { animation: kit-slide-in-right var(--dur-surface) var(--ease-drawer); }
+.kit-drawer[data-state='closed'] { animation: kit-slide-out-right var(--dur-base) var(--ease-out); }
+/* Menus, selects and tooltips are frequent navigation: their state changes are immediate. */
+.kit-menu {
+  transform-origin: var(--radix-popover-content-transform-origin,
+    var(--radix-dropdown-menu-content-transform-origin, var(--radix-context-menu-content-transform-origin,
+    var(--radix-tooltip-content-transform-origin, center))));
+}
+.kit-toast {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+}
+@starting-style {
+  .kit-toast { opacity: 0; transform: translateY(-25%); }
+}
+.kit-progress-fill { transition: transform var(--dur-base) var(--ease-out); }
+.kit-indeterminate { animation: kit-indeterminate 1.4s linear infinite; }
+/* Live work label (the model thinking, a tool running): a soft band sweeps across the text, then rests. It is an
+ * alpha mask over solid text, not a colour gradient: the label keeps its token colour (CLAUDE.md §2.2). */
+@keyframes kit-shimmer {
+  0% { mask-position: 100% 0; }
+  50%, 100% { mask-position: 0% 0; }
+}
+.kit-shimmer {
+  mask-image: linear-gradient(90deg, #000 34%, rgb(0 0 0 / 0.3) 50%, #000 66%);
+  mask-size: 300% 100%;
+  animation: kit-shimmer 3.2s linear infinite;
+}
 
+/* A pointer press changes colour immediately; the release still eases back. */
+:where(button, [role='button']):active { transition-duration: 0ms; }
+/* Keyboard-driven surfaces open and close at once. The animation keeps its name at a near-zero duration: Radix
+ * Presence waits for `animationend` of the named animation, so `animation: none` would strand a closing dialog
+ * (and its scrim) on screen if a key was pressed during its exit. Toasts are notifications, not something the
+ * user is waiting on, so they keep their entry. */
+:root[data-input='keyboard'] :is(.kit-overlay, .kit-dialog, .kit-drawer) { animation-duration: 0.01ms; }
+/* The scrollbar of a hover ScrollArea fades like the OS overlay bar instead of popping on every hover. */
+.kit-scrollbar { transition: opacity var(--dur-fast) var(--ease-out); }
+@starting-style {
+  .kit-scrollbar { opacity: 0; }
+}
+.kit-scrollbar[data-state='hidden'] { animation: kit-fade-out var(--dur-fast) var(--ease-out) forwards; }
+/* A drawer slides for --dur-base on exit; its scrim keeps pace so the last frames never slide over an undimmed page. */
+.kit-overlay:has(+ .kit-drawer)[data-state='closed'] { animation-duration: var(--dur-base); }
+/* One entry for rare, watched state changes (a step turning ✓, a milestone confirmed): scale .96 → 1 + fade, 220ms. */
+.kit-enter {
+  transition: opacity var(--dur-surface) var(--ease-out), transform var(--dur-surface) var(--ease-out);
+}
+@starting-style {
+  .kit-enter { opacity: 0; transform: scale(0.96); }
+}
+
+/* Reduced motion means gentler, not none: surfaces still fade, busy indicators still look alive (a slow opacity
+ * breathe instead of rotation), progress and switches change at once, and nothing moves across the screen. */
+@keyframes kit-breathe {
+  to { opacity: 0.35; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .kit-overlay, .kit-dialog, .kit-drawer, .kit-menu, .kit-toast { animation: none !important; }
+  .kit-overlay[data-state='open'] { animation-duration: var(--dur-fast); }
+  .kit-dialog[data-state='open'], .kit-drawer[data-state='open'] { animation: kit-fade-in var(--dur-fast) var(--ease-out); }
+  .kit-dialog[data-state='closed'], .kit-drawer[data-state='closed'] { animation: kit-fade-out var(--dur-fast) var(--ease-out); }
+  .kit-toast { transform: none; transition-property: opacity; }
+  @starting-style { .kit-toast { opacity: 0; transform: none; } }
+  .kit-progress-fill, [role='switch'] > *, .kit-scrollbar { transition: none; }
+  .kit-enter { transition-property: opacity; }
+  @starting-style { .kit-enter { transform: none; } }
+  .kit-scrollbar[data-state='hidden'] { animation-duration: 0.01ms; }
+  /* A dimmed full track says "busy, unknown length"; a parked segment would read as half done. */
+  .kit-indeterminate { animation: none; width: 100%; opacity: 0.4; }
+  /* The label says it is working; a slow breathe replaces the travelling band. */
+  .kit-shimmer { mask-image: none; animation: kit-breathe 1.2s ease-in-out infinite alternate; }
+  /* A loop on something already on screen eases both ways; ease-out would make the pulse lopsided. */
+  .animate-spin { animation: kit-breathe 1.2s ease-in-out infinite alternate; }
+  .animate-pulse { animation: none; }
 }
 
 /* Color controls are literal color samples, independent of the active theme. */

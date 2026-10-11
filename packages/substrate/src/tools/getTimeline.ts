@@ -66,7 +66,7 @@ export const getTimeline = defineSubstrateTool({
       const ordered = await createNameResolver(ctx.services.substrate).withSenderNames(
         sortBySeq(dedupeMessages(res.items)),
       )
-      const messages = ordered.map(compactMessage)
+      const messages = ordered.map((m) => compactMessage(m))
       const first = ordered[0]
       const last = ordered[ordered.length - 1]
       return ok(

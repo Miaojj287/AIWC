@@ -6,12 +6,14 @@ import type {
   ModelSelection,
   PermissionMode,
   ScheduledTask,
+  TaskAction,
+  TaskCatchUp,
   TaskSchedule,
   TaskScheduleKind,
   TaskTemplate,
 } from '@aiwc/protocol'
 import type { MessageKey, Translator } from '@/i18n'
-import { formatTime } from '@/platform/format'
+import { formatDateTime, formatTime } from '@/platform/format'
 
 export interface TaskDraft {
   name: string
@@ -21,9 +23,19 @@ export interface TaskDraft {
   /** Unattended runs default to Bypass; a template that sends outward comes with Autopilot. */
   permissionMode: PermissionMode
   model?: ModelSelection
+  /** 完成后推送到我的微信. Always sent explicitly so switching it off overwrites a saved `true`. */
+  pushToPhone: boolean
+  /** Run the agent, or only remind with the prompt text. */
+  action: TaskAction
+  /** A slot missed while the app was closed / the machine asleep: run it once when back, or only record it. */
+  catchUp: TaskCatchUp
+  /** Kept as-is when an Agent-created task is edited (its reminder goes back to that conversation). */
+  sourceThreadId?: string
 }
 
-export type TaskDraftErrors = Partial<Record<'name' | 'prompt' | 'time' | 'weekdays' | 'interval' | 'cron', string>>
+export type TaskDraftErrors = Partial<
+  Record<'name' | 'prompt' | 'time' | 'weekdays' | 'interval' | 'cron' | 'at', string>
+>
 
 export type TaskSegment = 'all' | 'on' | 'paused'
 
@@ -43,6 +55,9 @@ export function emptyDraft(template?: TaskTemplate): TaskDraft {
     schedule: template?.schedule ?? { kind: 'daily', time: DEFAULT_TIME },
     enabled: true,
     permissionMode: template?.permissionMode ?? 'bypass',
+    pushToPhone: false,
+    action: 'agent',
+    catchUp: 'once',
   }
 }
 
@@ -54,6 +69,10 @@ export function draftFromTask(task: ScheduledTask): TaskDraft {
     enabled: task.enabled,
     permissionMode: task.permissionMode,
     ...(task.model ? { model: task.model } : {}),
+    pushToPhone: task.pushToPhone === true,
+    action: task.action,
+    catchUp: task.catchUp,
+    ...(task.sourceThreadId ? { sourceThreadId: task.sourceThreadId } : {}),
   }
 }
 
@@ -64,6 +83,9 @@ export function sameDraft(a: TaskDraft, b: TaskDraft): boolean {
     a.enabled === b.enabled &&
     JSON.stringify(a.schedule) === JSON.stringify(b.schedule) &&
     a.permissionMode === b.permissionMode &&
+    a.pushToPhone === b.pushToPhone &&
+    a.action === b.action &&
+    a.catchUp === b.catchUp &&
     JSON.stringify(a.model ?? null) === JSON.stringify(b.model ?? null)
   )
 }
@@ -80,10 +102,20 @@ export function scheduleOfKind(kind: TaskScheduleKind, previous: TaskSchedule): 
       return { kind, everyMinutes: DEFAULT_INTERVAL_MINUTES }
     case 'cron':
       return { kind, expression: '' }
+    case 'once':
+      return { kind, at: nextWholeHour(Date.now()) }
   }
 }
 
-export function validateDraft(draft: TaskDraft, t: Translator): TaskDraftErrors {
+/** The start of the next hour (a one-shot's starting value). */
+export function nextWholeHour(now: number): number {
+  const d = new Date(now)
+  d.setMinutes(0, 0, 0)
+  d.setHours(d.getHours() + 1)
+  return d.getTime()
+}
+
+export function validateDraft(draft: TaskDraft, t: Translator, now: number = Date.now()): TaskDraftErrors {
   const errors: TaskDraftErrors = {}
   if (!draft.name.trim()) errors.name = t('tasks.editor.errors.name')
   if (!draft.prompt.trim()) errors.prompt = t('tasks.editor.errors.prompt')
@@ -93,6 +125,8 @@ export function validateDraft(draft: TaskDraft, t: Translator): TaskDraftErrors 
   if (s.kind === 'interval' && (!Number.isInteger(s.everyMinutes) || s.everyMinutes < 5))
     errors.interval = t('tasks.editor.errors.interval')
   if (s.kind === 'cron' && s.expression.trim().split(/\s+/).length < 5) errors.cron = t('tasks.editor.errors.cron')
+  // A one-shot that already fired (switched itself off) may still be renamed without moving its time.
+  if (s.kind === 'once' && draft.enabled && !(s.at > now)) errors.at = t('tasks.editor.errors.at')
   return errors
 }
 
@@ -119,6 +153,8 @@ export function describeSchedule(schedule: TaskSchedule, t: Translator): string 
     }
     case 'cron':
       return t('tasks.schedule.cron', { expr: schedule.expression })
+    case 'once':
+      return t('tasks.schedule.once', { time: formatDateTime(schedule.at) })
   }
 }
 
@@ -130,6 +166,9 @@ export interface TaskStatusLine {
 /** Second line of a list row: what the task is doing now, else when it runs next, else how the last run went. */
 export function taskStatusLine(task: ScheduledTask, t: Translator, now: number = Date.now()): TaskStatusLine {
   if (task.running) return { kind: 'running', text: t('tasks.list.status.running') }
+  // A one-shot switches itself off once it fired: say how that went rather than 已暂停.
+  if (!task.enabled && task.schedule.kind === 'once' && task.lastRunAt)
+    return { kind: 'paused', text: lastRunText(task, t, now) ?? t('tasks.list.status.paused') }
   if (!task.enabled) return { kind: 'paused', text: t('tasks.list.status.paused') }
   if (task.lastRunStatus === 'failed' && task.lastRunAt)
     return { kind: 'failed', text: t('tasks.list.status.lastFailed', { time: formatTime(task.lastRunAt, now) }) }
@@ -150,6 +189,10 @@ export function lastRunText(task: ScheduledTask, t: Translator, now: number = Da
       return t('tasks.list.status.lastCancelled', { time })
     case 'skipped':
       return t('tasks.list.status.lastSkipped', { time })
+    case 'missed':
+      return t('tasks.list.status.lastMissed', { time })
+    case 'interrupted':
+      return t('tasks.list.status.lastInterrupted', { time })
     case 'running':
       return t('tasks.list.status.running')
   }

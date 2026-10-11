@@ -361,6 +361,35 @@ describe('iLink adapter', () => {
     })
   })
 
+  it('retries a -14 send once without the stale context token before treating the login as expired', async () => {
+    const fake = createFakeFetch({
+      'ilink/bot/sendmessage': (call) =>
+        (call.body as { msg: { context_token?: string } }).msg.context_token
+          ? jsonResponse({ ret: -14, errmsg: 'session timeout' })
+          : jsonResponse({ ret: 0 }),
+    })
+    const saved: unknown[] = []
+    const { adapter: a } = makeAdapter(fake, {
+      // Injected store (the host keeps the login encrypted): nothing is written into stateDir.
+      sessionStore: {
+        path: 'memory',
+        load: () => ({ token: 't', baseUrl: 'https://api.test', botId: 'b', userId: 'owner', savedAt: 'x' }),
+        save: (s) => saved.push(s),
+        saveCursor: () => {},
+        clear: () => saved.push('cleared'),
+      },
+    })
+    const to = { channel: 'wechat-ilink' as const, chatId: 'owner', peerId: 'owner', chatType: 'dm' as const }
+    const res = await a.send({ to, parts: [{ type: 'text', text: 'hi' }], contextToken: 'stale', reason: 'cron' })
+    expect(res.ok).toBe(true)
+    expect(
+      fake.of('sendmessage').map((c) => (c.body as { msg: { context_token?: string } }).msg.context_token),
+    ).toEqual(['stale', undefined])
+    expect(a.session).toBeDefined()
+    expect(saved).toEqual([])
+    expect(existsSync(join(stateDir, 'ilink-session.json'))).toBe(false)
+  })
+
   it('drops the session and moves to needs_login when the server reports expiry during polling', async () => {
     const fake = createFakeFetch({
       notifystart: () => jsonResponse({ ret: 0 }),

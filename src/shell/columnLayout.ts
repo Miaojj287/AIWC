@@ -2,7 +2,7 @@
  * Column widths + collapsed flags. Persisted in AppConfig.ui (configStore); this hook keeps a live copy
  * while a Resizer drags and writes back on release. Bounds mirror packages/protocol/src/config.ts.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AppConfig } from '@aiwc/protocol'
 import { useConfigStore } from '@/platform/configStore'
 
@@ -14,8 +14,61 @@ export interface WidthBounds {
 
 export const OBJECT_LIST_WIDTH: WidthBounds = { min: 240, max: 400, default: 280 }
 export const AGENT_PANEL_WIDTH: WidthBounds = { min: 320, max: 640, default: 360 }
-/** Collapsed ObjectList re-expand handle. */
-export const LIST_HANDLE_WIDTH = 12
+/** Collapsed ObjectList re-expand handle: wide enough to be a real pointer target (24px). */
+export const LIST_HANDLE_WIDTH = 24
+/** The IconRail (tokens.css `--w-rail`). */
+export const RAIL_WIDTH = 64
+/** Collapsed Agent strip (AgentColumn). */
+export const AGENT_STRIP_WIDTH = 40
+/** The workspace keeps at least this much: tabs, headers and editors are laid out for 400px and up. */
+export const WORKSPACE_MIN_WIDTH = 400
+
+export interface ColumnFitInput {
+  viewport: number
+  listWidth: number
+  agentWidth: number
+  listCollapsed: boolean
+  agentCollapsed: boolean
+}
+
+/**
+ * Saved widths were chosen on some window size; at the minimum window (or after a resize) list 400 + Agent 640
+ * would leave the workspace 96px. The Agent panel yields first, then the list, each down to its own minimum, so
+ * the workspace keeps WORKSPACE_MIN_WIDTH whenever the window allows it. Saved values are not rewritten.
+ */
+export function fitColumns(input: ColumnFitInput): { listWidth: number; agentWidth: number } {
+  const listMin = OBJECT_LIST_WIDTH.min
+  const agentMin = AGENT_PANEL_WIDTH.min
+  const list = input.listCollapsed ? LIST_HANDLE_WIDTH : input.listWidth
+  const agent = input.agentCollapsed ? AGENT_STRIP_WIDTH : input.agentWidth
+  let over = RAIL_WIDTH + list + agent + WORKSPACE_MIN_WIDTH - input.viewport
+  let listWidth = input.listWidth
+  let agentWidth = input.agentWidth
+  if (over > 0 && !input.agentCollapsed) {
+    const give = Math.min(over, Math.max(0, agentWidth - agentMin))
+    agentWidth -= give
+    over -= give
+  }
+  if (over > 0 && !input.listCollapsed) {
+    const give = Math.min(over, Math.max(0, listWidth - listMin))
+    listWidth -= give
+  }
+  return { listWidth, agentWidth }
+}
+
+const subscribeViewport = (notify: () => void) => {
+  window.addEventListener('resize', notify)
+  return () => window.removeEventListener('resize', notify)
+}
+
+/** The window's inner width, re-read on resize. */
+export function useViewportWidth(): number {
+  return useSyncExternalStore(
+    subscribeViewport,
+    () => window.innerWidth,
+    () => 1440,
+  )
+}
 
 export const clampWidth = (value: number, bounds: WidthBounds): number =>
   Math.round(Math.min(bounds.max, Math.max(bounds.min, value)))

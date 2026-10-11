@@ -9,8 +9,9 @@ import type { AppConfig, ConfigPatch } from '@aiwc/protocol'
 import { setLanguage } from '@/i18n'
 import { applyPalette, applyTransparency } from './appearance'
 import { getBridge } from './bridge'
+import { rememberBootTheme, resolveTheme, type ResolvedTheme } from './themeBoot'
 
-export type ResolvedTheme = 'dark' | 'light'
+export { resolveTheme, type ResolvedTheme }
 
 export interface ConfigState {
   config: AppConfig | undefined
@@ -35,15 +36,6 @@ function mergePatch(base: AppConfig, patch: ConfigPatch): AppConfig {
   return next as AppConfig
 }
 
-export function resolveTheme(theme: AppConfig['general']['theme']): ResolvedTheme {
-  if (theme !== 'system') return theme
-  try {
-    return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-  } catch {
-    return 'dark'
-  }
-}
-
 let systemListener: (() => void) | undefined
 
 /** Stamp the resolved theme (and the 透明效果 flag) on <html>; follows the OS when theme === 'system'. */
@@ -56,6 +48,8 @@ export function applyTheme(
   const resolved = resolveTheme(theme)
   document.documentElement.dataset.theme = resolved
   applyPalette(resolved, appearance)
+  // The next launch paints these colours before the config round-trip (src/platform/themeBoot.ts).
+  rememberBootTheme({ theme, appearance })
   if (transparency !== undefined) applyTransparency(transparency)
   systemListener?.()
   systemListener = undefined

@@ -3,8 +3,13 @@
  * observation, cron) is normalised to MessageEvent; every outbound goes through PlatformAdapter.send.
  */
 import type { Millis } from './ids'
+import type { AutoSendHaltCode } from './privacy'
 
-export type ChannelKind = 'desktop' | 'wechat-ilink' | 'wechat-ui' | 'cron' | 'observed'
+/**
+ * 'wechat-remote' = the owner driving the Agent from their own phone through the iLink bot (我的微信): the thread
+ * belongs to the owner, but everything it sends goes back to that one private chat on 'wechat-ilink'.
+ */
+export type ChannelKind = 'desktop' | 'wechat-ilink' | 'wechat-ui' | 'cron' | 'observed' | 'wechat-remote'
 export type ChatType = 'dm' | 'group'
 
 export interface SessionSource {
@@ -101,5 +106,10 @@ export type GatewayEvent =
   | { type: 'autoreply.generating'; sessionId: string; name: string; active: boolean }
   | { type: 'autoreply.queued'; draftId: string }
   | { type: 'autoreply.countdown'; draftId: string; remainingMs: number }
-  | { type: 'autoreply.halted'; reason: string }
+  | {
+      type: 'autoreply.halted'
+      reason: string
+      /** Structured cause; the UI branches on this, never on `reason`. */
+      code?: AutoSendHaltCode
+    }
   | { type: 'login.qr'; channel: ChannelKind; qrDataUrl: string }

@@ -53,6 +53,8 @@ export function registerAutoReplyIpc(ctx: AppContext, _host: HostBridge, handle:
   handle('autoreply:retryDraft', ({ draftId }) => autoReply.retry(draftId))
   handle('autoreply:status', () => ({
     halted: autoReply.haltReason,
+    // The sender's own halts carry their cause; the service halts on its own only for host reasons (account switch).
+    haltCode: autoReply.halted ? (uiSender.haltCode ?? 'other') : undefined,
     connection: ctx.substrate.status().connection,
     accountId: ctx.substrate.status().account?.wxid,
     demo: ctx.substrate.mode() === 'demo',

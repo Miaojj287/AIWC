@@ -23,18 +23,19 @@ import {
   type MenuSpec,
 } from '@/kit'
 import { useT, type Translator } from '@/i18n'
+import { shortcutLabel } from '@/app/shortcuts'
 import { formatClock, formatDateDivider } from '@/platform/format'
 import { wechatEmoji } from './wechatEmoji'
 import { MessageBody } from './MessageBody'
 import { isNoticeKind } from './streamModel'
+import type { LightboxItem } from './Lightbox'
 
 export interface MessageActions {
   onCopy(message: WxMessage): void
   onQuote(message: WxMessage): void
   onToggleSelect(message: WxMessage): void
   onJumpToTime(message: WxMessage): void
-  onDeleteLocal(message: WxMessage): void
-  onOpenImage(src: string, alt: string): void
+  onOpenImage(item: LightboxItem): void
 }
 
 export interface MessageRowProps extends MessageActions {
@@ -94,7 +95,7 @@ function buildMenu(
       id: 'quote',
       label: t('chat.actions.quoteToAgent'),
       icon: AtSign,
-      shortcut: mac ? '⌘⇧A' : 'Ctrl+Shift+A',
+      shortcut: shortcutLabel('agent.quoteActiveTab', mac),
       onSelect: () => actions.onQuote(message),
     },
     {
@@ -117,7 +118,9 @@ function buildMenu(
       label: t('chat.message.deleteLocal'),
       icon: Trash,
       danger: true,
-      onSelect: () => actions.onDeleteLocal(message),
+      // Per-message local deletion has no backend yet: the entry stays visible but says why it cannot run.
+      disabled: true,
+      description: t('chat.deleteUnsupported'),
     },
   ]
 }
@@ -162,7 +165,7 @@ export const MessageRow = memo(function MessageRow({
       <Tooltip content={t('common.copy')}>
         <IconButton size="sm" icon={Copy} label={t('common.copy')} onClick={() => actions.onCopy(message)} />
       </Tooltip>
-      <Tooltip content={t('chat.actions.quoteToAgent')} kbd={mac ? '⌘⇧A' : 'Ctrl+Shift+A'}>
+      <Tooltip content={t('chat.actions.quoteToAgent')} kbd={shortcutLabel('agent.quoteActiveTab', mac)}>
         <IconButton
           size="sm"
           icon={AtSign}
@@ -195,10 +198,13 @@ export const MessageRow = memo(function MessageRow({
       data-message-id={message.id}
       data-selected={selected || undefined}
       className={cn(
-        'group relative flex items-end gap-2.5 px-6 transition-colors duration-(--dur-base)',
+        // A jump lights the row at once and lets it fade: instant in, 220ms out.
+        'group relative flex items-end gap-2.5 px-6',
+        // Selecting in select mode is frequent, so it also answers at once.
+        focused || selected ? 'transition-none' : 'transition-colors duration-(--dur-surface)',
         continued ? 'py-0.5' : 'pb-0.5 pt-2.5',
         self && 'flex-row-reverse',
-        selected && 'bg-accent-12/60',
+        selected && 'bg-accent-12',
         focused && 'bg-accent-15',
         selectMode && 'cursor-pointer',
       )}
@@ -237,9 +243,14 @@ export const MessageRow = memo(function MessageRow({
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <div
+              // A Tab stop per bubble: focus reveals the toolbar (group-focus-within) and Shift+F10 opens the menu.
+              role="group"
+              tabIndex={0}
+              data-message-bubble
+              aria-label={`${message.senderName ?? (self ? t('common.me') : message.senderId)} ${formatClock(message.createdAt)}`}
               className={cn(
-                'relative max-w-full text-bubble leading-[22px]',
-                bare ? 'rounded-item' : self ? 'rounded-[10px] rounded-tr-[4px]' : 'rounded-[10px] rounded-tl-[4px]',
+                'relative max-w-full text-bubble leading-bubble',
+                bare ? 'rounded-item' : self ? 'rounded-window rounded-tr-sm' : 'rounded-window rounded-tl-sm',
                 bubbleClass,
               )}
             >

@@ -112,10 +112,6 @@ export function localizeEvent<K extends EventChannel>(channel: K, payload: Event
       return localizeGatewayEvent(payload as EventMap['gateway:event']) as EventMap[K]
     case 'agent:event':
       return localizeAgentEvent(payload as EventMap['agent:event']) as EventMap[K]
-    case 'diary:progress': {
-      const p = payload as EventMap['diary:progress']
-      return { ...p, step: localizeText(p.step) } as EventMap[K]
-    }
     case 'app:toast': {
       const p = payload as EventMap['app:toast']
       return { ...p, text: localizeText(p.text) } as EventMap[K]

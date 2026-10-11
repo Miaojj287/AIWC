@@ -117,6 +117,9 @@ describe('compaction', () => {
     const req = model.requests[0]!
     expect(req.history[0]!.type).toBe('compaction_summary')
     expect(aux.requests[0]!.system).toContain('证据锚点')
+    // internal calls ask for the least reasoning the model allows; the turn itself keeps the thread's setting
+    expect(aux.requests[0]!.reasoningEffort).toBe('lowest')
+    expect(req.reasoningEffort).toBeUndefined()
   })
 
   it('manual thread.compact uses the same path', async () => {

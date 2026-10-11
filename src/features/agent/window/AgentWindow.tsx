@@ -49,7 +49,8 @@ export function AgentWindow({ platform, runtime }: AgentWindowProps) {
   useEffect(() => {
     if (tabCount === 0) useAgentWindowStore.getState().setPaneHidden(false)
   }, [tabCount])
-  // Entering the window: the composer takes focus, exactly like expanding the panel.
+  // Entering the window: the composer takes focus, exactly like expanding the panel (a pointer-style focus — the box
+  // only firms up its neutral border, no accent; CLAUDE.md §14).
   useEffect(() => {
     store().requestFocus()
   }, [store])
@@ -98,6 +99,7 @@ export function AgentWindow({ platform, runtime }: AgentWindowProps) {
           onTogglePane={() => useAgentWindowStore.getState().setPaneHidden(!paneHidden)}
         />
       }
+      headerDivider={Boolean(surface.view?.items.length) || surface.streaming}
       pane={<Workspace mac={mac} />}
       paneVisible={paneVisible}
     >

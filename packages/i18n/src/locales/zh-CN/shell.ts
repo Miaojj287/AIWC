@@ -6,6 +6,7 @@ export const shell = {
     autoreply: '自动回复',
     clone: 'AI 克隆',
     tasks: '定时任务',
+    todo: '每日待办',
     settings: '设置',
     accountSettings: '{name} · 设置',
   },
@@ -20,6 +21,7 @@ export const shell = {
     resizeWorkspace: '调整工作区宽度',
   },
   agent: {
+    panel: 'Agent 面板',
     expand: '展开 Agent 面板',
     unread: 'Agent 有新消息',
   },
@@ -28,6 +30,7 @@ export const shell = {
     close: '关闭窗口',
     minimize: '最小化窗口',
     fullscreen: '切换全屏',
+    zoom: '缩放窗口',
     actionFailed: '窗口操作失败',
   },
   objectList: {
@@ -46,6 +49,7 @@ export const shell = {
   },
   sessions: {
     title: '会话',
+    search: '搜索会话',
     listLabel: '会话列表',
     segments: { all: '全部', dm: '单聊', group: '群聊' },
     filters: { unreadOnly: '仅未读', mutedOnly: '仅已静音', hidden: '显示已隐藏' },
@@ -72,9 +76,12 @@ export const shell = {
     unreadMuted: '{n} 条未读（已静音）',
     pinned: '已置顶',
     moreActions: '{name} 的更多操作',
+    /** Row above the list while the box has text (and the no-results action): 搜索聊天记录 with that text. */
+    searchHistory: '搜索聊天记录',
+    searchHistoryHint: '查找含「{query}」的消息',
     empty: {
       notConnected: '尚未连接微信',
-      notConnectedHint: '连接本机微信数据库后显示会话',
+      notConnectedHint: '连接后显示本机会话',
       connect: '连接微信',
       loadFailed: '会话加载失败',
       noMatches: '没有匹配的会话',

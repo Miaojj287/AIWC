@@ -156,9 +156,23 @@ describe('channelVerdict', () => {
     ['cron', 'write_file', 'write', 'denied'],
     ['cron', 'send_message', 'send', 'denied'],
     ['desktop', 'send_message', 'send', undefined],
+    // The owner's phone is not a bot channel: the thread's permission mode decides, asking on the phone.
+    ['wechat-remote', 'write_file', 'write', undefined],
+    ['wechat-remote', 'send_message', 'send', undefined],
   ]
   it.each(rows)('%s × %s × %s → %s', (channel, toolName, risk, verdict) => {
     expect(channelVerdict(channel, toolName, risk)).toBe(verdict)
+  })
+})
+
+describe('wechat-remote (我的微信 遥控)', () => {
+  it('asks in Ask mode and never approves sends below Autopilot', () => {
+    const base = { channel: 'wechat-remote' as const, allowAlways: [] }
+    expect(decideApproval({ ...base, toolName: 'shell', risk: 'write', mode: 'ask' })).toBe('ask')
+    expect(decideApproval({ ...base, toolName: 'shell', risk: 'write', mode: 'bypass' })).toBe('approved')
+    expect(decideApproval({ ...base, toolName: 'send_message', risk: 'send', mode: 'bypass' })).toBe('ask')
+    expect(decideApproval({ ...base, toolName: 'rm', risk: 'destructive', mode: 'bypass' })).toBe('ask')
+    expect(decideApproval({ ...base, toolName: 'lookup', risk: 'read', mode: 'ask' })).toBe('approved')
   })
 })
 
@@ -180,7 +194,7 @@ describe('createApprovalGate ask/resolve/cancelAll', () => {
     const r = req()
     const p = gate.ask(r, new AbortController().signal)
     expect(gate.resolve(r.approvalId, 'allow_always')).toBe(true)
-    await expect(p).resolves.toBe('allow_always')
+    await expect(p).resolves.toEqual({ decision: 'allow_always' })
     expect(gate.resolve(r.approvalId, 'deny')).toBe(false)
   })
 
@@ -190,7 +204,25 @@ describe('createApprovalGate ask/resolve/cancelAll', () => {
     const p = gate.ask(r, new AbortController().signal)
     expect(gate.resolve(r.approvalId, 'allow_once', asThreadId('thr_b'))).toBe(false)
     expect(gate.resolve(r.approvalId, 'allow_once', asThreadId('thr_a'))).toBe(true)
-    await expect(p).resolves.toBe('allow_once')
+    await expect(p).resolves.toEqual({ decision: 'allow_once' })
+  })
+
+  it('carries a denial note and a grant scope only with the matching decision', async () => {
+    const gate = createApprovalGate()
+    const denied = req()
+    const p1 = gate.ask(denied, new AbortController().signal)
+    gate.resolve(denied.approvalId, 'deny', undefined, { reason: '  先列出文件再改  ', scope: 'global' })
+    await expect(p1).resolves.toEqual({ decision: 'deny', reason: '先列出文件再改' })
+
+    const granted = req()
+    const p2 = gate.ask(granted, new AbortController().signal)
+    gate.resolve(granted.approvalId, 'allow_always', undefined, { reason: 'ignored', scope: 'global' })
+    await expect(p2).resolves.toEqual({ decision: 'allow_always', scope: 'global' })
+
+    const long = req()
+    const p3 = gate.ask(long, new AbortController().signal)
+    gate.resolve(long.approvalId, 'deny', undefined, { reason: 'x'.repeat(5000) })
+    expect((await p3).reason).toHaveLength(1000)
   })
 
   it('unknown approvalId → false', () => {
@@ -202,14 +234,14 @@ describe('createApprovalGate ask/resolve/cancelAll', () => {
     const ac = new AbortController()
     const p = gate.ask(req(), ac.signal)
     ac.abort()
-    await expect(p).resolves.toBe('deny')
+    await expect(p).resolves.toEqual({ decision: 'deny' })
   })
 
   it('already-aborted signal → deny immediately', async () => {
     const gate = createApprovalGate()
     const ac = new AbortController()
     ac.abort()
-    await expect(gate.ask(req(), ac.signal)).resolves.toBe('deny')
+    await expect(gate.ask(req(), ac.signal)).resolves.toEqual({ decision: 'deny' })
   })
 
   it('cancelAll denies only the given thread', async () => {
@@ -219,8 +251,28 @@ describe('createApprovalGate ask/resolve/cancelAll', () => {
     const pa = gate.ask(a, new AbortController().signal)
     const pb = gate.ask(b, new AbortController().signal)
     gate.cancelAll(asThreadId('thr_a'))
-    await expect(pa).resolves.toBe('deny')
+    await expect(pa).resolves.toEqual({ decision: 'deny' })
     expect(gate.resolve(b.approvalId, 'allow_once')).toBe(true)
-    await expect(pb).resolves.toBe('allow_once')
+    await expect(pb).resolves.toEqual({ decision: 'allow_once' })
+  })
+
+  it('an aliased child is answered and cancelled through its parent only while the alias lasts', async () => {
+    const gate = createApprovalGate()
+    const unalias = gate.alias?.(asThreadId('thr_child'), asThreadId('thr_parent'))
+    const first = req('thr_child')
+    const p1 = gate.ask(first, new AbortController().signal)
+    expect(gate.resolve(first.approvalId, 'allow_once', asThreadId('thr_other'))).toBe(false)
+    expect(gate.resolve(first.approvalId, 'allow_once', asThreadId('thr_parent'))).toBe(true)
+    await expect(p1).resolves.toEqual({ decision: 'allow_once' })
+
+    const second = req('thr_child')
+    const p2 = gate.ask(second, new AbortController().signal)
+    gate.cancelAll(asThreadId('thr_parent'))
+    await expect(p2).resolves.toEqual({ decision: 'deny' })
+
+    unalias?.()
+    const third = req('thr_child')
+    void gate.ask(third, new AbortController().signal)
+    expect(gate.resolve(third.approvalId, 'allow_once', asThreadId('thr_parent'))).toBe(false)
   })
 })

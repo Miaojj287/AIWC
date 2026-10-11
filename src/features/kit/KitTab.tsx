@@ -40,7 +40,7 @@ export function KitTab(_props: TabRendererProps) {
                 href={`#${s.id}`}
                 onClick={(e) => {
                   e.preventDefault()
-                  document.getElementById(s.id)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                  document.getElementById(s.id)?.scrollIntoView({ block: 'start', behavior: 'instant' })
                 }}
                 className="rounded-chip bg-line-6 px-2.5 py-0.5 text-caption text-fg-2 hover:bg-line-10 hover:text-fg"
               >

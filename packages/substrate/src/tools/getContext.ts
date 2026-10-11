@@ -5,6 +5,7 @@
 import { z } from 'zod'
 import { scopeBotSession } from './botScope'
 import {
+  MAX_ANCHOR_TEXT_CHARS,
   READ_PROFILES,
   MessageAnchorSchema,
   anchorsMeta,
@@ -34,7 +35,7 @@ export type GetContextInput = z.infer<typeof GetContextInput>
 export const getContext = defineSubstrateTool({
   name: 'get_context',
   description:
-    '展开某条消息前后的上下文原文，用来核对事实、引用出处。入参直接用 search_messages / semantic_search 命中结果里的 anchor（证据锚点）原样填入。返回锚点前后各 radius 条消息（时间 + 发送者 + 原文，按时间正序），锚点那条标 isAnchor。\n' +
+    '展开某条消息前后的上下文原文，用来核对事实、引用出处。入参直接用 search_messages / semantic_search 命中结果里的 anchor（证据锚点）原样填入。返回锚点前后各 radius 条消息（时间 + 发送者 + 原文，按时间正序），锚点那条标 isAnchor 并给出完整原文；其余消息的 text 带 truncated 时只显示了开头。\n' +
     'Expand the messages around an evidence anchor (from a search hit) for verification and citation. Returns ordered compact messages with the anchor flagged.',
   inputSchema: GetContextInput,
   profiles: READ_PROFILES,
@@ -54,10 +55,11 @@ export const getContext = defineSubstrateTool({
           anchor: input.anchor,
         })
       }
-      const messages = ordered.map((m) => {
-        const c = compactMessage(m)
-        return m.id === input.anchor.messageId ? { ...c, isAnchor: true } : c
-      })
+      const messages = ordered.map((m) =>
+        m.id === input.anchor.messageId
+          ? { ...compactMessage(m, MAX_ANCHOR_TEXT_CHARS), isAnchor: true }
+          : compactMessage(m),
+      )
       const anchorFound = messages.some((m) => 'isAnchor' in m)
       return ok(
         {

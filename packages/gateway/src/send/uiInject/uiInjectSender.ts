@@ -14,6 +14,7 @@
  */
 import type {
   AdapterState,
+  AutoSendHaltCode,
   GatewayEvent,
   PlatformAdapter,
   SendRequest,
@@ -27,6 +28,7 @@ import {
   INJECT_FAILURE_TEXT,
   InjectorError,
   createDarwinInjector,
+  type InjectFailure,
   createInjector,
   type WeChatInjector,
 } from './injectors'
@@ -57,6 +59,8 @@ export interface UiInjectSender {
   send(req: SendRequest): Promise<SendResult>
   readonly halted: boolean
   readonly haltReason: string | undefined
+  /** Structured cause of the halt (what the UI branches on); undefined while not halted. */
+  readonly haltCode: AutoSendHaltCode | undefined
   /** Manual acknowledgement after a halt; nothing sends until this is called. */
   resume(): void
   events: { on(listener: (e: GatewayEvent) => void): () => void }
@@ -103,6 +107,7 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   let draining = false
   let halted = false
   let haltReason: string | undefined
+  let haltCode: AutoSendHaltCode | undefined
 
   // ── verification ─────────────────────────────────────────────────────────────────────────────
   /**
@@ -168,13 +173,14 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
   }
 
   // ── halt latch ───────────────────────────────────────────────────────────────────────────────
-  function halt(reason: string, detail?: string): SendResult {
+  function halt(reason: InjectFailure | 'wrong-session' | 'not-sent', detail?: string): SendResult {
     halted = true
+    haltCode = reason
     haltReason = detail ?? HALT_TEXT[reason] ?? reason
     for (const job of queue.splice(0))
       job.resolve({ ok: false, verified: false, error: `自动发送已熔断：${haltReason}` })
     log('error', 'ui-inject halted', { reason, detail })
-    events.emit({ type: 'autoreply.halted', reason: haltReason })
+    events.emit({ type: 'autoreply.halted', reason: haltReason, code: reason })
     states.emit({ state: 'error', detail: haltReason })
     return { ok: false, verified: false, error: haltReason }
   }
@@ -308,6 +314,9 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
     get haltReason() {
       return haltReason
     },
+    get haltCode() {
+      return haltCode
+    },
     get queued() {
       return queue.length
     },
@@ -315,6 +324,7 @@ export function createUiInjectSender(deps: UiInjectSenderDeps): UiInjectSender {
       if (!halted) return
       halted = false
       haltReason = undefined
+      haltCode = undefined
       states.emit({ state: 'connected' })
       void drain()
     },

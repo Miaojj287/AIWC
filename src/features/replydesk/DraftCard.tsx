@@ -91,7 +91,7 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
           <span className="font-latin text-micro text-fg-3">{formatTime(draft.createdAt)}</span>
         </div>
       </div>
-      <div className="rounded-item border border-line-6 bg-content px-3 py-2 text-caption leading-[18px] text-fg-2">
+      <div className="rounded-item border border-line-6 bg-content px-3 py-2 text-caption leading-4.5 text-fg-2">
         <span className="text-fg-3">{t('replydesk.draft.originalLabel')}</span>
         {draft.triggerText}
       </div>
@@ -115,7 +115,9 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
           variant="outline"
           size="sm"
           onClick={() => {
-            void invoke('autoreply:holdDraft', { draftId: draft.id }).catch((e) => toast.error(String(e)))
+            void invoke('autoreply:holdDraft', { draftId: draft.id }).catch((e: unknown) =>
+              toast.error(t('replydesk.draft.holdFailed'), { detail: e instanceof Error ? e.message : String(e) }),
+            )
           }}
         >
           {t('replydesk.draft.holdAndEdit')}
@@ -148,7 +150,7 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
         </div>
       ) : null}
       {failed ? <InlineHint kind="error">{draft.error ?? t('replydesk.draft.sendFailed')}</InlineHint> : null}
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {failed ? (
           <>
             <Button variant="ghost" onClick={() => onDismiss(draft.id)}>
@@ -173,7 +175,11 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
                 onClick={() => {
                   setBusy('edit')
                   void invoke('autoreply:retryDraft', { draftId: draft.id })
-                    .catch((e) => toast.error(t('replydesk.draft.regenerateFailed'), { detail: String(e) }))
+                    .catch((e: unknown) =>
+                      toast.error(t('replydesk.draft.regenerateFailed'), {
+                        detail: e instanceof Error ? e.message : String(e),
+                      }),
+                    )
                     .finally(() => setBusy(null))
                 }}
               >
@@ -194,7 +200,7 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
               icon={Pencil}
               loading={busy === 'edit'}
               disabled={!edited || !text.trim() || (busy !== null && busy !== 'edit')}
-              title={!edited ? t('replydesk.draft.editToEnable') : undefined}
+              disabledReason={!edited ? t('replydesk.draft.editToEnable') : undefined}
               onClick={() => void resolve('edit')}
             >
               {t('replydesk.draft.sendEdited')}
@@ -204,7 +210,7 @@ export function DraftCard({ draft, remainingMs, countdownTotalMs, onDismiss, pri
               icon={Check}
               loading={busy === 'approve'}
               disabled={edited || (busy !== null && busy !== 'approve')}
-              title={edited ? t('replydesk.draft.useSendEdited') : undefined}
+              disabledReason={edited ? t('replydesk.draft.useSendEdited') : undefined}
               onClick={() => void resolve('approve')}
             >
               {t('common.send')}

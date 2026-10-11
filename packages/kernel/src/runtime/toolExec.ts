@@ -140,5 +140,15 @@ export function outcomeToResultItem(
     isError: outcome.isError,
     durationMs: outcome.durationMs,
     truncated: false,
+    ...recordedArtifacts(outcome.artifacts),
+    ...(outcome.subagents?.length ? { subagents: outcome.subagents } : {}),
   }
+}
+
+/** Generated files worth keeping in history: by path only (inline `content` would bloat the rollout). */
+function recordedArtifacts(artifacts: ToolDispatchOutcome['artifacts']): Pick<ToolResultItem, 'artifacts'> {
+  const kept = (artifacts ?? [])
+    .filter((a) => a.path)
+    .map(({ kind, title, path, mediaType }) => ({ kind, title, path, ...(mediaType ? { mediaType } : {}) }))
+  return kept.length ? { artifacts: kept } : {}
 }

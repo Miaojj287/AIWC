@@ -18,9 +18,11 @@ import {
   PopoverAnchor,
   PopoverContent,
   Skeleton,
+  Tooltip,
   type MenuSpec,
 } from '@/kit'
 import { useT } from '@/i18n'
+import { shortcutLabel } from '@/app/shortcuts'
 import { formatDateTime, formatNumber } from '@/platform/format'
 import { toMediaUrl } from './mediaUrl'
 import type { OverviewCounts } from './syncModel'
@@ -53,7 +55,7 @@ export function ChatHeader({ session, meta, counts, mac, members, ...actions }: 
         id: 'search',
         label: t('chat.header.menu.search'),
         icon: Search,
-        shortcut: mac ? '⌘F' : 'Ctrl+F',
+        shortcut: shortcutLabel('search.inPage', mac),
         onSelect: actions.onSearch,
       },
       { id: 'export', label: t('chat.header.menu.export'), icon: Download, onSelect: actions.onExport },
@@ -71,7 +73,7 @@ export function ChatHeader({ session, meta, counts, mac, members, ...actions }: 
         id: 'quote',
         label: t('chat.actions.quoteToAgent'),
         icon: AtSign,
-        shortcut: mac ? '⌘⇧A' : 'Ctrl+Shift+A',
+        shortcut: shortcutLabel('agent.quoteActiveTab', mac),
         onSelect: actions.onQuoteSession,
       },
       { type: 'separator' },
@@ -88,7 +90,7 @@ export function ChatHeader({ session, meta, counts, mac, members, ...actions }: 
   )
 
   return (
-    <div className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line-6 px-4">
+    <div className="flex min-h-18 shrink-0 items-center gap-3 border-b border-line-6 px-5 py-3">
       <Popover open={infoOpen} onOpenChange={setInfoOpen}>
         <PopoverAnchor asChild>
           <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -106,7 +108,7 @@ export function ChatHeader({ session, meta, counts, mac, members, ...actions }: 
             <div className="flex min-w-0 flex-col gap-0.5">
               {session ? (
                 <>
-                  <div className="truncate text-bubble font-medium leading-5 text-fg">{session.title}</div>
+                  <div className="truncate text-bubble font-semibold leading-5 text-fg">{session.title}</div>
                   <div className="truncate text-caption leading-4 text-fg-3">{meta}</div>
                 </>
               ) : (
@@ -130,6 +132,17 @@ export function ChatHeader({ session, meta, counts, mac, members, ...actions }: 
           ) : null}
         </PopoverContent>
       </Popover>
+      <Tooltip content={t('chat.header.menu.search')} kbd={shortcutLabel('search.inPage', mac)}>
+        <IconButton icon={Search} label={t('chat.header.menu.search')} disabled={!session} onClick={actions.onSearch} />
+      </Tooltip>
+      <Tooltip content={t('chat.header.menu.export')}>
+        <IconButton
+          icon={Download}
+          label={t('chat.header.menu.export')}
+          disabled={!session}
+          onClick={actions.onExport}
+        />
+      </Tooltip>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <IconButton icon={Ellipsis} label={t('chat.header.actions')} disabled={!session} />

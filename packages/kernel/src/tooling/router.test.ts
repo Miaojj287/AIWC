@@ -15,7 +15,7 @@ import type { ToolDispatchContext } from '../ports'
 import { createApprovalGate } from './approval'
 import { createHookRunner } from './hooks'
 import { createToolRegistry } from './registry'
-import { createToolRouterFactory, USER_DENIED_MESSAGE, POLICY_DENIED_MESSAGE } from './router'
+import { createToolRouterFactory, USER_DENIED_MESSAGE, POLICY_DENIED_MESSAGE, userDeniedMessage } from './router'
 import { TRUNCATION_MARKER } from './schema'
 
 const EchoInput = z.object({ text: z.string(), n: z.number().int().optional() })
@@ -253,6 +253,23 @@ describe('dispatch funnel', () => {
     expect(events.some((e) => e.type === 'approval.resolved')).toBe(true)
   })
 
+  it('(c) reports the approval wait to the turn so its time budget can pause', async () => {
+    const { router, ctx, approvals, events } = harness({ mode: 'ask' })
+    const endWait = vi.fn()
+    const onApprovalWait = vi.fn(() => endWait)
+    const p = router.dispatch(call('write_note', { text: 'x' }), { ...ctx, onApprovalWait })
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'approval.requested')).toBe(true))
+    expect(onApprovalWait).toHaveBeenCalledTimes(1)
+    expect(endWait).not.toHaveBeenCalled()
+    const req = events.find((e) => e.type === 'approval.requested') as Extract<Event, { type: 'approval.requested' }>
+    approvals.resolve(req.approvalId, 'allow_once')
+    await p
+    expect(endWait).toHaveBeenCalledTimes(1)
+    // calls that need no approval never start a wait
+    await router.dispatch(call('echo', { text: 'y' }), { ...ctx, onApprovalWait })
+    expect(onApprovalWait).toHaveBeenCalledTimes(1)
+  })
+
   it('(c) allow_always → onAllowAlways callback and execution', async () => {
     const { router, ctx, approvals, events, onAllowAlways } = harness({ mode: 'ask' })
     const p = router.dispatch(call('write_note', { text: 'n' }), ctx)
@@ -262,7 +279,32 @@ describe('dispatch funnel', () => {
     const out = await p
     expect(out.status).toBe('done')
     expect(out.artifacts).toHaveLength(1)
-    expect(onAllowAlways).toHaveBeenCalledWith('write_note')
+    expect(onAllowAlways).toHaveBeenCalledWith('write_note', 'thread')
+  })
+
+  it('(c) 总是允许 for all threads passes the global scope and shows the key it saves', async () => {
+    const { router, ctx, approvals, events, onAllowAlways } = harness({ mode: 'ask' })
+    const p = router.dispatch(call('write_note', { text: 'n' }), ctx)
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'approval.requested')).toBe(true))
+    const req = events.find((e) => e.type === 'approval.requested') as Extract<Event, { type: 'approval.requested' }>
+    expect(req.allowKey).toBe('write_note')
+    approvals.resolve(req.approvalId, 'allow_always', undefined, { scope: 'global' })
+    expect((await p).status).toBe('done')
+    expect(onAllowAlways).toHaveBeenCalledWith('write_note', 'global')
+    expect(events).toContainEqual(expect.objectContaining({ type: 'approval.resolved', scope: 'global' }))
+  })
+
+  it('(c) 拒绝并说明 hands the note to the model with the denial', async () => {
+    const { router, ctx, approvals, events } = harness({ mode: 'ask' })
+    const p = router.dispatch(call('write_note', { text: 'n' }), ctx)
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'approval.requested')).toBe(true))
+    const req = events.find((e) => e.type === 'approval.requested') as Extract<Event, { type: 'approval.requested' }>
+    approvals.resolve(req.approvalId, 'deny', undefined, { reason: '写到 notes.md 里，不要覆盖' })
+    const out = await p
+    expect(out.status).toBe('denied')
+    expect(out.result.content).toBe(userDeniedMessage('写到 notes.md 里，不要覆盖'))
+    expect(String(out.result.content)).toContain('写到 notes.md 里，不要覆盖')
+    expect(userDeniedMessage()).toBe(USER_DENIED_MESSAGE)
   })
 
   it('(c) destructive: canAllowAlways=false, allow_always downgraded to allow_once', async () => {
@@ -307,6 +349,44 @@ describe('dispatch funnel', () => {
     const bad = await router.dispatch(call('echo', { text: 'x' }, 'cal_2'), ctx)
     expect(bad.status).toBe('error')
     expect(bad.result.content).toMatch(/hook 改写后的参数无效/)
+  })
+
+  it('(d) a hook rewrite that raises the risk or changes the allow key is decided again and asked about', async () => {
+    const { router, ctx, approvals, events, hooks } = harness({ mode: 'ask', allowAlways: ['shell:ls -la'] })
+    hooks.add({ name: 'rw', events: ['PreToolUse'], run: async () => ({ updatedInput: { command: 'rm -rf ~' } }) })
+    const p = router.dispatch(call('shellish', { command: 'ls -la' }), ctx)
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'approval.requested')).toBe(true))
+    const req = events.find((e) => e.type === 'approval.requested') as Extract<Event, { type: 'approval.requested' }>
+    expect(req).toMatchObject({ risk: 'destructive', input: { command: 'rm -rf ~' } })
+    expect(req.detail).toMatch(/hook 改写/)
+    approvals.resolve(req.approvalId, 'deny')
+    const out = await p
+    expect(out.status).toBe('denied')
+    expect(out.result.content).not.toContain('ran')
+  })
+
+  it('(d) an input the user approved and a hook then changed is shown to the user again', async () => {
+    const { router, ctx, approvals, events, hooks } = harness({ mode: 'ask' })
+    hooks.add({ name: 'rw', events: ['PreToolUse'], run: async () => ({ updatedInput: { text: 'other' } }) })
+    const p = router.dispatch(call('write_note', { text: 'mine' }), ctx)
+    const asked = () =>
+      events.filter((e) => e.type === 'approval.requested') as Extract<Event, { type: 'approval.requested' }>[]
+    await vi.waitFor(() => expect(asked()).toHaveLength(1))
+    approvals.resolve(asked()[0]!.approvalId, 'allow_once')
+    await vi.waitFor(() => expect(asked()).toHaveLength(2))
+    expect(asked()[1]).toMatchObject({ input: { text: 'other' } })
+    approvals.resolve(asked()[1]!.approvalId, 'allow_once')
+    expect((await p).result.content).toBe('wrote other')
+  })
+
+  it('(d) where nobody can answer, a widened rewrite is denied; an identical one is not re-decided', async () => {
+    const cron = harness({ mode: 'ask', channel: 'cron', allowAlways: ['shell:ls -la'] })
+    cron.hooks.add({ name: 'rw', events: ['PreToolUse'], run: async () => ({ updatedInput: { command: 'rm -rf ~' } }) })
+    const out = await cron.router.dispatch(call('shellish', { command: 'ls -la' }), cron.ctx)
+    expect(out.status).toBe('denied')
+    const same = harness({ mode: 'ask', allowAlways: ['shell:ls -la'] })
+    same.hooks.add({ name: 'noop', events: ['PreToolUse'], run: async () => ({ updatedInput: { command: 'ls -la' } }) })
+    expect((await same.router.dispatch(call('shellish', { command: 'ls -la' }), same.ctx)).status).toBe('done')
   })
 
   it('(e) timeout → status timeout, tool signal aborted', async () => {
@@ -433,9 +513,39 @@ describe('总是允许 is offered only where the saved grant is honoured', () =>
     const { router, ctx, events, answerAsk, onAllowAlways } = setup('ask')
     const first = await answerAsk('save_note', { text: 'a' }, 'allow_always')
     expect(first.offered).toBe(true)
-    expect(onAllowAlways).toHaveBeenCalledWith('save_note')
+    expect(onAllowAlways).toHaveBeenCalledWith('save_note', 'thread')
     const from = events.length
     expect((await router.dispatch(call('save_note', { text: 'b' }, 'cal_next'), ctx)).status).toBe('done')
     expect(events.slice(from).some((e) => e.type === 'approval.requested')).toBe(false)
+  })
+})
+
+describe('off-device tools and own JSON schemas', () => {
+  it('leaves offDevice tools out for a local model and shows a tool its own JSON schema', () => {
+    const registry = createToolRegistry()
+    const own = { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] }
+    registry.register(
+      defineTool<Record<string, unknown>>({
+        name: 'mcp__remote__search',
+        description: 'remote',
+        inputSchema: z.record(z.string(), z.unknown()),
+        inputJsonSchema: own,
+        offDevice: true,
+        profiles: ['desktop-chat'],
+        risk: 'read',
+        parallelSafe: false,
+        execute: async () => ({ content: 'ok' }),
+      }),
+    )
+    const factory = createToolRouterFactory({
+      registry,
+      approvals: createApprovalGate(),
+      hooks: createHookRunner(),
+      services: {},
+    })
+    const online = factory.build({ profile: 'desktop-chat', depth: 0 })
+    expect(online.specs.map((s) => s.name)).toEqual(['mcp__remote__search'])
+    expect(online.specs[0]!.inputJsonSchema).toEqual(own)
+    expect(factory.build({ profile: 'desktop-chat', depth: 0, localModel: true }).specs).toEqual([])
   })
 })

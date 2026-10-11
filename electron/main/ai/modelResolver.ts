@@ -2,8 +2,17 @@
  * ModelResolver for the kernel, built from config.ai + the secret store. Clients are cached per
  * provider/model and dropped whenever the AI config changes (new key, new base URL…).
  */
-import type { AppConfig, ModelClient, ModelSelection, ProviderConfig } from '@aiwc/protocol'
-import { createAiSdkModelClient } from '@aiwc/kernel'
+import {
+  modelCapabilities,
+  modelSupportsVision,
+  type AppConfig,
+  type ModelClient,
+  type ModelSelection,
+  type ModelUsageFeature,
+  type ProviderConfig,
+} from '@aiwc/protocol'
+import { createAiSdkModelClient, type ModelResolver } from '@aiwc/kernel'
+import type { MeterOptions } from './meteredClient'
 import type { ModelResolverLike } from '../contracts'
 import type { SecretStore } from '../config/secretStore'
 import type { Logger } from '../log'
@@ -15,6 +24,10 @@ export interface ModelResolverDeps {
   secrets: Pick<SecretStore, 'reveal'>
   /** Called by the composition root from config.subscribe to invalidate the cache. */
   logger?: Logger
+  /** Proxy-aware transport for a provider (设置 › AI 接入 › 网络); the global fetch when absent. */
+  fetchFor?: (provider: ProviderConfig) => typeof globalThis.fetch | undefined
+  /** Usage metering (设置 › 用量与记录); calls are not recorded without it. */
+  meter?: (client: ModelClient, opts: MeterOptions) => ModelClient
 }
 
 export class ModelNotConfiguredError extends Error {
@@ -41,7 +54,7 @@ export function isLocalProvider(provider: Pick<ProviderConfig, 'kind' | 'baseUrl
 
 export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike & { invalidate(): void } {
   const log = (deps.logger ?? nullLogger).child('models')
-  const cache = new Map<string, ModelClient>()
+  const cache = new Map<string, { client: ModelClient; apiKey?: string }>()
 
   function find(selection: ModelSelection): { provider: ProviderConfig; model: ProviderConfig['models'][number] } {
     const cfg = deps.config()
@@ -55,46 +68,60 @@ export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike 
     return { provider, model }
   }
 
-  function clientFor(selection: ModelSelection): ModelClient {
+  /** `feature` tags the call in the usage log when the request itself does not say (SamplingRequest.purpose). */
+  function clientFor(selection: ModelSelection, feature: ModelUsageFeature = 'other'): ModelClient {
     const key = `${selection.providerId}::${selection.modelId}`
-    const hit = cache.get(key)
-    if (hit) return hit
-    const { provider, model } = find(selection)
-    const apiKey = provider.apiKeyRef ? (deps.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined
-    if (!apiKey && !isLocalProvider(provider)) {
-      log.warn(`provider ${provider.id} has no usable API key (ref=${provider.apiKeyRef ?? 'none'})`)
+    let hit = cache.get(key)
+    if (!hit) {
+      const { provider, model } = find(selection)
+      const apiKey = provider.apiKeyRef ? (deps.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined
+      if (!apiKey && !isLocalProvider(provider)) {
+        log.warn(`provider ${provider.id} has no usable API key (ref=${provider.apiKeyRef ?? 'none'})`)
+      }
+      const fetch = isLocalProvider(provider) ? undefined : deps.fetchFor?.(provider)
+      hit = { client: createAiSdkModelClient({ provider, model, apiKey, fetch }), apiKey }
+      cache.set(key, hit)
     }
-    const client = createAiSdkModelClient({ provider, model, apiKey })
-    cache.set(key, client)
-    return client
+    return deps.meter
+      ? deps.meter(hit.client, { feature, providerId: selection.providerId, secrets: [hit.apiKey] })
+      : hit.client
   }
 
+  function resolverFor(feature: ModelUsageFeature): ModelResolver {
+    return {
+      async resolve(selection) {
+        const cfg = deps.config()
+        const provider = selection && cfg.ai.providers.find((p) => p.id === selection.providerId)
+        const requested = selection && provider?.models.find((m) => m.modelId === selection.modelId)
+        if (selection && requested && requested.enabled !== false && requested.available !== false)
+          return clientFor(selection, feature)
+        // A thread pinned to a local model must never be silently moved to the (possibly online) default.
+        if (provider && isLocalProvider(provider))
+          throw new ModelNotConfiguredError(
+            t('main.ai.modelNotFound', { provider: provider.label, model: selection?.modelId ?? '' }),
+          )
+        if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
+        return clientFor(cfg.ai.defaultModel, feature)
+      },
+      async resolveAuxiliary(primary) {
+        // No separate "cheap" model in config yet. A local thread keeps using its own local model; everything else
+        // uses the default. Never route a local thread's content to an online provider.
+        const cfg = deps.config()
+        const provider = primary && cfg.ai.providers.find((p) => p.id === primary.providerId)
+        if (primary && provider && isLocalProvider(provider)) return clientFor(primary, feature)
+        if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
+        return clientFor(cfg.ai.defaultModel, feature)
+      },
+    }
+  }
+  const general = resolverFor('other')
+
   return {
-    clientFor,
+    clientFor: (selection) => clientFor(selection),
     invalidate: () => cache.clear(),
-    async resolve(selection) {
-      const cfg = deps.config()
-      const provider = selection && cfg.ai.providers.find((p) => p.id === selection.providerId)
-      const requested = selection && provider?.models.find((m) => m.modelId === selection.modelId)
-      if (selection && requested && requested.enabled !== false && requested.available !== false)
-        return clientFor(selection)
-      // A thread pinned to a local model must never be silently moved to the (possibly online) default.
-      if (provider && isLocalProvider(provider))
-        throw new ModelNotConfiguredError(
-          t('main.ai.modelNotFound', { provider: provider.label, model: selection?.modelId ?? '' }),
-        )
-      if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
-      return clientFor(cfg.ai.defaultModel)
-    },
-    async resolveAuxiliary(primary) {
-      // No separate "cheap" model in config yet. A local thread keeps using its own local model; everything else
-      // uses the default. Never route a local thread's content to an online provider.
-      const cfg = deps.config()
-      const provider = primary && cfg.ai.providers.find((p) => p.id === primary.providerId)
-      if (primary && provider && isLocalProvider(provider)) return clientFor(primary)
-      if (!cfg.ai.defaultModel) throw new ModelNotConfiguredError()
-      return clientFor(cfg.ai.defaultModel)
-    },
+    resolve: general.resolve,
+    resolveAuxiliary: general.resolveAuxiliary,
+    forFeature: resolverFor,
     list() {
       const cfg = deps.config()
       return cfg.ai.providers.flatMap((p) =>
@@ -110,6 +137,8 @@ export function createModelResolver(deps: ModelResolverDeps): ModelResolverLike 
             local: isLocalProvider(p),
             supportsTools: m.supportsTools,
             reasoningEffort: m.reasoningEffort,
+            supportsVision: modelSupportsVision(p, m),
+            reasoningLevels: modelCapabilities(p, m).reasoning,
           })),
       )
     },

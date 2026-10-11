@@ -15,6 +15,7 @@ import {
   type ContextFragment,
   type ContextUsage,
   type Event,
+  type GrantScope,
   type HistoryItem,
   type Mention,
   type ModelClient,
@@ -29,6 +30,8 @@ import {
   type UserMessageItem,
 } from '@aiwc/protocol'
 import type { KernelServices, RolloutLine, ToolRouter } from '../ports'
+import { effectiveAllowAlways } from './effectiveAllowAlways'
+import { skillInvocationFragment } from './skillInvocation'
 import { compactContext, shouldCompact } from './compaction'
 import { createFragment, fragmentToItem, renderFragment } from './context/fragments/base'
 import { observedContextFragment } from './context/fragments/observedContext'
@@ -39,6 +42,9 @@ import { LoopGuard } from './loopGuard'
 import { errorActions, isAbortError } from './model/errors'
 import type { PromptBuilder } from './prompt'
 import { freezeStepContext, runStep } from './step'
+import { continuationFragment, judgeStepEnd, MAX_LENGTH_CONTINUATIONS } from './stepEnd'
+import { createTurnBudget } from './turnBudget'
+import { recordTurnChecks } from './turnChecks'
 import type { KernelConfig, Logger } from './types'
 import { deferred } from './util/deferred'
 import { fnv1a64 } from './util/hash'
@@ -46,8 +52,11 @@ import type { RwLock } from './util/rwlock'
 
 export type AbortReason = TurnAbortedItem['reason']
 
-/** Extra steps a blocking Stop hook may add to one turn (e.g. to correct a citation that does not match its message). */
-export const MAX_STOP_CONTINUATIONS = 1
+/**
+ * Times a blocking Stop hook may send the model back to rewrite its answer in one turn (e.g. a citation audit that
+ * found a quote missing from its message). Each rewrite is audited again; after the last one the turn ends as is.
+ */
+export const MAX_STOP_CONTINUATIONS = 2
 export const STOP_HOOK_TOKEN_CAP = 2000
 
 export interface TurnDeps {
@@ -67,8 +76,10 @@ export interface TurnDeps {
   worldState: WorldStateTracker
   lock: RwLock
   clock: () => number
-  /** The user answered an approval with "总是允许": the Thread persists the tool into ThreadSettings.allowAlways. */
-  onAllowAlways?: (toolName: string) => void
+  /** The user answered an approval with "总是允许": the Thread persists the key for this thread or globally. */
+  onAllowAlways?: (key: string, scope: GrantScope) => void
+  /** Grants that apply to every desktop thread (设置 › 权限规则), read per call so a revoke applies at once. */
+  globalAllowAlways?: () => readonly string[]
   logger?: Logger
 }
 
@@ -83,7 +94,7 @@ export interface TurnHandle {
    * Merge more user input into the running turn; it is consumed before the next step. Returns false once the
    * step loop can no longer pick it up (finishing, aborting or done) — the caller must then start a new turn.
    */
-  steer(input: UserInput): boolean
+  steer(input: UserInput, clientInputId?: string): boolean
   interrupt(reason?: 'interrupted' | 'replaced'): void
 }
 
@@ -97,26 +108,30 @@ const sumUsage = (a: TokenUsage, b: TokenUsage): TokenUsage => ({
 export const inputText = (input: UserInput): string =>
   input.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
 
+/** Input waiting to be recorded, with the sender's id echoed back on its item.user. */
+type MailboxEntry = UserInput & { clientInputId?: string }
+
 /** Ops arrive over IPC unvalidated; a malformed UserInput must not crash the turn. */
-const normalizeInput = (input: UserInput): UserInput => ({
+const normalizeInput = (input: UserInput, clientInputId?: string): MailboxEntry => ({
   content: Array.isArray(input.content) ? input.content : [],
   mentions: Array.isArray(input.mentions) ? input.mentions : [],
+  ...(clientInputId ? { clientInputId } : {}),
 })
 
-export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
+export function startTurn(deps: TurnDeps, input: UserInput, clientInputId?: string): TurnHandle {
   const turnId = newTurnId()
   const controller = new AbortController()
-  const mailbox: UserInput[] = [normalizeInput(input)]
+  const mailbox: MailboxEntry[] = [normalizeInput(input, clientInputId)]
   let abortReason: AbortReason | undefined
   /** Set once the step loop can no longer consume the mailbox (completing, aborting or crashed). */
   let loopDone = false
   /** Set once a terminal event (turn.completed / turn.aborted) has been emitted. */
   let terminal = false
   const done = deferred<TurnResult>()
-  // Cleared on every terminal path (completed / aborted / error / interrupted / crash) via settle() below.
-  const timer = setTimeout(() => abort('timeout'), deps.config.turnTimeoutMs)
-  ;(timer as { unref?: () => void }).unref?.()
-  const clearTimer = (): void => clearTimeout(timer)
+  // Disposed on every terminal path (completed / aborted / error / interrupted / crash) via settle() below. Time
+  // spent waiting for an approval does not count (turnBudget.ts).
+  const budget = createTurnBudget(deps.config.turnTimeoutMs, () => abort('timeout'))
+  const clearTimer = (): void => budget.dispose()
 
   const abort = (reason: AbortReason): void => {
     if (controller.signal.aborted) return
@@ -135,6 +150,7 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
   /** Best-effort terminal path for an unexpected throw inside run(): the UI must never be left "generating". */
   const crashed = async (err: unknown): Promise<TurnResult> => {
     loopDone = true
+    const dropped = takeUnrecorded()
     clearTimer()
     deps.logger?.('error', 'turn crashed', err)
     if (!terminal) {
@@ -157,9 +173,15 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
       terminal = true
       const error = { code: 'internal', message: err instanceof Error ? err.message : String(err), retryable: true }
       safeEmit({ type: 'error', threadId: deps.threadId, turnId, error, actions: errorActions(error) })
-      safeEmit({ type: 'turn.aborted', threadId: deps.threadId, turnId, reason: 'error' })
+      safeEmit({ type: 'turn.aborted', threadId: deps.threadId, turnId, reason: 'error', ...dropped })
     }
     return { status: 'aborted', turnId, reason: 'error', text: '' }
+  }
+
+  /** Empties the mailbox: what is still there never reached history, so its sender gets it back on turn.aborted. */
+  const takeUnrecorded = (): { droppedClientInputIds?: string[] } => {
+    const ids = mailbox.splice(0).flatMap((entry) => (entry.clientInputId ? [entry.clientInputId] : []))
+    return ids.length > 0 ? { droppedClientInputIds: ids } : {}
   }
 
   const settle = (result: TurnResult): void => {
@@ -171,9 +193,9 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
   return {
     turnId,
     promise: done.promise,
-    steer(more) {
+    steer(more, moreClientInputId) {
       if (loopDone || done.settled || controller.signal.aborted) return false
-      mailbox.push(normalizeInput(more))
+      mailbox.push(normalizeInput(more, moreClientInputId))
       return true
     },
     interrupt(reason = 'interrupted') {
@@ -215,12 +237,13 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
       loopDone = true
       clearTimer()
       if (inputRecorded) drainMailbox()
+      const dropped = takeUnrecorded()
       const item: TurnAbortedItem = { type: 'turn_aborted', id: newItemId(), turnId, createdAt: clock(), reason }
       deps.record([item])
       await services.hooks.run('TurnAborted', { threadId, turnId }).catch(() => undefined)
       await flushDurable()
       terminal = true
-      emit({ type: 'turn.aborted', threadId, turnId, reason })
+      emit({ type: 'turn.aborted', threadId, turnId, reason, ...dropped })
       return { status: 'aborted', turnId, reason, text: finalText }
     }
     const drainMailbox = (): void => {
@@ -236,7 +259,15 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         }
         deps.record([item])
         mentions.push(...next.mentions)
-        emit({ type: 'item.user', threadId, turnId, itemId: item.id, content: item.content, mentions: item.mentions })
+        emit({
+          type: 'item.user',
+          threadId,
+          turnId,
+          itemId: item.id,
+          content: item.content,
+          mentions: item.mentions,
+          ...(next.clientInputId ? { clientInputId: next.clientInputId } : {}),
+        })
       }
     }
     const recordFragment = (fragment: ContextFragment): void => {
@@ -255,13 +286,14 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         return undefined
       }
     }
-    const buildRouter = (settings: ThreadSettings): ToolRouter =>
+    const buildRouter = (settings: ThreadSettings, model: ModelClient): ToolRouter =>
       services.tools.build({
         profile: settings.profile,
         depth: deps.depth,
         deny: [],
+        localModel: model.ref.local,
         permissionMode: () => deps.settings().permissionMode,
-        allowAlways: () => deps.settings().allowAlways,
+        allowAlways: () => effectiveAllowAlways(deps.settings(), deps.globalAllowAlways?.() ?? [], deps.origin.channel),
         onAllowAlways: deps.onAllowAlways,
       })
     const computeUsage = (systemTokens: number, router: ToolRouter, model: ModelClient): ContextUsage =>
@@ -303,7 +335,8 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     }
 
     // 1. UserPromptSubmit hook
-    const firstText = inputText(mailbox[0]!)
+    const firstInput = mailbox[0]!
+    const firstText = inputText(firstInput)
     let hookContext: string | undefined
     let blockedReason: string | undefined
     try {
@@ -323,7 +356,7 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     let settings = deps.settings()
     let model = await resolveModel()
     if (!model) return finishAborted('error')
-    let router = buildRouter(settings)
+    let router = buildRouter(settings, model)
     deps.persist({
       ts: clock(),
       type: 'turn_context',
@@ -341,6 +374,9 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     drainMailbox()
     inputRecorded = true
     if (hookContext) recordFragment(createFragment('hook_context', '<hook_context>', 2000, () => hookContext))
+    // `/技能 …`: the kernel loads the skill itself instead of hoping the model calls skill_view (skillInvocation.ts).
+    const invokedSkill = await skillInvocationFragment(services.skills, firstInput, deps.origin.channel, deps.logger)
+    if (invokedSkill) recordFragment(invokedSkill)
     // AGENTS rules are re-provided every turn for freshness but recorded only when the model has not seen this
     // exact text: the world-state baseline remembers a digest of the last recorded text (see step loop).
     let userInstructions: ContextFragment | undefined
@@ -348,7 +384,13 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
     for (const provider of services.fragmentProviders) {
       if (provider.tier !== 'turn') continue
       try {
-        const fragments = await provider.provide({ threadId, origin: deps.origin, settings, userText: firstText })
+        const fragments = await provider.provide({
+          threadId,
+          origin: deps.origin,
+          settings,
+          userText: firstText,
+          mentions: [...mentions],
+        })
         for (const f of fragments) {
           if (f.kind === 'user_instructions') {
             userInstructions = f
@@ -366,6 +408,10 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
 
     // 4. step loop (re-entered at most MAX_STOP_CONTINUATIONS times when the Stop hook blocks)
     let stopContinuations = 0
+    // The next step rewrites the answer after a blocking Stop hook.
+    let revising = false
+    // Length continuations used so far, and whether the next step continues a cut-off answer (stepEnd.ts).
+    let lengthContinuations = 0
     let continuing = false
     turnLoop: for (;;) {
       while (true) {
@@ -376,7 +422,7 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         const resolved = await resolveModel()
         if (!resolved) return finishAborted('error')
         model = resolved
-        router = buildRouter(settings)
+        router = buildRouter(settings, model)
 
         // (re-)inject the rules only when the digest the model last saw differs (also after compaction resets).
         if (userInstructions && deps.worldState.current()?.userInstructions !== userInstructionsDigest)
@@ -416,7 +462,9 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
           settings,
           systemPrompt: prompt.system,
           cacheKey: prompt.cacheKey,
+          revision: revising ? 'stop_hook' : undefined,
         })
+        revising = false
         const outcome = await runStep(stepCtx, {
           threadId,
           turnId,
@@ -430,12 +478,17 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
           lock: deps.lock,
           // loop guard runs BEFORE dispatch: a repeated batch is refused, never executed
           beforeDispatch: (calls) => guard.push(calls.map((c) => ({ toolName: c.toolName, input: c.input }))),
+          onApprovalWait: budget.pause,
+          stream: deps.config.stream,
           logger: deps.logger,
         })
         steps++
         totalUsage = sumUsage(totalUsage, outcome.usage)
-        // A Stop-hook continuation adds to the answer the user already saw; it never replaces it.
-        if (outcome.text) finalText = continuing && finalText ? `${finalText}\n\n${outcome.text}` : outcome.text
+        // The answer is the last step's text. After a blocking Stop hook the model writes the whole answer again, so
+        // the rewrite replaces the earlier one (the panel folds the superseded draft into the turn's work).
+        const answerBefore = finalText
+        if (outcome.text) finalText = continuing ? finalText + outcome.text : outcome.text
+        continuing = false
 
         if (outcome.error) {
           emitError(outcome.error)
@@ -447,6 +500,24 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
         emit({ type: 'context.usage', threadId, usage: usageAfter })
 
         if (outcome.loopGuard) return finishAborted('loop_guard')
+        const verdict = judgeStepEnd(outcome, lengthContinuations, answerBefore, steps < deps.maxSteps)
+        if (verdict.kind === 'fail') {
+          emitError(verdict.error)
+          return finishAborted('error')
+        }
+        if (verdict.kind === 'continue') {
+          lengthContinuations++
+          continuing = true
+          emit({
+            type: 'turn.continuing',
+            threadId,
+            turnId,
+            attempt: lengthContinuations,
+            max: MAX_LENGTH_CONTINUATIONS,
+          })
+          recordFragment(continuationFragment())
+          continue
+        }
         if (outcome.toolCalls.length === 0) {
           if (mailbox.length > 0) continue
           break
@@ -464,9 +535,11 @@ export function startTurn(deps: TurnDeps, input: UserInput): TurnHandle {
           return undefined
         })
       if (controller.signal.aborted) return finishAborted(abortReason ?? 'interrupted')
-      if (stop?.block && stopContinuations < MAX_STOP_CONTINUATIONS && steps < deps.maxSteps) {
+      const rewrite = Boolean(stop?.block) && stopContinuations < MAX_STOP_CONTINUATIONS && steps < deps.maxSteps
+      recordTurnChecks(stop?.checks, rewrite, { threadId, turnId, record: deps.record, emit, clock })
+      if (stop?.block && rewrite) {
         stopContinuations++
-        continuing = true
+        revising = true
         const reason = stop.block.reason
         recordFragment(createFragment('stop_hook', '<stop_hook>', STOP_HOOK_TOKEN_CAP, () => reason))
         continue turnLoop

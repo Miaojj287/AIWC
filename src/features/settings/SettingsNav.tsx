@@ -2,22 +2,40 @@
  * Left column of the settings Tab (200px): account block, search with inline results, grouped nav.
  * Figma 125:415 (left) and board 151:415 ① 导航与搜索.
  */
-import { BookOpen, Cpu, Info, PawPrint, SlidersHorizontal, UserRound } from 'lucide-react'
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
-import { Avatar, ICON_STROKE, ListItem, SearchBox, cn, type IconComponent } from '@/kit'
+import {
+  Blocks,
+  BookOpen,
+  ChartColumn,
+  Cpu,
+  HardDrive,
+  Info,
+  ListTodo,
+  PawPrint,
+  SlidersHorizontal,
+  UserRound,
+  WandSparkles,
+} from 'lucide-react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { Avatar, Badge, ICON_STROKE, ListItem, SearchBox, cn, type IconComponent } from '@/kit'
 import { useT } from '@/i18n'
-import { truncateMiddle } from '@/platform/format'
 import { useAccountStatus } from '@/platform/useAccountStatus'
 import { toMediaUrl } from '@/platform/mediaUrl'
+import { formatCount } from '@/platform/format'
+import { useMemoryReview } from './memoryReviewStore'
 import { NAV_GROUPS, PAGE_META, type SettingsPage } from './model'
 import { searchSettings, type SearchHit } from './searchIndex'
 
 const PAGE_ICON: Record<SettingsPage, IconComponent> = {
   general: SlidersHorizontal,
   account: UserRound,
+  data: HardDrive,
   ai: Cpu,
+  usage: ChartColumn,
   pets: PawPrint,
   memory: BookOpen,
+  skills: WandSparkles,
+  todo: ListTodo,
+  extensions: Blocks,
   about: Info,
 }
 
@@ -33,9 +51,12 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
   const t = useT()
   const status = useAccountStatus()
   const account = status.data?.account
+  // 待确认 memories: a quiet count on 记忆 so proposals are not missed (the toast is gone by the time settings opens).
+  const pendingMemory = useMemoryReview().items.length
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
+  const resultsId = useId()
   // Not memoized: results depend on the UI language too (searchSettings reads it), and ~40 rows are cheap.
   const hits = searchSettings(query)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -57,7 +78,15 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
     setOpen(false)
   }
 
+  const showResults = open && query.trim().length > 0
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Escape peels one layer at a time: the open list first, then (in SearchBox) the text, then focus.
+    if (e.key === 'Escape' && showResults) {
+      e.preventDefault()
+      setOpen(false)
+      return
+    }
     if (!open || hits.length === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -72,12 +101,15 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
     }
   }
 
-  const showResults = open && query.trim().length > 0
+  useEffect(() => {
+    if (!showResults) return
+    document.getElementById(`${resultsId}-${active}`)?.scrollIntoView?.({ block: 'nearest', behavior: 'instant' })
+  }, [showResults, resultsId, active])
 
   return (
     <nav
       aria-label={t('settings.nav.ariaLabel')}
-      className="flex w-[var(--w-settings-nav)] shrink-0 flex-col gap-3 border-r border-line-6 bg-panel px-2.5 py-3 @max-[640px]/settings:w-[168px] @max-[640px]/settings:px-2"
+      className="flex w-[var(--w-settings-nav)] shrink-0 flex-col gap-5 border-r border-line-6 bg-panel px-2.5 py-5 @max-[640px]/settings:w-[168px] @max-[640px]/settings:px-2"
     >
       <div className="flex items-center gap-2.5 px-1.5">
         {account ? (
@@ -100,7 +132,7 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
                 : t('settings.nav.account.disconnected')}
           </span>
           <span className="truncate font-mono text-micro leading-4 text-fg-3" title={account?.wxid}>
-            {account ? truncateMiddle(account.wxid, 18) : t('settings.nav.account.configureHint')}
+            {account ? account.wxid : t('settings.nav.account.configureHint')}
           </span>
         </div>
       </div>
@@ -118,14 +150,20 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
           onKeyDown={onKeyDown}
           placeholder={t('settings.nav.search.placeholder')}
           shortcut={shortcutLabel}
+          // A combobox, not a bare searchbox: it owns a listbox popup and drives it with aria-activedescendant.
+          role="combobox"
           aria-label={t('settings.nav.search.placeholder')}
           aria-expanded={showResults}
+          aria-controls={showResults ? resultsId : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={showResults && hits[active] ? `${resultsId}-${active}` : undefined}
         />
         {showResults ? (
           <div
             role="listbox"
+            id={resultsId}
             aria-label={t('settings.nav.search.results')}
-            className="kit-menu absolute inset-x-0 top-full z-20 mt-1 flex flex-col gap-px rounded-item border border-line-10 bg-overlay p-1.5 shadow-overlay"
+            className="kit-menu absolute inset-x-0 top-full z-20 mt-1 flex max-h-[min(360px,60vh)] flex-col gap-px overflow-y-auto rounded-item border border-line-10 bg-overlay p-1.5 shadow-overlay"
           >
             <div className="px-2 pb-1 pt-1 text-micro text-fg-3">
               {hits.length > 0 ? t('settings.nav.search.count', { n: hits.length }) : t('settings.nav.search.empty')}
@@ -136,6 +174,7 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
               hits.map((hit, i) => (
                 <ListItem
                   key={hit.row.id}
+                  id={`${resultsId}-${i}`}
                   dense
                   role="option"
                   aria-selected={i === active}
@@ -168,8 +207,8 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
                   aria-current={selected ? 'page' : undefined}
                   onClick={() => onNavigate(p)}
                   className={cn(
-                    'flex h-8 w-full items-center gap-2 rounded-item px-2.5 text-left text-body outline-none transition-colors duration-(--dur-fast)',
-                    'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70',
+                    // No transition: pages are switched all day, so selection and hover answer at once (CLAUDE.md §13).
+                    'flex h-8 w-full items-center gap-2 rounded-item px-2.5 text-left text-body outline-none',
                     selected ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-hover-5 hover:text-fg',
                   )}
                 >
@@ -180,6 +219,15 @@ export function SettingsNav({ page, onNavigate, searchRef, shortcutLabel }: Sett
                     className={cn('shrink-0', selected ? 'text-fg' : 'text-fg-3')}
                   />
                   <span className="min-w-0 flex-1 truncate">{t(PAGE_META[p].label)}</span>
+                  {p === 'memory' && pendingMemory > 0 ? (
+                    <Badge
+                      tone="accent"
+                      className="shrink-0"
+                      aria-label={t('settings.memory.review.navBadge', { n: pendingMemory })}
+                    >
+                      {formatCount(pendingMemory)}
+                    </Badge>
+                  ) : null}
                 </button>
               )
             })}

@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, MessageSquare, Reply, UserRound } from 'lucide-react'
+import { Bot, CalendarClock, ListTodo, MessageSquare, Reply, UserRound } from 'lucide-react'
 import { forwardRef, type ButtonHTMLAttributes, type CSSProperties } from 'react'
 import { runCommand } from '@/app/commands'
 import { shortcutLabel } from '@/app/shortcuts'
@@ -17,12 +17,13 @@ export interface RailFunctionMeta {
   icon: IconComponent
 }
 
-/** The functions, in rail order (CLAUDE.md §1; 定时任务 joined the original three). */
+/** The functions, in rail order (CLAUDE.md §1: 定时任务 and 每日待办 follow the original three). */
 export const RAIL_FUNCTIONS: readonly RailFunctionMeta[] = [
   { fn: 'chat', labelKey: 'shell.rail.chat', icon: MessageSquare },
   { fn: 'autoreply', labelKey: 'shell.rail.autoreply', icon: Reply },
   { fn: 'clone', labelKey: 'shell.rail.clone', icon: Bot },
   { fn: 'tasks', labelKey: 'shell.rail.tasks', icon: CalendarClock },
+  { fn: 'todo', labelKey: 'shell.rail.todo', icon: ListTodo },
 ]
 
 export interface IconRailProps {
@@ -121,8 +122,8 @@ const RailTile = forwardRef<HTMLButtonElement, RailTileProps>(function RailTile(
       data-active={active || undefined}
       className={cn(
         'app-no-drag inline-flex size-10 shrink-0 select-none items-center justify-center rounded-window bg-cover',
-        'ring-1 transition-[filter] duration-(--dur-fast) hover:brightness-110 active:brightness-95',
-        'outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'ring-1 hover:brightness-110 active:brightness-95',
+        'outline-none',
         // selected = accent 30% ring (a spread ring, never a blurred glow); rest = the 10% line token
         active ? 'ring-accent-30' : 'ring-line-10',
         className,

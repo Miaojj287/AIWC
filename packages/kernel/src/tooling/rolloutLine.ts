@@ -10,6 +10,7 @@
 import { z } from 'zod'
 import {
   PermissionModeSchema,
+  ReasoningEffortSchema,
   type CallId,
   type ChannelKind,
   type ContentPart,
@@ -24,11 +25,19 @@ import {
   type ToolOutputContent,
   type ToolProfile,
   type TurnAbortedItem,
+  TurnCheckSchema,
   type TurnId,
 } from '@aiwc/protocol'
 import type { RolloutLine } from '../ports'
 
-const CHANNELS = ['desktop', 'wechat-ilink', 'wechat-ui', 'cron', 'observed'] as const satisfies readonly ChannelKind[]
+const CHANNELS = [
+  'desktop',
+  'wechat-ilink',
+  'wechat-ui',
+  'cron',
+  'observed',
+  'wechat-remote',
+] as const satisfies readonly ChannelKind[]
 const PROFILES = ['desktop-chat', 'wechat-bot', 'cron', 'subagent', 'persona'] as const satisfies readonly ToolProfile[]
 const MENTION_KINDS = ['session', 'file', 'contact', 'memory'] as const satisfies readonly MentionKind[]
 const ABORT_REASONS = [
@@ -53,12 +62,19 @@ export const ThreadOriginSchema = z.looseObject({
   channel: z.enum(CHANNELS),
   chatId: z.string().optional(),
   peerId: z.string().optional(),
+  // A malformed chip reference only loses the chip, never the thread.
+  contextRef: z
+    .looseObject({ kind: z.enum(['session', 'file', 'contact']), id: z.string(), label: z.string() })
+    .optional()
+    .catch(undefined),
 })
 
 export const ThreadSettingsSchema = z.looseObject({
   // A mode removed since (the old 'plan') degrades to asking instead of discarding the thread.
   permissionMode: PermissionModeSchema.catch('ask'),
   model: z.looseObject({ providerId: z.string(), modelId: z.string() }).optional(),
+  // A level a newer build wrote (or junk) drops to the model's own setting instead of failing the thread.
+  reasoningEffort: ReasoningEffortSchema.nullable().optional().catch(undefined),
   profile: z.enum(PROFILES),
   allowAlways: z.array(z.string()),
   title: z.string().optional(),
@@ -145,6 +161,13 @@ const HistoryItemSchema = z.discriminatedUnion('type', [
     turnId,
     createdAt: millis,
     reason: z.enum(ABORT_REASONS),
+  }),
+  z.looseObject({
+    type: z.literal('turn_check'),
+    id: itemId,
+    turnId,
+    createdAt: millis,
+    check: TurnCheckSchema,
   }),
 ])
 

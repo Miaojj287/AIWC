@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, promises as fsp, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { asCallId, asThreadId, asTurnId, estimateTokens, newStepId, type Event, type ToolContext } from '@aiwc/protocol'
+import { asCallId, asThreadId, asTurnId, estimateTokens, newStepId, type ToolContext } from '@aiwc/protocol'
 import { createSkillIndex, parseSkillFile, truncateDescription, SKILLS_INDEX_TOKEN_CAP } from './skillIndex'
 import { skillTools, stampCreatedBy } from './skillTools'
 import { planTools } from './planTools'
@@ -82,7 +82,9 @@ describe('createSkillIndex', () => {
     expect(index.get('weekly')).toMatchObject({ source: 'builtin', command: '/周报', description: '生成周报' })
     expect(index.get('no-fm')).toMatchObject({ name: 'no-fm', description: '' })
     expect([...index.get('long')!.description]).toHaveLength(60)
-    expect(index.list()).toHaveLength(83)
+    // no-fm is indexed (get) but broken: it is not offered to the model
+    expect(index.list()).toHaveLength(82)
+    expect(index.list().some((s) => s.name === 'no-fm')).toBe(false)
     expect(index.writableDir()?.path).toBe(user)
 
     const frag = index.indexFragment()
@@ -211,10 +213,9 @@ describe('skillTools', () => {
 })
 
 describe('planTools', () => {
-  it('update_plan validates steps and emits plan.updated via services.emit', async () => {
+  it('update_plan validates steps; the recorded input is the plan (no side channel)', async () => {
     const [tool] = planTools()
     expect(tool).toMatchObject({ name: 'update_plan', risk: 'read', profiles: ['desktop-chat', 'subagent'] })
-    const emit = vi.fn<(e: Event) => void>()
     const steps = [
       { title: '读取', status: 'done' },
       { title: '总结', status: 'doing' },
@@ -223,8 +224,6 @@ describe('planTools', () => {
     expect(parsed.success).toBe(true)
     expect(tool!.inputSchema.safeParse({ steps: [] }).success).toBe(false)
     expect(tool!.inputSchema.safeParse({ steps: [{ title: 'x', status: 'nope' }] }).success).toBe(false)
-    expect(await tool!.execute({ steps }, ctx({ emit }))).toEqual({ content: 'ok' })
-    expect(emit).toHaveBeenCalledWith({ type: 'plan.updated', threadId: 'thr_1', steps })
     expect(await tool!.execute({ steps }, ctx())).toEqual({ content: 'ok' })
     expect(tool!.summarize?.({ steps: steps as never })).toBe('更新计划（2 步，1 已完成）')
   })

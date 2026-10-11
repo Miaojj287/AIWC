@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultConfig,
   type AiwcBridge,
   type AppConfig,
+  type ApprovalId,
+  type CallId,
   type ConfigPatch,
   type Event,
   type Op,
   type ThreadId,
   type ThreadSummary,
+  type TurnId,
 } from '@aiwc/protocol'
 import { onCommand, runCommand } from '@/app/commands'
 import { clearToasts, TooltipProvider } from '@/kit'
@@ -77,6 +80,12 @@ function fakeBridge(threads: ThreadSummary[]): FakeBridge {
         }
         case 'agent:listThreads':
           return threads
+        case 'agent:searchThreads': {
+          const { query } = req as { query: string }
+          return query === '报价'
+            ? [{ threadId: 'thr_old', title: '旧会话', itemId: 'itm_42', snippet: '项目群报价讨论', ts: 1 }]
+            : []
+        }
         case 'agent:getThread': {
           const { threadId } = req as { threadId: ThreadId }
           return { summary: threads.find((t) => t.threadId === threadId) ?? threads[0], items: [] }
@@ -86,7 +95,6 @@ function fakeBridge(threads: ThreadSummary[]): FakeBridge {
           return undefined
         case 'agent:listModels':
         case 'agent:listSkills':
-        case 'agent:suggestPrompts':
           return []
         default:
           throw new Error(`unexpected ${channel}`)
@@ -134,6 +142,15 @@ describe('<AgentWindow>', () => {
     fireEvent.click(list.querySelector('[data-thread-id="thr_10"]')!)
     expect(useAgentStore.getState().activeThreadId).toBe('thr_10')
     await waitFor(() => expect(document.title).toContain('会话 10'))
+  })
+
+  it('searches the words inside conversations from the sidebar, like the panel history', async () => {
+    await mount([thread(0), thread(1)])
+    const reveal = vi.spyOn(useAgentStore.getState(), 'revealItem')
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索会话…' }), { target: { value: '报价' } })
+    const hits = await screen.findByRole('region', { name: '内容匹配' })
+    fireEvent.click(within(hits).getByText('旧会话'))
+    expect(reveal).toHaveBeenCalledWith('thr_old', 'itm_42')
   })
 
   it('「工作台」 returns to the four-column layout through shell.setMode', async () => {
@@ -196,7 +213,7 @@ describe('<AgentWindow>', () => {
     expect(seen).toEqual([{ mode: 'workbench' }, { mode: 'workbench' }])
   })
 
-  it('offers every panel action on a sidebar row: open / rename / pin / export / compact / clear / delete', async () => {
+  it('offers every panel action on a sidebar row: open / rename / pin / archive / export / save as skill / compact / clear / delete', async () => {
     await mount([thread(0), thread(1)])
     fireEvent.contextMenu(threadList().querySelector('[data-thread-id="thr_1"]')!)
     const items = await screen.findAllByRole('menuitem')
@@ -204,7 +221,9 @@ describe('<AgentWindow>', () => {
       '打开会话',
       '重命名',
       '固定会话',
+      '归档',
       '导出对话',
+      expect.stringContaining('存为技能'),
       expect.stringContaining('压缩上下文'),
       '清空上下文',
       '删除会话',
@@ -220,5 +239,46 @@ describe('<AgentWindow>', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
     await waitFor(() => expect(bridge.ops.map((o) => o.type)).toEqual(['thread.create', 'turn.start']))
     expect(within(threadList()).getByText('总结今天')).toBeTruthy()
+  })
+
+  it('answers a pending approval in the composer slot, with the draft hidden underneath', async () => {
+    const bridge = await mount([thread(0)])
+    const threadId = useAgentStore.getState().activeThreadId!
+    act(() =>
+      useAgentStore.setState((s) => ({
+        views: {
+          ...s.views,
+          [threadId]: {
+            ...s.views[threadId]!,
+            isStreaming: true,
+            pendingApprovals: [
+              {
+                approvalId: 'apr_1' as ApprovalId,
+                callId: 'c1' as CallId,
+                turnId: 'trn_1' as TurnId,
+                toolName: 'send_message',
+                summary: '推送到 投研交流群',
+                input: { to: 'g2' },
+                risk: 'send',
+                canAllowAlways: true,
+              },
+            ],
+          },
+        },
+      })),
+    )
+    expect(screen.getByRole('group', { name: 'Agent 请求：推送到 投研交流群' })).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: '给 Agent 的消息' })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('listbox', { name: '确认选项' }), { key: '1' })
+    await waitFor(() =>
+      expect(bridge.ops).toContainEqual({
+        type: 'approval.resolve',
+        threadId,
+        approvalId: 'apr_1',
+        decision: 'allow_once',
+      }),
+    )
+    expect(screen.queryByRole('group', { name: 'Agent 请求：推送到 投研交流群' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '给 Agent 的消息' })).toBeTruthy()
   })
 })

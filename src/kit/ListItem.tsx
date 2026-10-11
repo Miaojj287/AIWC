@@ -23,13 +23,26 @@ export interface ListItemProps extends Omit<HTMLAttributes<HTMLDivElement>, 'tit
   onSelect?: () => void
   /** Dense = 44px rows (settings lists); default 56px (sessions / contacts). */
   dense?: boolean
+  /**
+   * Compact = 32px single-line navigation row (the Agent window sidebar): 16px leading slot (icon or status), title
+   * 13 Regular, meta on the right; no subtitle. Implies `quiet`.
+   */
+  compact?: boolean
+  /**
+   * Neutral selection — the settings nav's raised ground instead of the accent tint and ring. For navigation rows that
+   * sit beside a conversation (the Agent window sidebar), where a blue block would be the loudest thing on screen.
+   */
+  quiet?: boolean
+  /** Native tooltip for the whole row (the truncated title already repeats itself when it is a string). */
+  tooltip?: string
 }
 
 /**
  * ListItem — the one row for sessions, contacts and rules (CLAUDE.md §3):
  * avatar 36 r8 | title 13 Medium + subtitle 12 weak | meta / badge / toggle on the right.
- * selected = accent 12% ground; hover = fg 5% and reveals `···`. Right-click → the same menu (wrap in ContextMenuTrigger).
- * `data-hover` forces the hover look (gallery / screenshots).
+ * selected = `--selected-bg` ground + `--selected-ring` inner ring (greyed while the window is inactive); hover = fg 5%,
+ * press = fg 7%, and hover reveals `···`. Right-click → the same menu (wrap in ContextMenuTrigger).
+ * `data-hover` forces the hover look (gallery / screenshots). Selection changes at once: rows are switched all day.
  */
 export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListItem(
   {
@@ -43,6 +56,9 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
     disabled = false,
     onSelect,
     dense = false,
+    compact = false,
+    quiet = compact,
+    tooltip,
     className,
     onKeyDown,
     ...rest
@@ -67,27 +83,40 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
       ref={ref}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
-      aria-selected={interactive ? selected : undefined}
+      aria-current={selected ? 'true' : undefined}
       aria-disabled={disabled || undefined}
       data-selected={selected || undefined}
+      title={tooltip}
       onClick={interactive ? onSelect : undefined}
       onKeyDown={handleKeyDown}
       className={cn(
-        'group relative flex w-full select-none items-center gap-2.5 rounded-item px-2.5 text-left outline-none',
-        dense ? 'min-h-11 py-1.5' : 'min-h-14 py-2',
-        'transition-colors duration-(--dur-fast)',
-        interactive &&
-          'cursor-pointer hover:bg-hover-5 data-[hover]:bg-hover-5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70',
-        selected && 'bg-accent-12 hover:bg-accent-12',
+        'kit-row group relative flex w-full select-none items-center gap-3 rounded-item px-3 text-left outline-none',
+        compact ? 'min-h-8 gap-2 px-2.5 py-1' : dense ? 'min-h-11 py-1.5' : 'min-h-14 py-2',
+        interactive && 'cursor-pointer hover:bg-hover-5 active:bg-hover-7 data-[hover]:bg-hover-5',
+        selected &&
+          (quiet
+            ? 'bg-raised hover:bg-raised active:bg-raised data-[hover]:bg-raised'
+            : 'bg-selected ring-1 ring-inset ring-selected-ring hover:bg-selected active:bg-selected'),
         disabled && 'pointer-events-none opacity-40',
         className,
       )}
       {...rest}
     >
-      {leading ? <div className="flex size-9 shrink-0 items-center justify-center">{leading}</div> : null}
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      {/* A compact row keeps its empty 16px slot so titles line up whether or not a status shows. */}
+      {leading || compact ? (
+        <div className={cn('flex shrink-0 items-center justify-center', compact ? 'size-4' : 'size-9')}>{leading}</div>
+      ) : null}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-body font-medium leading-4.5 text-fg">{title}</span>
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate text-body text-fg',
+              compact ? 'font-normal leading-6' : 'font-medium leading-4.5',
+            )}
+            title={typeof title === 'string' ? title : undefined}
+          >
+            {title}
+          </span>
           {meta ? (
             <span
               className={cn(
@@ -102,8 +131,13 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
         {/* A block box, not a flex row: text-overflow only renders on the box that owns the text, so a plain
             string subtitle inside `flex … truncate` used to clip mid-glyph. Callers that mix a dot / Badge with
             text wrap them in their own `flex` span, whose truncating child still gets the ellipsis. */}
-        {subtitle ? (
-          <div className="min-w-0 truncate text-caption leading-4 text-fg-3 [&>*+*]:ml-1.5">{subtitle}</div>
+        {subtitle && !compact ? (
+          <div
+            className="min-w-0 truncate text-caption leading-4 text-fg-3 [&>*+*]:ml-1.5"
+            title={typeof subtitle === 'string' ? subtitle : undefined}
+          >
+            {subtitle}
+          </div>
         ) : null}
       </div>
       {trailing || (hoverActions && !overlayActions) ? (
@@ -124,7 +158,10 @@ export const ListItem = forwardRef<HTMLDivElement, ListItemProps>(function ListI
       ) : null}
       {overlayActions ? (
         <div
-          className="absolute right-2 top-2 hidden items-center gap-0.5 group-hover:flex group-focus-within:flex group-data-[hover]:flex"
+          className={cn(
+            'absolute hidden items-center gap-0.5 group-hover:flex group-focus-within:flex group-data-[hover]:flex',
+            compact ? 'inset-y-0 right-1' : 'right-2 top-2',
+          )}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >

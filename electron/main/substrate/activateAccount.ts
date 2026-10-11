@@ -1,10 +1,18 @@
+import type { AccountTarget } from '@aiwc/protocol'
 import type { AppContext } from '../contracts'
+import { accountProfileId } from '../services/accountProfiles'
+import type { AccountSession } from '../services/accountSession'
+import { verifyAccount } from '@aiwc/substrate'
 import { t } from '../i18n'
 
 /** Serialize selection + reconnect so config, source and status commit as one operation. */
-export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substrate'>) {
+export function createAccountActivator(
+  ctx: Pick<AppContext, 'config' | 'substrate'> & Partial<Pick<AppContext, 'activate'>>,
+  session?: AccountSession,
+  scope?: string,
+) {
   let pending: Promise<unknown> = Promise.resolve()
-  return (target: { wxid: string; dbRoot: string } | void) => {
+  return (target: AccountTarget | void) => {
     const run = pending.then(async () => {
       const previous = ctx.config.get().account
       const active = ctx.substrate.status().account
@@ -13,6 +21,30 @@ export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substra
       const selected = target ?? previous
       try {
         if (!selected.wxid || !selected.dbRoot) throw new Error(t('main.substrate.selectAccountAndDbRoot'))
+        if (session && scope !== accountProfileId(selected.wxid)) {
+          const target = {
+            wxid: selected.wxid,
+            dbRoot: selected.dbRoot,
+            ...(selected.cacheDir === undefined ? {} : { cacheDir: selected.cacheDir }),
+          }
+          const credentials = session.credentials(target)
+          const ref = credentials.config.get().account.dbKeyRef
+          const dbKeyHex = ref ? (credentials.secrets.reveal(ref) ?? undefined) : undefined
+          const verified = await verifyAccount({ ...target, dbKeyHex })
+          if (!verified.ok) return verified
+          session.switch(target)
+          return { ok: true }
+        }
+        if (
+          previous.verifiedAt &&
+          (selected.cacheDir === undefined || selected.cacheDir === previous.cacheDir) &&
+          active?.wxid === selected.wxid &&
+          active.dbRoot === selected.dbRoot &&
+          ctx.substrate.status().connection === 'ready'
+        ) {
+          ctx.activate?.()
+          return { ok: true }
+        }
         ctx.config.set({ account: { ...selected, verifiedAt: 0 } })
         const result = await ctx.substrate.reconnect()
         if (!result.ok) throw new Error(result.error ?? t('main.substrate.connectFailed'))
@@ -21,6 +53,7 @@ export function createAccountActivator(ctx: Pick<AppContext, 'config' | 'substra
           throw new Error(t('main.substrate.accountMismatch'))
         }
         ctx.config.set({ account: { verifiedAt: Date.now() } })
+        ctx.activate?.()
         return { ok: true }
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e)

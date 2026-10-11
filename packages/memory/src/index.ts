@@ -1,5 +1,5 @@
 /**
- * @aiwc/memory — bounded Markdown memory, relationship (clone) profiles, diary pipeline, fragment
+ * @aiwc/memory — bounded Markdown memory, relationship (clone) profiles, the 每日待办 scanner, fragment
  * providers and tools. Public surface per docs/PACKAGE-API.md; everything else is internal.
  */
 /**
@@ -14,15 +14,18 @@
 export { createMemoryStore } from './store/memoryStore'
 
 export { createRelationshipStore, type RelationshipStoreExt } from './relationship/relationshipStore'
-export { createDiaryStore } from './diary/diaryStore'
-export { createDiaryPipeline } from './diary/pipeline'
+export { createTodoStore, TodoNotFoundError, type TodoStore } from './todo/todoStore'
+export { createTodoScanner, type TodoScanner } from './todo/pipeline'
 export { memoryFragmentProvider, type MemoryFragmentProvider } from './fragments/memoryFragmentProvider'
 export { relationshipFragmentProvider } from './fragments/relationshipFragmentProvider'
 export { personaFragmentProvider, personaIdentityProvider } from './fragments/personaFragmentProvider'
 
 export { reflectConversation, renderTranscript, MAX_TRANSCRIPT_CHARS } from './clone/reflect'
 
-export { memoryTools } from './tools/memoryTools'
+export { memoryTools, type MemoryToolOptions } from './tools/memoryTools'
+/** 设置 › 记忆 › 待确认: proposals held for the user, and the idle-conversation extraction that fills them. */
+export { createMemoryProposalStore, type MemoryProposalStore } from './review/proposalStore'
+export { extractMemoryProposals, renderReviewTranscript } from './review/extract'
 export { relationshipTools } from './tools/relationshipTools'
 export { createCloneBuilder } from './clone/cloneBuilder'
 export { profileEditCorrections } from './clone/corrections'

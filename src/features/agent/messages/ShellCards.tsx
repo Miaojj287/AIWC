@@ -1,11 +1,10 @@
 /**
  * The `shell` tool in the transcript: the approval shows the exact command line (plus why it was
- * graded the way it was), and the row's card shows the command with its output like a terminal
+ * graded the way it was), and the expanded row shows the command with its output like a terminal
  * would — exit code, stdout, stderr — instead of a JSON blob.
  */
-import { Terminal } from 'lucide-react'
 import { useT } from '@/i18n'
-import { cn, ICON_STROKE } from '@/kit'
+import { cn } from '@/kit'
 import type { ApprovalBodyProps, ToolCardProps } from '../toolCards'
 
 interface ShellInputLike {
@@ -29,7 +28,8 @@ interface ShellOutputLike {
   error?: string
 }
 
-const record = (v: unknown): Record<string, unknown> | undefined => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined)
+const record = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
 
 function shellInput(value: unknown): ShellInputLike | undefined {
   const r = record(value)
@@ -41,7 +41,7 @@ export function ShellApprovalBody({ request }: ApprovalBodyProps) {
   const input = shellInput(request.input)
   if (!input) return null
   return (
-    <div className="flex flex-col gap-1.5 rounded-control border border-line-6 bg-content px-2.5 py-2">
+    <div className="flex flex-col gap-1.5 rounded-item border border-line-6 bg-panel px-2.5 py-2">
       <pre className="m-0 max-h-[132px] overflow-auto whitespace-pre-wrap break-all font-mono text-micro leading-4 text-fg select-text">
         <span className="text-fg-3">$ </span>
         {input.command}
@@ -52,7 +52,11 @@ export function ShellApprovalBody({ request }: ApprovalBodyProps) {
             {input.cwd}
           </span>
         ) : null}
-        {input.escalate ? <span className="text-warn">{input.reason ? t('agent.shell.unsandboxed', { reason: input.reason }) : t('agent.shell.ranUnsandboxed')}</span> : null}
+        {input.escalate ? (
+          <span className="text-warn-ink">
+            {input.reason ? t('agent.shell.unsandboxed', { reason: input.reason }) : t('agent.shell.ranUnsandboxed')}
+          </span>
+        ) : null}
         {request.detail ? <span>{request.detail}</span> : null}
       </div>
     </div>
@@ -69,21 +73,26 @@ export function ShellCard({ call }: ToolCardProps) {
   const stderr = (out?.stderr ?? '').trimEnd()
   const error = typeof out?.error === 'string' ? out.error : typeof call.output === 'string' ? call.output : undefined
   return (
-    <div className="flex flex-col gap-1 rounded-item border border-line-6 bg-panel px-2.5 py-2" data-testid="shell-card">
-      <div className="flex items-start gap-1.5">
-        <Terminal size={12} strokeWidth={ICON_STROKE} aria-hidden className="mt-0.5 shrink-0 text-fg-3" />
-        <pre className="m-0 min-w-0 flex-1 whitespace-pre-wrap break-all font-mono text-micro leading-4 text-fg-2 select-text">{input.command}</pre>
-      </div>
+    <div
+      className="flex flex-col gap-2 rounded-item border border-line-8 bg-panel px-3 py-2.5"
+      data-testid="shell-card"
+    >
+      <pre className="m-0 min-w-0 whitespace-pre-wrap break-all font-mono text-micro leading-4 text-fg select-text">
+        <span className="text-fg-3">$ </span>
+        {input.command}
+      </pre>
       {stdout ? <Output text={stdout} /> : null}
       {stderr ? <Output text={stderr} tone="danger" /> : null}
       {error && !stdout && !stderr ? <Output text={error} tone="danger" /> : null}
       {out || call.status === 'error' || call.status === 'denied' || call.status === 'timeout' ? (
         <div className="flex flex-wrap items-center gap-x-3 text-micro text-fg-3">
           {out?.exitCode !== undefined && out?.exitCode !== null ? (
-            <span className={cn('font-latin', failed ? 'text-danger' : undefined)}>{t('agent.shell.exitCode', { code: out.exitCode })}</span>
+            <span className={cn('font-latin', failed ? 'text-danger-ink' : undefined)}>
+              {t('agent.shell.exitCode', { code: out.exitCode })}
+            </span>
           ) : null}
-          {out?.timedOut ? <span className="text-warn">{t('agent.shell.timedOut')}</span> : null}
-          {out?.sandboxed === false ? <span className="text-warn">{t('agent.shell.ranUnsandboxed')}</span> : null}
+          {out?.timedOut ? <span className="text-warn-ink">{t('agent.shell.timedOut')}</span> : null}
+          {out?.sandboxed === false ? <span className="text-warn-ink">{t('agent.shell.ranUnsandboxed')}</span> : null}
           {out?.truncated ? <span>{t('agent.shell.truncated')}</span> : null}
           {call.status === 'denied' ? <span>{t('agent.tool.status.denied')}</span> : null}
         </div>
@@ -95,7 +104,12 @@ export function ShellCard({ call }: ToolCardProps) {
 
 function Output({ text, tone }: { text: string; tone?: 'danger' }) {
   return (
-    <pre className={cn('m-0 max-h-[220px] overflow-auto whitespace-pre-wrap break-all rounded-control bg-line-4 px-2 py-1.5 font-mono text-micro leading-4 select-text', tone === 'danger' ? 'text-danger' : 'text-fg-2')}>
+    <pre
+      className={cn(
+        'm-0 max-h-[220px] overflow-auto whitespace-pre-wrap break-all rounded-control bg-line-4 px-2 py-1.5 font-mono text-micro leading-4 select-text',
+        tone === 'danger' ? 'text-danger-ink' : 'text-fg-2',
+      )}
+    >
       {text}
     </pre>
   )

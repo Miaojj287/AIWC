@@ -28,6 +28,9 @@ export function register(): void {
     get title() {
       return t('tasks.list.title')
     },
+    get searchPlaceholder() {
+      return t('tasks.list.search')
+    },
     component: TaskList,
     segments: TASK_SEGMENTS.map((s) => ({
       id: s.id,

@@ -12,7 +12,7 @@ import { Avatar, Badge, Checkbox, EmptyState, FormDialog, SearchBox, SkeletonLis
 import { invoke, useInvoke } from '@/platform/hooks'
 import { isRuleTarget } from '../ruleListModel'
 import { copyRuleTo } from '../ruleModel'
-import { usePagedSessions } from '../sessionPaging'
+import { usePagedSessions } from '@/platform/sessionPaging'
 
 /** Fetch the next page once the list is scrolled this close to its end. */
 const LOAD_MORE_THRESHOLD_PX = 120
@@ -87,9 +87,11 @@ export function CopyRuleDialog({ open, onOpenChange, rule, sourceTitle, onCopied
         action={{ label: t('common.retry'), onClick: sessions.reload }}
       />
     ) : candidates.length === 0 ? (
-      <div className="px-3 py-6 text-center text-caption text-fg-3">
-        {query ? t('autoreply.copyDialog.noMatch', { query }) : t('autoreply.copyDialog.noOthers')}
-      </div>
+      <EmptyState
+        compact
+        variant={query ? 'no-results' : 'empty'}
+        title={query ? t('autoreply.copyDialog.noMatch', { query }) : t('autoreply.copyDialog.noOthers')}
+      />
     ) : (
       <>
         <Virtualizer scrollRef={scrollRef} data={candidates}>

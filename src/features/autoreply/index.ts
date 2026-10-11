@@ -27,6 +27,9 @@ export function register(): void {
     get title() {
       return t('autoreply.list.title')
     },
+    get searchPlaceholder() {
+      return t('autoreply.list.search')
+    },
     component: RuleList,
     segments: RULE_SEGMENTS.map((s) => ({
       id: s.id,

@@ -5,6 +5,7 @@ import { createFragment } from './context/fragments/base'
 import { createMockModelClient } from './model/mock'
 import { createThreadHarness, userInput } from './testing/harness'
 import { waitForEvent, type FakeTool } from './testing/fakes'
+import { MAX_STOP_CONTINUATIONS } from './turn'
 import { deferred, sleep } from './util/deferred'
 
 const isFragment = (item: HistoryItem, kind: string): item is ContextFragmentItem =>
@@ -354,6 +355,57 @@ describe('turn loop', () => {
     expect(model.requests[1]!.history.filter((i) => i.type === 'user_message')).toHaveLength(2)
   })
 
+  it('(9a) echoes the clientInputId of the sender on the item.user of a started turn and of a steer', async () => {
+    const model = createMockModelClient([
+      { text: '第一步回答，比较长以便可以被并入。', delayMs: 10, chunkSize: 2 },
+      { text: '第二步补充。' },
+    ])
+    const h = await createThreadHarness({ model })
+    await h.thread.submit({
+      type: 'turn.start',
+      threadId: h.thread.id,
+      input: userInput('第一句'),
+      mode: 'start',
+      clientInputId: 'cin_first',
+    })
+    await waitForEvent(h.emitter.on, 'text.delta')
+    await h.thread.submit({
+      type: 'turn.start',
+      threadId: h.thread.id,
+      input: userInput('补充一句'),
+      mode: 'steer',
+      clientInputId: 'cin_steer',
+    })
+    await h.thread.activeTurn?.promise
+    const users = h.events.events.filter((e): e is Extract<Event, { type: 'item.user' }> => e.type === 'item.user')
+    expect(users.map((e) => e.clientInputId)).toEqual(['cin_first', 'cin_steer'])
+    // the id is the sender's, not history: it is never recorded
+    const recorded = h.thread.context.all().filter((i) => i.type === 'user_message')
+    expect(recorded.every((u) => !('clientInputId' in u))).toBe(true)
+  })
+
+  it('(9d) turn-tier providers see the mentions of the turn (quoted message ids included)', async () => {
+    const seen: unknown[] = []
+    const model = createMockModelClient([{ text: '好的' }])
+    const h = await createThreadHarness({
+      model,
+      fragmentProviders: [
+        {
+          tier: 'turn',
+          async provide(ctx) {
+            seen.push(ctx.mentions)
+            return []
+          },
+        },
+      ],
+    })
+    const quote = { kind: 'session' as const, id: 'g1@chatroom', label: '客户群', messageIds: ['m1', 'm2'] }
+    await (
+      await h.thread.startTurn(userInput('这几句要什么', { mentions: [quote] }), 'start')
+    ).promise
+    expect(seen).toEqual([[quote]])
+  })
+
   it('(9b) a steer that arrives after the step loop ended starts a new turn instead of being dropped', async () => {
     const model = createMockModelClient([{ text: '一' }, { text: '二' }])
     const aux = createMockModelClient({ steps: [{ text: '标题' }], loopLast: true })
@@ -382,10 +434,11 @@ describe('turn loop', () => {
     expect(h.thread.activeTurn).toBeUndefined()
   })
 
-  it('(9c) a blocking Stop hook gets exactly one more step, with its reason in context, and the correction is appended', async () => {
+  it('(9c) a blocking Stop hook sends the model back to rewrite the answer, re-audits it, and stops after the cap', async () => {
     const model = createMockModelClient([
       { text: '她说“已经在一起了”。' },
-      { text: '更正：原文里没有这句话。' },
+      { text: '她没有说过在一起，只说“再看看”。' },
+      { text: '她只说了“再看看”。' },
       { text: '不应被请求' },
     ])
     const h = await createThreadHarness({ model })
@@ -399,14 +452,22 @@ describe('turn loop', () => {
       },
     })
     const result = await (await h.thread.startTurn(userInput('他们在一起了吗'), 'start')).promise
-    expect(result).toMatchObject({ status: 'completed', text: '她说“已经在一起了”。\n\n更正：原文里没有这句话。' })
-    // Always blocking must not loop: one continuation, then the turn ends.
-    expect(model.requests).toHaveLength(2)
-    expect(seen).toHaveLength(2)
-    expect(seen[0]).toMatchObject({ text: '她说“已经在一起了”。', profile: 'desktop-chat' })
+    // Each rewrite replaces the answer (nothing is appended), and each one is audited again.
+    expect(result).toMatchObject({ status: 'completed', text: '她只说了“再看看”。' })
+    // Always blocking must not loop: MAX_STOP_CONTINUATIONS rewrites, then the turn ends.
+    expect(model.requests).toHaveLength(1 + MAX_STOP_CONTINUATIONS)
+    expect(seen.map((s) => s.text)).toEqual([
+      '她说“已经在一起了”。',
+      '她没有说过在一起，只说“再看看”。',
+      '她只说了“再看看”。',
+    ])
+    expect(seen[0]).toMatchObject({ profile: 'desktop-chat' })
     const fragment = h.thread.context.all().find((i) => i.type === 'context_fragment' && i.kind === 'stop_hook')
     expect(fragment && fragment.type === 'context_fragment' && fragment.text).toContain('已经在一起了')
     expect(JSON.stringify(model.requests[1]!.history)).toContain('不在引用的消息里')
+    // The rewriting steps are announced so the panel can fold the superseded draft.
+    const steps = h.events.events.flatMap((e) => (e.type === 'step.started' ? [e.revision] : []))
+    expect(steps).toEqual([undefined, 'stop_hook', 'stop_hook'])
     expect(h.events.types().filter((t) => t === 'turn.completed')).toHaveLength(1)
   })
 
@@ -498,6 +559,45 @@ describe('turn loop', () => {
     expect(await first.promise).toMatchObject({ status: 'aborted', reason: 'replaced' })
     await h.thread.activeTurn?.promise
     expect(h.events.types().filter((t) => t === 'turn.completed')).toHaveLength(1)
+  })
+
+  it('hands back the clientInputId of input a turn ended without recording', async () => {
+    const h = await createThreadHarness({ model: createMockModelClient([{ text: 'never' }]) })
+    h.services.hooks.add({
+      name: 'block',
+      events: ['UserPromptSubmit'],
+      async run() {
+        return { block: { reason: 'blocked' } }
+      },
+    })
+    await h.thread.submit({
+      type: 'turn.start',
+      threadId: h.thread.id,
+      input: userInput('被拦下的话'),
+      mode: 'start',
+      clientInputId: 'cin_lost',
+    })
+    await h.thread.activeTurn?.promise
+    expect(h.events.events.some((e) => e.type === 'item.user')).toBe(false)
+    expect(h.events.events.find((e) => e.type === 'turn.aborted')).toMatchObject({
+      reason: 'error',
+      droppedClientInputIds: ['cin_lost'],
+    })
+
+    // once the prompt is recorded, an abort has nothing to hand back
+    const ok = await createThreadHarness({
+      model: createMockModelClient([{ error: { code: 'auth', message: 'x', retryable: false } }]),
+    })
+    await ok.thread.submit({
+      type: 'turn.start',
+      threadId: ok.thread.id,
+      input: userInput('记下了'),
+      mode: 'start',
+      clientInputId: 'cin_kept',
+    })
+    await ok.thread.activeTurn?.promise
+    const aborted = ok.events.events.find((e) => e.type === 'turn.aborted')
+    expect(aborted && 'droppedClientInputIds' in aborted).toBe(false)
   })
 
   it('emits an error event with actions and aborts when the model fails', async () => {

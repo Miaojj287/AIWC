@@ -1,7 +1,8 @@
 /**
  * Frame clock for one sprite. Drives uneven per-frame durations (which CSS steps() cannot) and
  * one-shot plays: `repeat` cycles then `onDone`. With `playing` false the first frame stays put —
- * that is also the reduced-motion rendering, a still pose that still shows the state.
+ * that is also the reduced-motion rendering, a still pose that still shows the state. The clock pauses while the
+ * document is hidden and picks up from the same frame when it is shown again.
  */
 import { useEffect, useRef, useState } from 'react'
 import { PET_ANIMATIONS, type PetAnimationId } from './spriteSpec'
@@ -29,8 +30,10 @@ export function useSpriteFrame(
     const durations = PET_ANIMATIONS[animation].durations
     let index = 0
     let cycles = 0
-    let timer: ReturnType<typeof setTimeout>
+    let timer: ReturnType<typeof setTimeout> | undefined
     const tick = () => {
+      // A hidden window shows nothing: hold the current frame instead of waking the renderer several times a second.
+      if (document.hidden) return
       timer = setTimeout(() => {
         index += 1
         if (index >= durations.length) {
@@ -46,7 +49,15 @@ export function useSpriteFrame(
       }, durations[index])
     }
     tick()
-    return () => clearTimeout(timer)
+    const onVisibility = () => {
+      clearTimeout(timer)
+      tick()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      clearTimeout(timer)
+    }
   }, [animation, playing, repeat, restartKey])
 
   return frame

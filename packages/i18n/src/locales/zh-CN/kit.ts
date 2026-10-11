@@ -63,4 +63,58 @@ export const kit = {
     manageDescription: '设置 › AI 接入',
     effort: { off: '关闭', minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' },
   },
+  /** ReasoningEffortSelect: per-thread reasoning depth in the composer toolbar. */
+  effortSelect: {
+    label: '推理强度',
+    default: '默认',
+    defaultWith: '默认（{effort}）',
+    defaultDescription: '使用 设置 › AI 接入 里这个模型的设置',
+    description: {
+      off: '不思考，直接回答',
+      minimal: '只做最少的思考',
+      low: '快，适合简单问题',
+      medium: '速度与质量平衡',
+      high: '更仔细，适合复杂问题',
+      xhigh: '更深入，耗时更长',
+      max: '最深入，最慢',
+    },
+  },
+  /** Markdown renderer (Agent replies, file preview): the code-block copy button and the table `···` menu. */
+  /** ZoomPan: images and diagrams that zoom (wheel / pinch / + −) and pan (drag). */
+  zoomPan: {
+    roleDescription: '可缩放的图片',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    reset: '还原',
+    atMin: '已缩到最小',
+    atMax: '已放到最大',
+    atReset: '已是原始大小',
+  },
+  markdown: {
+    copyCode: '复制代码',
+    copied: '已复制',
+    copyFailed: '复制失败',
+    /** ```mermaid code blocks drawn as diagrams. */
+    mermaid: {
+      label: 'Mermaid 图表',
+      rendering: '正在绘制图表',
+      failed: '图表无法绘制，已显示源码',
+      showSource: '查看源码',
+      showDiagram: '查看图表',
+      expand: '放大查看',
+    },
+    image: {
+      open: '放大查看图片',
+    },
+    table: {
+      actions: '表格操作',
+      copyMarkdown: '复制为 Markdown',
+      copyMarkdownHint: '保留格式，粘贴到文档或笔记',
+      copyTsv: '复制为 TSV',
+      copyTsvHint: '直接粘贴到 Excel、Google 表格或飞书表格',
+      saveCsv: '另存为 CSV',
+      saveCsvHint: '可用 Excel 等表格软件打开',
+      copied: '表格已复制',
+    },
+  },
 }

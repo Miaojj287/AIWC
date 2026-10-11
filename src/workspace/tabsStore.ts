@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import type { TabDescriptor, TabKind } from './tabRegistry'
 import { tabId } from './tabRegistry'
 
-export type RailFunction = 'chat' | 'autoreply' | 'clone' | 'tasks'
+export type RailFunction = 'chat' | 'autoreply' | 'clone' | 'tasks' | 'todo'
 
 /** Which rail function a tab kind belongs to (for §0.2 "activate that function's last tab"). */
 export const TAB_FUNCTION: Record<TabKind, RailFunction | null> = {
@@ -15,11 +15,13 @@ export const TAB_FUNCTION: Record<TabKind, RailFunction | null> = {
   autoreply: 'autoreply',
   clone: 'clone',
   task: 'tasks',
+  todo: 'todo',
   settings: null,
   file: null,
-  diary: null,
   replydesk: null,
+  search: null,
   kit: null,
+  agentRun: null,
 }
 
 interface TabsState {

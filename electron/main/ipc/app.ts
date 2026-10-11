@@ -1,9 +1,8 @@
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename } from 'node:path'
 import { dialog, shell } from 'electron'
 import type { AppContext } from '../contracts'
 import { resolveAllowedExisting } from '../security/pathAllowList'
-import { formatDateForFile } from '../services/exporter'
+import { diagnosticsRedaction, exportDiagnostics } from '../services/diagnostics'
 import { currentSystemVersion, supportsTransparency } from '../windows/transparency'
 import type { Handle, HostBridge } from './register'
 import { t } from '../i18n'
@@ -28,6 +27,10 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
       case 'fullscreen':
         win.setFullScreen(!win.isFullScreen())
         break
+      case 'zoom':
+        if (win.isMaximized()) win.unmaximize()
+        else win.maximize()
+        break
       default:
         throw new Error(t('main.app.unknownWindowAction'))
     }
@@ -44,27 +47,16 @@ export function registerAppIpc(ctx: AppContext, host: HostBridge, handle: Handle
     }
   })
 
-  handle('app:checkUpdate', () => {
-    // TODO: wire electron-updater (autoUpdater.checkForUpdates → 'app:update' events). Until then the
-    // settings page shows "已是最新".
-    return { state: 'up_to_date', version: host.appVersion }
-  })
+  // app:checkUpdate lives with the updater in ./data.ts.
 
   handle('app:exportLogs', () => {
-    const files = [...ctx.logger.files()].reverse() // oldest first
-    const out = join(ctx.paths.exportsDir, `aiwc-logs-${formatDateForFile()}.log`)
-    const chunks: string[] = [
-      `# AIWC ${host.appVersion} · ${process.platform}-${process.arch} · electron ${process.versions.electron ?? '?'}\n`,
-    ]
-    for (const f of files) {
-      try {
-        chunks.push(`\n===== ${f} =====\n`, readFileSync(f, 'utf8'))
-      } catch (e) {
-        chunks.push(`\n===== ${f} (read failed: ${e instanceof Error ? e.message : String(e)}) =====\n`)
-      }
-    }
-    writeFileSync(out, chunks.join(''), 'utf8')
-    log.info('logs exported', { out })
+    const out = exportDiagnostics({
+      appVersion: host.appVersion,
+      files: ctx.logger.files(),
+      exportsDir: ctx.paths.exportsDir,
+      redaction: diagnosticsRedaction(),
+    })
+    log.info('logs exported', { file: basename(out) })
     return { path: out }
   })
 

@@ -27,6 +27,17 @@ export const pets: Messages['pets'] = {
     hiddenDetail: 'Turn it back on in Settings › Pets',
     hideFailed: "Couldn't hide the pet",
   },
+  status: {
+    group: 'Agent status',
+    waiting: '{n, plural, one {# chat needs} other {# chats need}} your OK',
+    running: '{n, plural, one {# chat} other {# chats}} running',
+    done: '{n, plural, one {# chat} other {# chats}} done, not viewed yet',
+    failed: '{n, plural, one {# chat} other {# chats}} failed',
+    unread:
+      '{n, plural, one {# unread WeChat message} other {# unread WeChat messages}} ({chats, plural, one {# chat} other {# chats}})',
+    unreadCapped: 'At least {n} unread WeChat messages',
+    separator: '; ',
+  },
   source: {
     builtin: 'Built-in',
     catalog: 'codex-pets.net',

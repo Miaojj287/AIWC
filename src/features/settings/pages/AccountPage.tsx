@@ -24,13 +24,13 @@ import { useT } from '@/i18n'
 import { useAccountStatus } from '@/platform/useAccountStatus'
 import { toMediaUrl } from '@/platform/mediaUrl'
 import { useConfig } from '@/platform/configStore'
-import { truncateMiddle } from '@/platform/format'
 import { invoke, useInvoke } from '@/platform/hooks'
 import { secretRefFor, type KeyKind } from '../accountModel'
 import { activateAccount, errorMessage, refreshConfig, saveConfig } from '../hooks'
 import { PagePlaceholder, SRow, Section } from '../pageKit'
-import { InlineKeyAcquire, SecretField } from './AccountKeys'
+import { AcquireKeysButton, InlineKeyAcquire, SecretField } from './AccountKeys'
 import { OfficeSection } from './OfficeSection'
+import { MobileSection } from './MobileSection'
 
 export function AccountPage() {
   const t = useT()
@@ -182,6 +182,17 @@ export function AccountPage() {
         switching={switching}
       />
 
+      {/* Part of the page when it opens, not a reply to input: shown, with a way out, but not announced as an alert. */}
+      {accounts.error ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <InlineHint kind="error" live={false} className="min-w-0 flex-1">
+            {t('settings.account.listFailed', { detail: errorMessage(accounts.error) })}
+          </InlineHint>
+          <Button variant="outline" size="sm" icon={RefreshCw} onClick={accounts.reload} loading={accounts.loading}>
+            {t('common.retry')}
+          </Button>
+        </div>
+      ) : null}
       {mismatch ? <InlineHint kind="warning">{t('settings.account.mismatch')}</InlineHint> : null}
       <Section title={t('settings.account.sections.dirs')}>
         <Card variant="rows">
@@ -212,7 +223,6 @@ export function AccountPage() {
           <SRow
             id="account.cacheDir"
             title={t('settings.account.cacheDir.title')}
-            description={t('settings.account.cacheDir.description')}
             help={t('settings.account.cacheDir.help')}
             stacked
           >
@@ -254,7 +264,6 @@ export function AccountPage() {
                 <Badge tone="warn">{t('settings.account.unverified')}</Badge>
               )
             }
-            description={t('settings.account.verify.description')}
             help={t('settings.account.verify.help')}
             stacked
             footer={verifyError ? <InlineHint kind="error">{verifyError}</InlineHint> : null}
@@ -268,11 +277,12 @@ export function AccountPage() {
                 placeholder={accounts.loading ? t('settings.account.loading') : t('settings.account.verify.selectWxid')}
                 className="min-w-[220px] font-mono"
               />
-              <Button variant="ghost" icon={ScanLine} onClick={() => void rescan()} loading={scanning}>
+              {/* Sibling checks share one level (outline, CLAUDE.md §2.2); the connection test is the quieter extra. */}
+              <Button variant="outline" icon={ScanLine} onClick={() => void rescan()} loading={scanning}>
                 {t('settings.account.verify.scanDir')}
               </Button>
               <Button
-                variant="ghost"
+                variant="outline"
                 icon={ShieldCheck}
                 onClick={() => void verify()}
                 loading={verifying}
@@ -280,7 +290,7 @@ export function AccountPage() {
               >
                 {t('settings.account.verify.verify')}
               </Button>
-              <Button variant="link" icon={Link} onClick={() => void testConnection()} loading={testing}>
+              <Button variant="ghost" icon={Link} onClick={() => void testConnection()} loading={testing}>
                 {t('settings.account.verify.testConnection')}
               </Button>
             </div>
@@ -321,9 +331,14 @@ export function AccountPage() {
                 label={t('settings.account.dbKey.fieldLabel')}
                 className="min-w-[200px] flex-1"
               />
-              <Button variant="primary" icon={KeyRound} onClick={() => setAcquire('all')}>
+              <AcquireKeysButton
+                secretRef={secretRefFor(account, 'db_key')}
+                version={keyVersion}
+                icon={KeyRound}
+                onClick={() => setAcquire('all')}
+              >
                 {t('settings.account.dbKey.acquire')}
-              </Button>
+              </AcquireKeysButton>
             </div>
           </SRow>
 
@@ -365,15 +380,22 @@ export function AccountPage() {
                 onSaved={afterKeys}
                 className="min-w-[200px] flex-1"
               />
-              <Button variant="primary" icon={Image} onClick={() => setAcquire('image')}>
+              <AcquireKeysButton
+                secretRef={secretRefFor(account, 'image_aes')}
+                version={keyVersion}
+                icon={Image}
+                onClick={() => setAcquire('image')}
+              >
                 {t('settings.account.imageKeys.acquire')}
-              </Button>
+              </AcquireKeysButton>
             </div>
           </SRow>
         </Card>
       </Section>
 
       <OfficeSection />
+
+      <MobileSection />
 
       <ConfirmDialog
         open={resetCache}
@@ -476,7 +498,7 @@ function AccountCard({
           </span>
         </div>
         <div className="truncate font-mono text-micro text-fg-3" title={dbRoot}>
-          {dbRoot ? truncateMiddle(dbRoot, 56) : t('settings.account.card.dbRootUnset')}
+          {dbRoot ? dbRoot : t('settings.account.card.dbRootUnset')}
         </div>
       </div>
       {/* In a narrow settings column the switcher drops to its own row instead of squeezing the name to nothing. */}

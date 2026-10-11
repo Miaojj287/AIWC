@@ -118,10 +118,6 @@ export function filterContacts<T extends CloneListEntry>(
   )
 }
 
-export function readyCount(entries: readonly CloneListEntry[]): number {
-  return entries.filter((e) => e.status.state === 'ready').length
-}
-
 export type TrainingRange = 'all' | 'year' | 'quarter'
 
 /** Labels are catalog keys — resolve with t() at render. */

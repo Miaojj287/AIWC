@@ -2,7 +2,7 @@
  * AI 接入 helpers (DESIGN-SPEC §2): provider kinds, the ModelForm draft + validation, test-result copy
  * and the flattened model list used by 默认模型 / thread model pickers. Pure — tested in aiModel.test.ts.
  */
-import { validModelSettings } from '@aiwc/protocol'
+import { applyModelProfile, validModelSettings, type CapabilityProvider } from '@aiwc/protocol'
 import type {
   ModelEntry,
   ModelSelection,
@@ -175,6 +175,7 @@ const ERROR_CODE_LABEL: Record<NonNullable<ModelTestResult['error']>['code'], Me
   network: 'settings.ai.test.errors.network',
   invalid_request: 'settings.ai.test.errors.invalidRequest',
   unsupported_tools: 'settings.ai.test.errors.unsupportedTools',
+  stream_stalled: 'settings.ai.test.errors.streamStalled',
   unknown: 'settings.ai.shared.connectFailed',
 }
 
@@ -350,10 +351,13 @@ export function removeModel(p: ProviderConfig, modelId: string): ProviderConfig 
   }
 }
 
-/** A model entry typed by hand or picked from the remote list (no preset note). */
-export function modelEntryFromId(modelId: string, contextWindow = 128_000): ModelEntry {
+/**
+ * A model entry typed by hand or picked from the remote list (no preset note). With `provider`, 智能配置 fills the
+ * context budget and image input from the model profile (modelProfiles.ts).
+ */
+export function modelEntryFromId(modelId: string, contextWindow = 128_000, provider?: CapabilityProvider): ModelEntry {
   const id = modelId.trim()
-  return {
+  const entry: ModelEntry = {
     modelId: id,
     label: id,
     source: 'manual',
@@ -362,6 +366,7 @@ export function modelEntryFromId(modelId: string, contextWindow = 128_000): Mode
     supportsVision: false,
     enabled: true,
   }
+  return provider ? applyModelProfile(provider, entry) : entry
 }
 
 /** Pick the default model after a config change: keep it while it still exists and is enabled, else the first enabled one. */

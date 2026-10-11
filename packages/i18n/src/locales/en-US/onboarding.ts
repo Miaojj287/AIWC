@@ -6,53 +6,31 @@ export const onboarding: Messages['onboarding'] = {
     exit: 'Exit setup',
     connected: 'Connected, opening the main window',
     language: 'Interface language',
+    stepStatus: 'Step {n} of {total}: {label}',
   },
   steps: {
     welcome: 'Welcome',
     connect: 'Connect WeChat',
     unlock: 'Unlock data',
+    model: 'Connect a model',
     done: 'Done',
   },
   welcome: {
     title: 'Welcome to AIWC',
-    subtitle: 'A WeChat data manager that runs entirely on your computer',
-    capabilities: {
-      local: {
-        title: 'Fully local',
-        body: 'Decryption, indexing and transcription all happen on this computer; no chat data is uploaded',
-      },
-      agent: {
-        title: 'AI Agent',
-        body: 'Search, summarize and write weekly reports in plain language, with any model you connect',
-      },
-      automation: {
-        title: 'Auto reply · AI clone',
-        body: "Set up auto reply for specific chats and clone a contact's way of talking",
-      },
-    },
-    agreeLabel: 'I have read and agree to the',
-    agreementLink: 'User Agreement and Privacy Policy',
-    notes: {
-      local: { title: 'Your data stays local', body: 'Read and decrypted only on this computer' },
-      scope: { title: 'Authorized use', body: "Only your own account or accounts you're authorized to use" },
-      disclaimer: {
-        title: 'Disclaimer',
-        body: 'The developers are not liable for any loss caused by using this software',
-      },
-    },
-    note: '{title} — {body}',
+    subtitle: 'Your WeChat data workbench, fully local',
+    agreeLabel: 'I agree to the',
+    agreementLink: 'Terms & Privacy Policy',
     agreeFirst: 'Read and accept the User Agreement first',
-    start: 'Start setup',
-    footnote: 'About 2 minutes · Requires WeChat to be logged in on this computer',
+    start: 'Get started',
   },
   connect: {
     pathTitle: 'Set the WeChat data path',
-    pathDescription: 'Confirm the data folder and account. They are only read on this computer',
     keysTitle: 'Detect WeChat and unlock data',
-    keysDescription: 'Fetch the database and image keys in one go',
-    localNotice: 'WeChat data is only read, never modified; keys stay on this computer and are never sent anywhere',
     back: 'Back',
     testing: 'Testing connection…',
+    welcomeBack: 'Welcome back',
+    welcomeBackName: 'Welcome back, {name}',
+    enter: 'Enter',
   },
   /** Items are mid-sentence fragments (lowercase): `reason` joins 1–3 of them. */
   gate: {
@@ -64,8 +42,7 @@ export const onboarding: Messages['onboarding'] = {
   },
   account: {
     pathLabel: 'WeChat database path',
-    pathHelp: 'You can find this folder in WeChat → Settings → Account & Storage → Storage Location',
-    pathHint: 'Can be edited manually',
+    pathHelp: 'You can find this folder in WeChat › Settings › Account & Storage › Storage Location',
     pathAuto: 'Detected automatically',
     pathCached: 'Loaded from cache',
     pathManual: 'Chosen manually',
@@ -90,7 +67,6 @@ export const onboarding: Messages['onboarding'] = {
     accountHelp:
       'Each WeChat account that has logged in on this computer has its own folder starting with wxid_ in the data folder',
     noAccountsHint: 'No WeChat account found?',
-    accountsFound: '{n, plural, one {# account found in this folder} other {# accounts found in this folder}}',
     unnamedAccount: 'WeChat user (nickname unavailable)',
     unnamedAvatar: 'WeChat user',
     verified: 'Verified',
@@ -101,7 +77,6 @@ export const onboarding: Messages['onboarding'] = {
     rescan: 'Rescan',
     verify: 'Verify account',
     verifyMismatch: "This wxid doesn't match the selected database folder. Choose another account or verify again",
-    accountVerified: 'Account folder verified',
     verifyToContinue: 'Verify the account to continue',
     chooseOne: '{n, plural, one {Found # account, select it} other {Found # accounts, select one}}',
     notFoundRunning: 'Data folder not found. Click "Browse" to choose it manually',
@@ -129,13 +104,6 @@ export const onboarding: Messages['onboarding'] = {
       imageXor: { label: 'Image XOR key', description: 'Restores images' },
       imageAes: { label: 'Image AES key', description: 'Decrypts image index' },
     },
-    steps: {
-      dbKey: 'Database decryption key',
-      imageXor: 'Image XOR key',
-      imageAes: 'Image AES key',
-      verify: 'Verify account and folder',
-    },
-    acquireFailed: "Couldn't fetch the key",
     storedNotViewable: "The key is saved in the system's secure storage and can't be shown here yet",
     notInStore: "This key isn't in the system's secure storage",
     revealFailed: "Couldn't read the key: {detail}",
@@ -149,9 +117,6 @@ export const onboarding: Messages['onboarding'] = {
     pasteHex: 'Paste a {n}-digit hex key',
     clear: 'Clear',
     memoryScan: 'Memory scan',
-    scanningMemory: 'Scanning WeChat process memory…',
-    fetchingKeys: 'Fetching WeChat data keys…',
-    stayLoggedIn: 'Keep WeChat logged in; if it asks you to log in again, quit WeChat and log back in',
     invalidKey: 'Invalid key',
   },
   agreement: {
@@ -200,8 +165,7 @@ export const onboarding: Messages['onboarding'] = {
   },
   exit: {
     title: 'Exit setup?',
-    description:
-      'The paths and keys you entered stay on this computer, so you can pick up where you left off next time.',
+    description: 'Your paths and keys stay on this computer for next time.',
     continue: 'Continue setup',
     confirm: 'Exit',
   },

@@ -21,6 +21,8 @@ export const newStepId = (): StepId => `stp_${nanoid(10)}` as StepId
 export const newItemId = (): ItemId => `itm_${nanoid(12)}` as ItemId
 export const newCallId = (): CallId => `cal_${nanoid(12)}` as CallId
 export const newApprovalId = (): ApprovalId => `apr_${nanoid(10)}` as ApprovalId
+/** Sender-side id of one submitted input (Op turn.start → Event item.user). Not a kernel id, so not branded. */
+export const newClientInputId = (): string => `cin_${nanoid(10)}`
 export const asThreadId = (s: string): ThreadId => s as ThreadId
 export const asTurnId = (s: string): TurnId => s as TurnId
 export const asItemId = (s: string): ItemId => s as ItemId

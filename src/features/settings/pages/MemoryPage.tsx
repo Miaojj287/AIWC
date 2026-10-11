@@ -6,7 +6,6 @@ import { FileText, RotateCcw, Save, Trash } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { MemoryBudget, MemoryFile } from '@aiwc/protocol'
 import {
-  Badge,
   Button,
   Card,
   ConfirmDialog,
@@ -14,8 +13,8 @@ import {
   ICON_STROKE,
   InlineHint,
   Input,
+  ListItem,
   ProgressBar,
-  SettingRow,
   Textarea,
   Toggle,
   cn,
@@ -24,6 +23,7 @@ import {
 import { useT } from '@/i18n'
 import { useConfig } from '@/platform/configStore'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
+import { listKeyNav } from '@/platform/listNavigation'
 import { errorMessage, saveConfig } from '../hooks'
 import {
   MEMORY_FILES,
@@ -34,6 +34,8 @@ import {
   parseMaxEntries,
 } from '../memoryModel'
 import { PagePlaceholder, SRow, Section, useReportDirty } from '../pageKit'
+import { MemoryProvenance } from './MemoryProvenance'
+import { MemoryReviewSection } from './MemoryReview'
 
 interface FileInfo {
   count?: number
@@ -148,41 +150,46 @@ export function MemoryPage() {
 
   return (
     <>
+      <MemoryReviewSection autoWrite={memory.autoWrite} />
+
       <Section title={t('settings.memory.sections.files')}>
-        <Card variant="rows" data-setting-row="memory.files">
+        {/* The row is the button (one target, no nested 编辑): selected = the file in the editor below. */}
+        <Card
+          variant="rows"
+          role="group"
+          aria-label={t('settings.memory.sections.files')}
+          data-setting-row="memory.files"
+          className="flex flex-col gap-0.5 p-1.5"
+          onKeyDown={listKeyNav}
+        >
           {MEMORY_FILES.map((m) => {
             const active = m.file === file
+            const name = memoryFileName(m.file)
             return (
-              <SettingRow
+              <ListItem
                 key={m.file}
-                className={cn('cursor-pointer hover:bg-hover-5', active && 'bg-accent-12 hover:bg-accent-12')}
-                onClick={() => select(m.file)}
-                title={
-                  <span className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        'flex size-7 items-center justify-center rounded-control',
-                        active ? 'bg-accent-15 text-accent' : 'bg-line-6 text-fg-3',
-                      )}
-                    >
-                      <FileText size={13} strokeWidth={ICON_STROKE} aria-hidden />
-                    </span>
-                    <span className="font-mono">{memoryFileName(m.file)}</span>
-                    <span className="text-fg-2">{t(m.label)}</span>
+                leading={
+                  <span
+                    className={cn(
+                      'flex size-7 items-center justify-center rounded-control',
+                      active ? 'bg-accent-15 text-accent' : 'bg-line-6 text-fg-3',
+                    )}
+                  >
+                    <FileText size={13} strokeWidth={ICON_STROKE} aria-hidden />
                   </span>
                 }
-                description={`${t(m.description)} · ${memoryStatusLine(info[m.file]?.count, info[m.file]?.budget)}`}
-              >
-                {active ? (
-                  <Badge tone="accent">
-                    {dirty ? t('settings.memory.editingUnsaved') : t('settings.memory.editing')}
-                  </Badge>
-                ) : (
-                  <Button variant="ghost" size="sm" onClick={() => select(m.file)}>
-                    {t('common.edit')}
-                  </Button>
-                )}
-              </SettingRow>
+                // Inline spans, not a flex row: the ellipsis has to land on the title's own text box.
+                title={
+                  <>
+                    <span className="font-mono">{name}</span>{' '}
+                    <span className="font-normal text-fg-2">{t(m.label)}</span>
+                  </>
+                }
+                tooltip={`${name} · ${t(m.label)}`}
+                subtitle={`${t(m.description)} · ${memoryStatusLine(info[m.file]?.count, info[m.file]?.budget)}`}
+                selected={active}
+                onSelect={() => select(m.file)}
+              />
             )
           })}
         </Card>
@@ -198,8 +205,11 @@ export function MemoryPage() {
       >
         <Card className="flex flex-col gap-0 p-0" data-setting-row="memory.editor">
           {loadError ? (
-            <div className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4">
               <InlineHint kind="error">{loadError}</InlineHint>
+              <Button variant="outline" icon={RotateCcw} onClick={() => void loadFile(file)}>
+                {t('common.retry')}
+              </Button>
             </div>
           ) : (
             <Textarea
@@ -218,9 +228,11 @@ export function MemoryPage() {
           <div className="flex items-center gap-3 border-t border-line-6 px-4 py-2.5">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               {dirty ? (
-                <span className="text-caption text-accent">{t('settings.memory.editor.modified')}</span>
+                <span className="min-w-0 truncate text-caption text-accent-ink">
+                  {t('settings.memory.editor.modified')}
+                </span>
               ) : (
-                <span className="text-caption text-fg-3">
+                <span className="min-w-0 truncate text-caption text-fg-3">
                   {budget ? t('settings.memory.used', { used: budget.usedChars, limit: budget.limitChars }) : ''}
                 </span>
               )}
@@ -228,7 +240,7 @@ export function MemoryPage() {
                 <ProgressBar
                   value={budgetRatio(budget) * 100}
                   label={t('settings.memory.editor.capacity')}
-                  className="w-[100px]"
+                  className="w-[100px] shrink-0"
                 />
               ) : null}
               {tooLong ? (
@@ -244,15 +256,15 @@ export function MemoryPage() {
               variant="primary"
               icon={Save}
               disabled={!dirty || tooLong}
-              loading={saving}
-              onClick={() => void save()}
-              title={
+              disabledReason={
                 !dirty
                   ? t('settings.memory.editor.noChanges')
                   : tooLong
                     ? t('settings.memory.editor.tooLong')
                     : undefined
               }
+              loading={saving}
+              onClick={() => void save()}
             >
               {t('common.save')}
             </Button>
@@ -260,12 +272,14 @@ export function MemoryPage() {
         </Card>
       </Section>
 
+      <MemoryProvenance file={file} />
+
       <Section title={t('settings.memory.sections.policy')}>
         <Card variant="rows">
           <SRow
             id="memory.autoWrite"
             title={t('settings.memory.autoWrite.title')}
-            description={t('settings.memory.autoWrite.description')}
+            help={t('settings.memory.autoWrite.help')}
             htmlFor="memory-auto"
           >
             <Toggle
@@ -277,7 +291,6 @@ export function MemoryPage() {
           <SRow
             id="memory.confirmBeforeWrite"
             title={t('settings.memory.confirmBeforeWrite.title')}
-            description={t('settings.memory.confirmBeforeWrite.description')}
             htmlFor="memory-confirm"
           >
             <Toggle
@@ -289,7 +302,7 @@ export function MemoryPage() {
           <SRow
             id="memory.maxEntries"
             title={t('settings.memory.maxEntries.title')}
-            description={t('settings.memory.maxEntries.description')}
+            help={t('settings.memory.maxEntries.description')}
             htmlFor="memory-max"
             footer={maxCheck && !maxCheck.ok ? <InlineHint kind="error">{maxCheck.error}</InlineHint> : null}
           >
@@ -312,17 +325,9 @@ export function MemoryPage() {
               wrapperClassName="w-[104px]"
             />
           </SRow>
-          <SRow
-            id="memory.clear"
-            title={t('settings.memory.clear.title', { file: memoryFileName(file) })}
-            description={t('settings.memory.clear.description')}
-          >
-            <Button
-              variant="ghost"
-              icon={Trash}
-              className="text-danger hover:text-danger"
-              onClick={() => setClearOpen(true)}
-            >
+          <SRow id="memory.clear" title={t('settings.memory.clear.title', { file: memoryFileName(file) })}>
+            {/* A plain trigger: red lives only inside the DangerDialog it opens (CLAUDE.md §3). */}
+            <Button variant="ghost" icon={Trash} onClick={() => setClearOpen(true)}>
               {t('common.clear')}
             </Button>
           </SRow>

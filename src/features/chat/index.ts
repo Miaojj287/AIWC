@@ -8,6 +8,7 @@ import { registerTab } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { ChatTab } from './ChatTab'
 import { useChatUiStore } from './chatStore'
+import { focusedFindScope } from '@/platform/focusScope'
 
 export function register(): void {
   registerTab({ kind: 'chat', icon: 'message-square', component: ChatTab })
@@ -17,6 +18,8 @@ export function register(): void {
 
   // ⌘F: only when the active workspace tab is a chat preview (settings / other tabs handle their own).
   onCommand('search.inPage', () => {
+    // Focus in a region that owns ⌘F (the Agent conversation) — it is not meant for this tab.
+    if (focusedFindScope()) return
     const { tabs, activeId } = useTabsStore.getState()
     const active = tabs.find((t) => t.id === activeId)
     if (active?.kind === 'chat') useChatUiStore.getState().openSearch(active.id)

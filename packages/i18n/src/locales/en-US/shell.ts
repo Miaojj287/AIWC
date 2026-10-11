@@ -7,12 +7,13 @@ export const shell: Messages['shell'] = {
     autoreply: 'Auto reply',
     clone: 'AI clone',
     tasks: 'Scheduled tasks',
+    todo: 'Daily to-dos',
     settings: 'Settings',
     accountSettings: '{name} · Settings',
   },
   layout: {
     expandList: 'Expand sidebar',
-    resizeList: 'Resize sidebar',
+    resizeList: 'Resize list',
     resizeAgent: 'Resize Agent panel',
   },
   agentWindow: {
@@ -20,6 +21,7 @@ export const shell: Messages['shell'] = {
     resizeWorkspace: 'Resize workspace',
   },
   agent: {
+    panel: 'Agent panel',
     expand: 'Expand Agent panel',
     unread: 'New Agent messages',
   },
@@ -28,6 +30,7 @@ export const shell: Messages['shell'] = {
     close: 'Close window',
     minimize: 'Minimize window',
     fullscreen: 'Toggle full screen',
+    zoom: 'Zoom window',
     actionFailed: 'Window action failed',
   },
   objectList: {
@@ -46,6 +49,7 @@ export const shell: Messages['shell'] = {
   },
   sessions: {
     title: 'Chats',
+    search: 'Search chats',
     listLabel: 'Chat list',
     segments: { all: 'All', dm: 'Direct', group: 'Groups' },
     filters: { unreadOnly: 'Unread only', mutedOnly: 'Muted only', hidden: 'Show hidden' },
@@ -71,9 +75,11 @@ export const shell: Messages['shell'] = {
     unreadMuted: '{n} unread (muted)',
     pinned: 'Pinned',
     moreActions: 'More actions for {name}',
+    searchHistory: 'Search chat history',
+    searchHistoryHint: 'Messages with "{query}"',
     empty: {
       notConnected: 'WeChat not connected',
-      notConnectedHint: 'Connect the WeChat database on this computer to see your chats',
+      notConnectedHint: 'Your chats appear once connected',
       connect: 'Connect WeChat',
       loadFailed: "Couldn't load chats",
       noMatches: 'No matching chats',

@@ -3,6 +3,14 @@
  * JSON is located rather than assumed, and URLs are pulled from free text.
  */
 
+/**
+ * How much text the brace scan below may inspect in total. Trying every `{` to the end of the output
+ * is quadratic, and these CLIs can print megabytes: a run of unbalanced braces in their noise would
+ * otherwise block the main process for minutes. The budget is far above any real document (a 10KB
+ * output affords hundreds of full scans) and turns the pathological case into a few milliseconds.
+ */
+const MAX_SCAN_CHARS = 5_000_000
+
 /** The JSON document in `text`: the whole trimmed text, else the first `{`/`[` that parses to the end of a balanced block. */
 export function parseJsonOutput(text: string): unknown {
   const trimmed = text.trim()
@@ -12,10 +20,12 @@ export function parseJsonOutput(text: string): unknown {
   } catch {
     /* mixed output — scan */
   }
-  for (let i = 0; i < trimmed.length; i++) {
+  let budget = MAX_SCAN_CHARS
+  for (let i = 0; i < trimmed.length && budget > 0; i++) {
     const ch = trimmed[i]
     if (ch !== '{' && ch !== '[') continue
     const end = matchingClose(trimmed, i)
+    budget -= (end < 0 ? trimmed.length : end) - i
     if (end < 0) continue
     try {
       return JSON.parse(trimmed.slice(i, end + 1))

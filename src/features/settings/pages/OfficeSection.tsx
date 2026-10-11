@@ -31,11 +31,13 @@ import {
   DialogContent,
   DialogHeader,
   EmptyState,
+  ICON_STROKE,
   IconButton,
   Skeleton,
+  SkeletonListRows,
   toast,
-  Tooltip,
 } from '@/kit'
+import { formatDateTime } from '@/platform/format'
 import { invoke, useInvoke } from '@/platform/hooks'
 import { openUrl } from '@/platform/openExternal'
 import { errorMessage } from '../hooks'
@@ -154,9 +156,8 @@ export function OfficeSection() {
           ))}
         </Card>
       )}
-      <p className="m-0 px-1 text-micro leading-4 text-fg-3">{t('office.settings.dataNote')}</p>
 
-      <RecentPushes records={pushes.data} />
+      <RecentPushes records={pushes.data} error={pushes.error} onRetry={pushes.reload} />
 
       <Dialog
         open={Boolean(session)}
@@ -175,7 +176,7 @@ export function OfficeSection() {
               description={t(ROW_DESC[session.platform])}
             />
             <DialogBody>
-              <OfficeConnectPanel session={session} showPrivacy onRetry={() => void connect(session.platform, true)} />
+              <OfficeConnectPanel session={session} onRetry={() => void connect(session.platform, true)} />
             </DialogBody>
           </DialogContent>
         ) : null}
@@ -220,7 +221,7 @@ function PlatformRow({ platform, status, loading, starting, busy, onConnect, onD
       badge={loading ? null : <StatusBadge status={status} />}
       help={status?.detail}
     >
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
         {status?.cli.version ? (
           <span className="hidden font-mono text-micro text-fg-3 @min-[640px]/settings:inline">
             {t('office.settings.cliVersion', { version: status.cli.version })}
@@ -236,13 +237,9 @@ function PlatformRow({ platform, status, loading, starting, busy, onConnect, onD
                 {t('office.settings.disconnect')}
               </Button>
             ) : (
-              <Tooltip content={t('office.settings.noLogout')} multiline>
-                <span>
-                  <Button variant="ghost" icon={Unlink} disabled>
-                    {t('office.settings.disconnect')}
-                  </Button>
-                </span>
-              </Tooltip>
+              <Button variant="ghost" icon={Unlink} disabled disabledReason={t('office.settings.noLogout')}>
+                {t('office.settings.disconnect')}
+              </Button>
             )}
           </>
         ) : (
@@ -271,24 +268,42 @@ function StatusBadge({ status }: { status: OfficePlatformStatus | undefined }) {
   return <Badge tone="neutral">{t('office.settings.status.notConnected')}</Badge>
 }
 
-function RecentPushes({ records }: { records: OfficePushRecord[] | undefined }) {
+interface RecentPushesProps {
+  /** Undefined until the first answer: the card then shows its loading or error state, never nothing. */
+  records: OfficePushRecord[] | undefined
+  error: Error | undefined
+  onRetry(): void
+}
+
+function RecentPushes({ records, error, onRetry }: RecentPushesProps) {
   const t = useT()
-  if (!records) return null
   return (
     <Card variant="rows" title={t('office.settings.recent')} className="mt-1">
-      {records.length === 0 ? (
+      {!records ? (
+        error ? (
+          <EmptyState
+            compact
+            variant="error"
+            title={t('settings.account.pushesFailed')}
+            description={errorMessage(error)}
+            action={{ label: t('common.retry'), onClick: onRetry, icon: RefreshCw }}
+          />
+        ) : (
+          <SkeletonListRows rows={2} avatar={false} className="px-4 py-3" />
+        )
+      ) : records.length === 0 ? (
         <div className="px-4 py-3 text-note text-fg-3">{t('office.settings.recentEmpty')}</div>
       ) : (
         records.map((r) => {
           const url = r.url && isOfficeHostUrl(r.platform, r.url) ? r.url : undefined
           return (
             <div key={r.id} className="flex items-center gap-2.5 border-b border-line-6 px-4 py-2 last:border-b-0">
-              <Table2 size={14} aria-hidden className="shrink-0 text-fg-3" />
+              <Table2 size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" />
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-body text-fg">{r.title}</span>
                 <span className="truncate text-micro text-fg-3">
                   {t(PLATFORM_KEY[r.platform])} {t(TABLE_NOUN_KEY[r.platform])} ·{' '}
-                  {t('office.settings.rows', { rows: r.rows })} · {new Date(r.createdAt).toLocaleString()}
+                  {t('office.settings.rows', { rows: r.rows })} · {formatDateTime(r.createdAt)}
                 </span>
               </div>
               {url ? (

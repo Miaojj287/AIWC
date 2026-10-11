@@ -1,10 +1,10 @@
 /**
- * `update_plan`: lets the model publish / update its step list. The plan is surfaced to the UI as
- * a `plan.updated` event through `ctx.services.emit`, which the composition root must inject
- * (services.emit = (event: Event) => void). Without it the tool still succeeds silently.
+ * `update_plan`: lets the model publish / update its step list. The call's input IS the plan: the panel draws the
+ * checklist from the latest update_plan call of the turn (live from its tool.call event, after a reload from the
+ * recorded call), so the plan needs no side channel and survives a restart.
  */
 import { z } from 'zod'
-import { defineTool, type AnyToolDefinition, type Event } from '@aiwc/protocol'
+import { defineTool, type AnyToolDefinition } from '@aiwc/protocol'
 
 export const PlanStepSchema = z.object({
   title: z.string().min(1).max(200),
@@ -16,13 +16,8 @@ export const UpdatePlanInput = z.object({
 })
 export type UpdatePlanInputT = z.infer<typeof UpdatePlanInput>
 
-export interface PlanToolServices {
-  emit?: (event: Event) => void
-  [key: string]: unknown
-}
-
 export function planTools(): AnyToolDefinition[] {
-  const updatePlan = defineTool<UpdatePlanInputT, PlanToolServices>({
+  const updatePlan = defineTool<UpdatePlanInputT>({
     name: 'update_plan',
     description: '更新当前任务的步骤计划。多步任务开始前先列出步骤，每完成一步就把对应状态改为 done。',
     inputSchema: UpdatePlanInput,
@@ -30,11 +25,7 @@ export function planTools(): AnyToolDefinition[] {
     risk: 'read',
     parallelSafe: false,
     summarize: (i) => `更新计划（${i.steps.length} 步，${i.steps.filter((s) => s.status === 'done').length} 已完成）`,
-    async execute(input, ctx) {
-      const emit = ctx.services.emit
-      if (typeof emit === 'function') {
-        emit({ type: 'plan.updated', threadId: ctx.threadId, steps: input.steps })
-      }
+    async execute() {
       return { content: 'ok' }
     },
   })

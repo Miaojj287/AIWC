@@ -25,6 +25,8 @@ const sessions: WxSession[] = Array.from({ length: 20 }, (_, i) => ({
 }))
 
 let requests: ListSessionsQuery[]
+/** What a page request returns (empty = no chat name matches). */
+let pageItems: WxSession[]
 let connection: ConnectionState
 /** When set, every session page request fails with this error. */
 let listError: Error | undefined
@@ -38,6 +40,7 @@ class ResizeObserverStub {
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   requests = []
+  pageItems = sessions
   connection = 'ready'
   listError = undefined
   __resetShellStoreForTests()
@@ -52,7 +55,7 @@ beforeEach(() => {
       if (request.limit === 1) return { items: [], total: 100, hasMore: true }
       if (listError) throw listError
       if ((request.offset ?? 0) > 0) throw new Error('the first paint must not wait for page two')
-      return { items: sessions, total: 100, hasMore: true }
+      return { items: pageItems, total: pageItems.length ? 100 : 0, hasMore: pageItems.length > 0 }
     }),
   } as unknown as AiwcBridge
   __setBridgeForTests(bridge)
@@ -118,5 +121,32 @@ describe('failed session list', () => {
     expect(screen.getByRole('status', { name: '加载中' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '连接微信' })).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('searching all chat history from the chat list', () => {
+  it('keeps a row above the matching chats that searches every chat for the text', async () => {
+    const opened = vi.fn()
+    const off = onCommand('tab.openSearch', opened)
+    render(<SessionList query=" 聚餐 " activeObjectId={null} />)
+    await act(async () => {})
+
+    fireEvent.click(screen.getByRole('button', { name: /查找含「聚餐」的消息/ }))
+    expect(opened).toHaveBeenCalledWith({ query: '聚餐' })
+    off()
+  })
+
+  it('offers it first when no chat name contains the text', async () => {
+    pageItems = []
+    const opened = vi.fn()
+    const off = onCommand('tab.openSearch', opened)
+    render(<SessionList query="聚餐" activeObjectId={null} />)
+    await act(async () => {})
+
+    expect(screen.getByText('没有会话名包含「聚餐」')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
+    expect(opened).toHaveBeenCalledWith({ query: '聚餐' })
+    expect(screen.getByRole('button', { name: '清空搜索' })).toBeTruthy()
+    off()
   })
 })

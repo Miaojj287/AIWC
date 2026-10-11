@@ -1,15 +1,13 @@
 /**
  * Composition root: the ONLY place that knows about every package. createApp() wires config,
- * secrets, substrate (utility process), memory, gateway, kernel, auto-reply, diary and clone
+ * secrets, substrate (utility process), memory, gateway, kernel, auto-reply, 每日待办 and clone
  * builder together and bridges their event streams to the renderer (docs/ARCHITECTURE.md §3).
  *
  * Adding a tool = register it here (plus export from its package). Nothing else to touch.
  */
-import { homedir } from 'node:os'
+import { createAccountRuntime } from './services/accountRuntime'
 import { nanoid } from 'nanoid'
 import {
-  type CloneStatus,
-  type MessageEvent,
   type ModelSelection,
   type ReplyDraft,
   type SessionSource,
@@ -25,14 +23,14 @@ import {
   createSkillIndex,
   createToolRegistry,
   createToolRouterFactory,
+  askUserTool,
+  createQuestionGate,
   planTools,
   skillTools,
 } from '@aiwc/kernel'
 import { substrateTools, type SourceOpenOptions } from '@aiwc/substrate'
 import {
   createCloneBuilder,
-  createDiaryPipeline,
-  createDiaryStore,
   createMemoryStore,
   createRelationshipStore,
   memoryFragmentProvider,
@@ -47,7 +45,6 @@ import {
   createAutoReplyService,
   createDesktopAdapter,
   createGateway,
-  createIlinkAdapter,
   buildSessionKey,
   createUiInjectSender,
   gatewayTools,
@@ -61,20 +58,30 @@ import { resolveLanguage } from '@aiwc/i18n'
 import { createConfigService } from './config/configService'
 import { setMainLanguage, t } from './i18n'
 import { createSecretStore, type SafeStorageLike } from './config/secretStore'
-import { createAllowList } from './security/pathAllowList'
-import { customCacheDir, isDirectorySync, validateCacheDir } from './security/cacheDirPolicy'
-import { defaultAllowedRoots } from './paths'
-import { createModelResolver } from './ai/modelResolver'
+import { substrateCacheDir } from './paths'
+import { composeFileAccess } from './composeFileAccess'
+import { composeModels } from './composeModels'
 import { createSubstrateHost } from './substrate/hostClient'
 import { STABLE_SYSTEM_PROMPT } from './prompts/stable'
 import { PERSONA_STABLE_PROMPT } from './prompts/persona'
 import { observedFragmentProvider, userInstructionsFragmentProvider, wireMemoryInvalidation } from './prompts/fragments'
-import { type InboundNames } from './prompts/inbound'
+import { createAllowedTextReader, mentionFragmentProvider } from './prompts/mentionFragments'
+import { createAttentionNotices } from './composeNotifications'
+import { createCloneStatusReporter, reportConfirmDrafts } from './composeReports'
+import type { AttentionNotice } from './services/systemNotifier'
 import { composeTasks } from './composeTasks'
+import { composeExtensions } from './composeExtensions'
+import { composeMobile } from './composeMobile'
+import { composePrivacy, type PrivacyHost } from './composePrivacy'
+import { composeTodo } from './composeTodo'
+import { composeMemoryReview } from './composeMemory'
 import { createAutoReplyMonitor } from './services/autoReplyMonitor'
 import { createAutoReplyGenerator } from './services/autoReplyGenerate'
+import { createInboundNameResolver } from './services/autoReplyNames'
+import { createJevClient } from './services/jevClient'
+import { createJevReplyDecider } from './services/jevReply'
 import { createPetService } from './services/petService'
-import { citationAuditHook, dateHook, memoryToastHook } from './hooks'
+import { citationAuditHook, dateHook } from './hooks'
 import type {
   AppContext,
   Broadcast,
@@ -97,6 +104,12 @@ export interface CreateAppDeps {
   systemLocale?: string
   /** `shell.openExternal`: office authorization links are opened by main, never taken from the renderer. */
   openExternal?: (url: string) => Promise<void>
+  /** System notifications while the window is in the background (index.ts: services/systemNotifier.ts). */
+  attention?: (notice: AttentionNotice) => void
+  /** `session.defaultSession.resolveProxy`: 跟随系统 for requests to model providers. */
+  resolveProxy?: (url: string) => Promise<string>
+  /** Accessibility check, build fingerprint and trash for composePrivacy (index.ts, via electron). */
+  privacyHost?: PrivacyHost
 }
 
 type PkgLogger = (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
@@ -111,7 +124,6 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const toast = (payload: ToastPayload) => broadcast('app:toast', payload)
   const unsubscribers: Array<() => void> = []
 
-  // ---- config & secrets ------------------------------------------------------------------------
   const config = createConfigService({
     file: paths.configFile,
     logger,
@@ -127,32 +139,9 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   })
   const cfg = () => config.get()
 
-  // account.cacheDir is renderer-writable (config:set), so it is never trusted as-is: the substrate
-  // only gets it when it is an absolute, non-root, non-home path, and it becomes a file allow-list
-  // root only at startup and only when it already exists as a directory. Later changes go through
-  // app:pickDirectory (dialog result → root) + the config:set validation, never via config.subscribe.
-  const home = homedir()
-  const cacheDirOverride = (): string | undefined => {
-    const raw = customCacheDir(cfg().account.cacheDir)
-    if (!raw) return undefined
-    const verdict = validateCacheDir(raw, { home })
-    if (!verdict.ok) {
-      log.warn('ignoring account.cacheDir', { cacheDir: raw, reason: verdict.reason })
-      return undefined
-    }
-    return verdict.dir
-  }
-  const startupCacheDir = (() => {
-    const dir = cacheDirOverride()
-    if (!dir) return undefined
-    const verdict = validateCacheDir(dir, { home, isDirectory: isDirectorySync })
-    if (!verdict.ok)
-      log.warn('account.cacheDir not added to file allow-list', { cacheDir: dir, reason: verdict.reason })
-    return verdict.ok ? verdict.dir : undefined
-  })()
-  const allowList = createAllowList(defaultAllowedRoots(paths, { cacheDir: startupCacheDir }), { home })
+  // Custom cache dir, renderer file allow-list and protected stores (composeFileAccess.ts).
+  const { cacheDirOverride, allowList, protectedPaths } = composeFileAccess({ paths, config: cfg, log })
 
-  // ---- substrate (utility process) -------------------------------------------------------------
   // Desktop sessions always come from the configured WeChat database.
   const resolveMode = (): SubstrateMode => 'wcdb'
   const resolveInit = (): SubstrateHostInit => {
@@ -162,12 +151,12 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       mode,
       nativeDir: mode === 'wcdb' ? paths.nativeDir : undefined,
       mirrorDbPath: paths.mirrorDb,
-      cacheDir: cacheDirOverride() ?? paths.mediaCacheDir,
+      cacheDir: substrateCacheDir(paths, cacheDirOverride()),
     }
   }
   const resolveOpen = (_mode: SubstrateMode): SourceOpenOptions | undefined => {
     const a = cfg().account
-    const cacheDir = cacheDirOverride() ?? paths.mediaCacheDir
+    const cacheDir = substrateCacheDir(paths, cacheDirOverride())
     if (!a.dbRoot || !a.wxid || !a.dbKeyRef) return undefined
     const dbKeyHex = secrets.reveal(a.dbKeyRef)
     if (!dbKeyHex) return undefined
@@ -189,12 +178,12 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     toast({ kind: 'error', text: t('main.substrate.startFailed'), sticky: true })
   }
 
-  // ---- memory -----------------------------------------------------------------------------------
-  const memory = createMemoryStore({ dir: paths.memoryDir })
+  const memory = createMemoryStore({ dir: paths.memoryDir, maxEntries: () => cfg().memory.maxEntries })
+  const memoryReview = composeMemoryReview({ dir: paths.memoryDir, memory, config: cfg, broadcast, toast, logger })
+  unsubscribers.push(memoryReview.dispose)
   const relationships = createRelationshipStore({ dir: paths.relationshipsDir })
-  const diaries = createDiaryStore({ dir: paths.diariesDir })
   // Stable-tier memory snapshot: frozen per thread, refreshed process-wide whenever a memory file
-  // changes (remember/forget tools, 设置 › 记忆 edits, diary backfill) so new threads see the update.
+  // changes (remember/forget tools, 设置 › 记忆 edits) so new threads see the update.
   const memoryFragments = memoryFragmentProvider(memory)
   const personaFragments = personaFragmentProvider({
     relationships,
@@ -203,20 +192,8 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   })
   unsubscribers.push(wireMemoryInvalidation(memory, memoryFragments))
 
-  // ---- models -----------------------------------------------------------------------------------
-  const models = createModelResolver({ config: cfg, secrets, logger })
-  let lastAiJson = JSON.stringify(cfg().ai)
-  unsubscribers.push(
-    config.subscribe((next) => {
-      const aiJson = JSON.stringify(next.ai)
-      if (aiJson !== lastAiJson) {
-        lastAiJson = aiJson
-        models.invalidate()
-      }
-    }),
-  )
+  const { models, modelOps } = composeModels({ ...deps, config, secrets, unsubscribers })
 
-  // ---- gateway ----------------------------------------------------------------------------------
   // records.db holds rules + audit records + drafts; the gateway reads rules through the callback.
   const records = createAutoReplyRecordStore({ dbPath: paths.recordsDb })
   const gateway = createGateway({
@@ -225,13 +202,7 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       source.channel === 'desktop' || source.channel === 'wechat-ilink' || source.channel === 'wechat-ui',
     logger: pkgLogger('gateway'),
   })
-  gateway.registerAdapter(
-    createIlinkAdapter({
-      stateDir: paths.gatewayStateDir,
-      persistSession: false,
-      onQr: (dataUrl) => broadcast('gateway:event', { type: 'login.qr', channel: 'wechat-ilink', qrDataUrl: dataUrl }),
-    }),
-  )
+  // The iLink adapter (我的微信) is registered by composeMobile, once the kernel exists.
   gateway.registerAdapter(createDesktopAdapter())
   // 'wechat-ui' = keyboard injection into the WeChat client, verified by reading the message back from the
   // local DB; a failed verification halts the whole outbound path until the user resumes it.
@@ -285,15 +256,17 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       text: t('main.autoReply.agentDraftReady', { name: source.displayName ?? source.chatId }),
       action: { label: t('main.autoReply.openReplyDesk'), command: 'tab.openReplyDesk' },
     })
+    notices.agentDraft(source.displayName)
   }
 
-  // ---- kernel -----------------------------------------------------------------------------------
   const skills = createSkillIndex({
     dirs: [
       { path: paths.skillsBuiltinDir, source: 'builtin' },
       { path: paths.skillsUserDir, source: 'user' },
       { path: paths.skillsAgentDir, source: 'agent' },
     ],
+    disabled: () => config.get().agent.disabledSkills,
+    onRefresh: (entries) => broadcast('skills:changed', { skills: entries }),
   })
   try {
     await skills.refresh()
@@ -301,7 +274,6 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     log.warn('skill index refresh failed', e)
   }
 
-  // ---- office platforms -------------------------------------------------------------------------
   // 飞书 / 钉钉 / 企业微信 through their official CLIs. The package host-checks every link before main
   // opens it; npm JS shims run on Electron-as-node when the user has no node on PATH.
   const office = createOfficeService({
@@ -322,8 +294,9 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   // mounted on WeChat bot threads. The office connectors contribute their CLI verbs and state dirs.
   const shell = createShellTool({
     workspaceDir: paths.workspaceDir,
+    dataRoot: paths.dataRoot,
     extraWritableRoots: () => office.writableRoots(),
-    protectedPaths: [paths.secretsFile, paths.mirrorDb, paths.indexDb, paths.recordsDb],
+    protectedPaths,
     classifiers: [office.commandClassifier()],
     sandboxMode: () => cfg().agent.shellSandbox,
     env: deps.env,
@@ -333,20 +306,21 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const registry = createToolRegistry()
   const toolDefs = [
     ...substrateTools(),
-    ...memoryTools(),
+    ...memoryTools(memoryReview.toolOptions),
     ...relationshipTools(),
     ...gatewayTools(gateway.outbound, { onDraft: handoffDraft }),
     ...skillTools(skills),
     ...planTools(),
+    askUserTool(),
     ...officeTools(office),
     shell,
   ]
   for (const tool of toolDefs) registry.register(tool)
 
   const approvals = createApprovalGate()
+  const questions = createQuestionGate()
   const hooks = createHookRunner({ logger: (level, msg, meta) => logger.child('hooks')[level](msg, meta) })
   hooks.add(dateHook())
-  hooks.add(memoryToastHook(toast))
   hooks.add(
     citationAuditHook({ substrate, logger: (level, msg, meta) => logger.child('citation-audit')[level](msg, meta) }),
   )
@@ -364,12 +338,13 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     skills,
     config: cfg,
   }
-  const tools = createToolRouterFactory({ registry, approvals, hooks, services: toolServices })
+  const tools = createToolRouterFactory({ registry, approvals, questions, hooks, services: toolServices })
 
   const kernel = createKernel({
     services: {
       tools,
       approvals,
+      questions,
       hooks,
       rollout,
       skills,
@@ -381,6 +356,11 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
         relationshipFragmentProvider(relationships), // turn: origin peer profile
         personaFragments, // turn: what this message reminds the clone of (persona threads only)
         observedFragmentProvider(gateway), // turn: unaddressed group chatter
+        mentionFragmentProvider({
+          substrate,
+          readTextFile: createAllowedTextReader(allowList),
+          logger: pkgLogger('mentions'),
+        }), // turn: quoted messages + @files
       ],
     },
     config: () => {
@@ -401,36 +381,55 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       skillsExcludedProfiles: ['persona'],
     },
     logger: pkgLogger('kernel'),
+    onGlobalGrant: (key) => privacy.grants.addGlobal(key),
   })
+  const privacy = composePrivacy({
+    ...paths,
+    ...{ config, kernel, memory, skills, hooks, broadcast, host: deps.privacyHost, logger },
+    gatewayEvents: gateway.events,
+    chatName: async (chatId) => (await substrate.getSession(chatId).catch(() => undefined))?.title,
+  })
+  unsubscribers.push(privacy.dispose)
+  const notices = createAttentionNotices({
+    attention: deps.attention,
+    showNames: () => cfg().general.notifications.showNames,
+    kernel,
+    logger: pkgLogger('notify'),
+  })
+  unsubscribers.push(notices.dispose)
   // delegate_analysis needs the kernel to spawn read-only children; the registry is consulted per step,
   // so registering after createKernel is fine.
   registry.register(createDelegateTool(() => kernel))
+  // 扩展 (composeExtensions.ts): MCP tools, user hooks, workflow_run.
+  const extensions = composeExtensions({
+    ...{ paths, secrets, registry, hooks, kernel, broadcast, logger, env: deps.env, protectedPaths },
+    fallbackNode: process.versions.electron
+      ? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }
+      : undefined,
+    sandboxMode: () => cfg().agent.shellSandbox,
+  })
+  memoryReview.start({ kernel, secrets, model: modelOps.lowEffortModel })
   log.info('tools registered', { count: registry.list().length, names: registry.list().map((t) => t.name) })
 
-  // ---- auto reply -------------------------------------------------------------------------------
-  const resolveNames = async (event: MessageEvent): Promise<InboundNames> => {
-    try {
-      const contact = await substrate.getContact(event.source.peerId)
-      const group = event.source.chatType === 'group' ? await substrate.getSession(event.source.chatId) : undefined
-      return { nickname: contact?.remark ?? contact?.nickname ?? event.source.displayName, groupName: group?.title }
-    } catch {
-      return { nickname: event.source.displayName }
-    }
-  }
+  const resolveNames = createInboundNameResolver(substrate)
   // The peer's text is third-party data, never the instruction: prompts/inbound wraps it in a bounded
   // fragment and the turn's request is "reply appropriately". Group origins carry peerId (thread per member).
   const generate = createAutoReplyGenerator({
     substrate,
-    model: () => models.resolve(cfg().ai.defaultModel),
+    model: () => models.forFeature('autoReply').resolve(cfg().ai.defaultModel),
     logger: pkgLogger('autoreply-generate'),
   })
+  // 自动回复的 Jev（beta）回复方式: Jev only chooses between the rule's own candidates (services/jevReply.ts).
+  const jev = createJevClient({ config: cfg, secrets, fetch: modelOps.network.fetch, logger: pkgLogger('jev') })
+  const jevReply = createJevReplyDecider({ substrate, jev, resolveNames, logger: pkgLogger('jev-reply') })
   const autoReply = createAutoReplyService({
     gateway,
     records,
     countdownMs: () => cfg().autoReply.countdownMs,
     queueGapMs: () => 2500 + Math.floor(Math.random() * 4501),
     onDraft: (draft) => broadcast('autoreply:draft', draft),
-    generate: (event, rule, context) => generate(event, rule, context.signal),
+    generate: (event, rule, context) =>
+      rule.source === 'jev' ? jevReply.generate(event, rule, context.signal) : generate(event, rule, context.signal),
     onRecord: (record) => broadcast('autoreply:record', record),
     canSend: async (draft) => {
       if (draft.source.channel === 'wechat-ui') {
@@ -453,33 +452,8 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     resolveNames,
     logger: pkgLogger('autoreply'),
   })
-  autoReply.start()
-  // 自动回复 (sendMode 'confirm') parks the reply and tells the user where the button is; the toast
-  // is keyed per chat so a newer draft for the same chat replaces it instead of stacking.
   unsubscribers.push(
-    autoReply.events.on((e) => {
-      if (e.type !== 'autoreply.queued') return
-      const draft = records.getDraft(e.draftId)
-      if (
-        !draft ||
-        draft.state !== 'pending' ||
-        draft.mode !== 'confirm' ||
-        !draft.ruleId ||
-        draft.triggerMessageId.startsWith('retry_')
-      )
-        return
-      const name = draft.source.displayName ?? draft.source.chatId
-      toast({
-        id: `autoreply.confirm.${draft.source.chatId}`,
-        kind: 'info',
-        text: t('main.autoReply.draftReady', { name }),
-        action: {
-          label: t('main.autoReply.goConfirm'),
-          command: 'tab.openAutoReply',
-          payload: { sessionId: draft.source.chatId, title: name },
-        },
-      })
-    }),
+    reportConfirmDrafts({ events: autoReply.events, getDraft: (id) => records.getDraft(id), toast, notices }),
   )
   const autoReplyMonitor = createAutoReplyMonitor({
     substrate,
@@ -497,8 +471,6 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     accountChanged: () => autoReply.halt(t('main.autoReply.haltAccountSwitched')),
     onError: (error) => log.warn('local auto-reply monitor failed', error),
   })
-  // Demo fixtures must never drive real keyboard injection.
-  if (substrate.mode() !== 'demo') autoReplyMonitor.start()
   let lastReplyConfig = JSON.stringify(cfg().autoReply)
   unsubscribers.push(
     config.subscribe(() => {
@@ -517,7 +489,6 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     log.warn('desktop adapter connect failed', e)
   }
 
-  // ---- pets -------------------------------------------------------------------------------------
   // Bundled pets are copied into <dataRoot>/pets so every pet is served from the same allow-listed root.
   const pets = createPetService({ petsDir: paths.petsDir, builtinDir: paths.petsBuiltinDir, logger })
   try {
@@ -526,21 +497,37 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     log.warn('bundled pets not seeded', e)
   }
 
-  // ---- diary & clone ----------------------------------------------------------------------------
-  const diary = createDiaryPipeline({
+  const todo = composeTodo({
+    dir: paths.todoDir,
     substrate,
-    memory,
-    diaries,
-    model: () => models.resolveAuxiliary(),
-    rolloutSearch: (q, o) => rollout.search(q, o),
-    schedule: () => cfg().diary,
-    logger: pkgLogger('diary'),
+    resolveModel: (selection) => models.forFeature('todo').resolve(selection),
+    config: () => cfg().todo,
+    onConfigChange: (listener) => config.subscribe(listener),
+    broadcast,
+    toast,
+    logger: pkgLogger('todo'),
   })
-  diary.start()
 
-  // ---- 定时任务 (composeTasks.ts) -------------------------------------------------------------------
-  const tasks = composeTasks({ dir: paths.tasksDir, kernel, broadcast, toast, logger: pkgLogger('tasks') })
-  tasks.start()
+  const mobile = composeMobile({
+    dir: paths.mobileDir,
+    gatewayStateDir: paths.gatewayStateDir,
+    gateway,
+    kernel,
+    secrets,
+    broadcast,
+    logger: pkgLogger('mobile'),
+  })
+  const tasks = composeTasks({
+    dir: paths.tasksDir,
+    kernel,
+    broadcast,
+    toast,
+    notify: notices.taskRun,
+    registry,
+    attention: deps.attention,
+    onFinished: (run, task) => void mobile.pushTaskRun(run, task),
+    logger: pkgLogger('tasks'),
+  })
 
   // The builder takes one model getter; the IPC request may name a model per build. Last start wins
   // for concurrent builds with different models (rare: the UI clones one contact at a time).
@@ -548,7 +535,7 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const builder = createCloneBuilder({
     substrate,
     relationships,
-    model: () => models.resolve(cloneModel),
+    model: () => models.forFeature('clone').resolve(cloneModel),
     logger: pkgLogger('clone'),
   })
   const clone: CloneBuilderLike = {
@@ -561,7 +548,6 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     onStatus: (cb) => builder.onStatus(cb),
   }
 
-  // ---- event bridging ---------------------------------------------------------------------------
   unsubscribers.push(kernel.events.on((e) => broadcast('agent:event', e)))
   unsubscribers.push(
     gateway.events.on((e) => {
@@ -574,33 +560,30 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
           sticky: true,
           action: { label: t('main.autoReply.viewReplyDesk'), command: 'tab.openReplyDesk' },
         })
+        notices.autoReplyHalted()
       }
     }),
   )
   unsubscribers.push(memory.subscribe((e) => broadcast('memory:changed', e)))
   unsubscribers.push(office.onSession((session) => broadcast('office:session', session)))
 
-  const lastCloneStatus = new Map<string, string>()
-  const pushCloneStatus = (e: { contactId: string; status: CloneStatus }) => {
-    const key = JSON.stringify(e.status)
-    if (lastCloneStatus.get(e.contactId) === key) return
-    lastCloneStatus.set(e.contactId, key)
-    broadcast('clone:status', e)
-    if (e.status.state === 'ready')
-      toast({
-        kind: 'success',
-        text: t('main.clone.done'),
-        action: { label: t('main.clone.view'), command: 'tab.openClone' },
-      })
-    if (e.status.state === 'failed')
-      toast({ kind: 'error', text: t('main.clone.failed', { error: localizeText(e.status.error) }), sticky: true })
-  }
+  const pushCloneStatus = createCloneStatusReporter({ broadcast, toast })
   unsubscribers.push(relationships.subscribe(pushCloneStatus))
   unsubscribers.push(clone.onStatus(pushCloneStatus))
 
   log.info('app composed', { mode: substrate.mode(), skills: skills.list().length, tools: registry.list().length })
 
   return {
+    activate: createAccountRuntime([
+      extensions.start,
+      autoReply.start,
+      () => {
+        if (substrate.mode() !== 'demo') autoReplyMonitor.start()
+      },
+      todo.start,
+      mobile.start,
+      tasks.start,
+    ]),
     paths,
     logger,
     config,
@@ -608,21 +591,27 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
     kernel,
     skills,
     models,
+    modelOps,
     substrate,
     memory,
+    memoryReview,
     relationships,
-    diaries,
-    diary,
+    todo,
     gateway,
     autoReply,
     autoReplyMonitor,
     records,
+    jev,
     uiSender,
     clone,
     pets,
     office,
     tasks,
+    mobile,
+    extensions: extensions.service,
+    privacy,
     allowList,
+    protectedPaths,
     broadcast,
     toast,
     async shutdown() {
@@ -637,7 +626,10 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
       // Waiting device-flow pollers are detached process groups: stop them before anything else.
       office.shutdown()
       tasks.stop()
-      diary.stop()
+      await tasks.flush()
+      await extensions.shutdown().catch((e: unknown) => log.warn('extensions shutdown failed', e))
+      mobile.dispose()
+      todo.dispose()
       autoReplyMonitor.stop()
       await autoReply.stop()
       try {

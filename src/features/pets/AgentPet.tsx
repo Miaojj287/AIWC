@@ -3,7 +3,8 @@
  * with a one-line status bubble; `mini` lives in the collapsed Agent strip (no bubble, click expands).
  * It mirrors the active thread: runs while the Agent works, waits when a 二次确认 is open, cheers or
  * slumps when the turn ends, and otherwise breathes with an occasional wave (CLAUDE.md §5: the Agent
- * still only speaks in the panel — the pet only reflects state).
+ * still only speaks in the panel — the pet only reflects state). Beside it (below it in the strip) a
+ * count readout covers every thread and WeChat: running, needs you, done or failed unseen, unread.
  */
 import { Check, CircleAlert, Clock, EyeOff, Hand, Settings2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
@@ -20,7 +21,10 @@ import {
   Tooltip,
   type MenuSpec,
 } from '@/kit'
+import { openPetStatus } from './actions'
 import { PetSprite } from './PetSprite'
+import { PetStatusBar } from './PetStatusBar'
+import { petStatusItems, type PetStatusItem } from './petStatus'
 import {
   bubbleFor,
   MOOD_ANIMATION,
@@ -47,6 +51,8 @@ export interface AgentPetProps {
   onHide?: () => void
   /** Mini: click expands the Agent panel. */
   onActivate?: () => void
+  /** A status count was clicked (default: open that thread / the unread chats). */
+  onStatusSelect?: (item: PetStatusItem) => void
   className?: string
   style?: CSSProperties
 }
@@ -63,6 +69,8 @@ interface OneShot {
 }
 
 const HOVER_WAVE_GAP_MS = 5_000
+/** The readout sits just above the composer's top edge (the pet overlaps that edge by PERCH_OVERLAP). */
+const STATUS_LIFT = PERCH_OVERLAP + 8
 
 export function AgentPet({
   pet,
@@ -72,6 +80,7 @@ export function AgentPet({
   onOpenSettings,
   onHide,
   onActivate,
+  onStatusSelect = openPetStatus,
   className,
   style,
 }: AgentPetProps) {
@@ -149,6 +158,10 @@ export function AgentPet({
   const visibleBubble = bubble && bubble.key !== dismissed ? bubble : undefined
 
   const mini = variant === 'mini'
+  const statusItems = petStatusItems(signal.fleet, config)
+  const statusBar = statusItems.length ? (
+    <PetStatusBar items={statusItems} orientation={mini ? 'column' : 'row'} onSelect={onStatusSelect} />
+  ) : null
   const scale = mini ? MINI_SCALE : PET_SCALE[config.size]
   const status = moodLabel(mood)
 
@@ -186,17 +199,15 @@ export function AgentPet({
         if (mini) onActivate?.()
         else if (!busy && motion) play('jumping')
       }}
-      onPointerEnter={() => {
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'mouse') return
         if (mini || busy || !motion || interaction) return
         const at = Date.now()
         if (at - lastWave.current < HOVER_WAVE_GAP_MS) return
         lastWave.current = at
         play('waving')
       }}
-      className={cn(
-        'pointer-events-auto flex shrink-0 cursor-pointer items-end justify-center rounded-item outline-none transition-transform duration-(--dur-fast)',
-        'focus-visible:ring-2 focus-visible:ring-accent/70 active:scale-95',
-      )}
+      className="pointer-events-auto flex shrink-0 cursor-pointer items-end justify-center rounded-item outline-none"
     >
       {sprite}
     </button>
@@ -211,15 +222,27 @@ export function AgentPet({
   return (
     <div
       data-testid={mini ? 'agent-pet-mini' : 'agent-pet'}
-      className={cn(mini ? 'flex justify-center' : 'pointer-events-none flex items-end gap-1.5', className)}
+      className={cn(
+        mini ? 'flex flex-col items-center gap-1' : 'pointer-events-none flex items-end gap-1.5',
+        className,
+      )}
       style={style}
     >
-      {visibleBubble ? (
-        <PetBubbleView
-          bubble={visibleBubble}
-          onDismiss={() => setDismissed(visibleBubble.key)}
-          petHeight={scaledFrame(scale).height}
-        />
+      {!mini && (visibleBubble || statusBar) ? (
+        // Bubble above, counts below at the composer edge; without counts the bubble keeps its place by the pet's head.
+        <div
+          className="flex min-w-0 flex-col items-end gap-1.5"
+          style={statusBar ? { marginBottom: STATUS_LIFT } : undefined}
+        >
+          {visibleBubble ? (
+            <PetBubbleView
+              bubble={visibleBubble}
+              onDismiss={() => setDismissed(visibleBubble.key)}
+              lift={statusBar ? 0 : Math.round(scaledFrame(scale).height * 0.42)}
+            />
+          ) : null}
+          {statusBar}
+        </div>
       ) : null}
       <ContextMenu>
         <Tooltip
@@ -237,6 +260,7 @@ export function AgentPet({
           <ContextMenuItems items={menu} />
         </ContextMenuContent>
       </ContextMenu>
+      {mini ? statusBar : null}
     </div>
   )
 }
@@ -249,15 +273,7 @@ const BUBBLE_ICON = {
 } as const
 
 /** Same floating style as the kit Tooltip (raised ground, r6, toast shadow) — no new overlay style. */
-function PetBubbleView({
-  bubble,
-  onDismiss,
-  petHeight,
-}: {
-  bubble: PetBubble
-  onDismiss: () => void
-  petHeight: number
-}) {
+function PetBubbleView({ bubble, onDismiss, lift }: { bubble: PetBubble; onDismiss: () => void; lift: number }) {
   const t = useT()
   return (
     <button
@@ -268,8 +284,8 @@ function PetBubbleView({
       onClick={onDismiss}
       data-tone={bubble.tone}
       data-state="open"
-      className="kit-menu pointer-events-auto flex max-w-[200px] items-start gap-1.5 rounded-control bg-raised px-2 py-1.5 text-left text-note text-fg shadow-toast outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
-      style={{ marginBottom: Math.round(petHeight * 0.42) }}
+      className="kit-menu pointer-events-auto flex max-w-[200px] items-start gap-1.5 rounded-control bg-raised px-2 py-1.5 text-left text-note text-fg shadow-toast outline-none"
+      style={lift ? { marginBottom: lift } : undefined}
     >
       <span className="mt-0.5 flex size-3 shrink-0 items-center justify-center">{BUBBLE_ICON[bubble.tone]}</span>
       <span className="flex min-w-0 flex-col gap-0.5">

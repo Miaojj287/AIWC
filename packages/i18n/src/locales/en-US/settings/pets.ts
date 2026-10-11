@@ -1,17 +1,17 @@
 import type { Messages } from '../../zh-CN'
 
 export const pets: Messages['settings']['pets'] = {
-  sections: { current: 'Current pet', installed: 'My pets', catalog: 'Pet gallery' },
+  sections: { current: 'Current pet', status: 'Status counts', installed: 'My pets', catalog: 'Pet gallery' },
   current: {
     title: 'Current pet',
     description: 'Tap a move below to see how it looks in each state',
     empty: 'No pets yet',
-    emptyDescription: 'Adopt one from the gallery below, or import a downloaded pet package',
+    emptyDescription: 'Adopt one from the gallery below',
     loadFailed: "Couldn't read pets: {error}",
   },
   enabled: {
     title: 'Show a pet in the Agent panel',
-    description: 'It sits above the composer and shrinks into the side strip when the panel is collapsed',
+    description: 'Sits above the input box; tucks into the side strip when the panel is collapsed',
   },
   bubbles: {
     title: 'Status bubble',
@@ -24,12 +24,30 @@ export const pets: Messages['settings']['pets'] = {
   },
   idleFlair: { title: 'Idle moves', description: 'Waves or hops now and then while idle' },
   size: { title: 'Pet size', description: 'How big the pet is in the Agent panel', sm: 'S', md: 'M', lg: 'L' },
+  status: {
+    help: 'Like Codex, small counts next to the pet show the state of every Agent chat and of WeChat; click a count to open that chat or your unread chats. Reads local data only.',
+    running: {
+      title: 'Running chats',
+      description: 'Chats running or waiting for your OK; waiting ones in the warning color',
+    },
+    done: {
+      title: 'Finished chats',
+      description: 'Chats that finished or failed and you have not opened yet; opening clears them',
+    },
+    unread: {
+      title: 'WeChat unread',
+      description: 'Unread messages, not counting muted or folded chats and official accounts',
+    },
+    preview: 'Example: shown next to the pet',
+    previewOff: 'All status counts are off',
+  },
   preview: {
     label: '{name} preview',
     group: 'Preview moves',
     noDescription: 'This pet has no description yet.',
     reducedMotion: 'Your system has Reduce Motion on, so the pet holds a still pose.',
     motionOff: 'Animation is off, so the pet holds a still pose.',
+    status: 'Sample status counts',
     moves: {
       idle: 'Idle',
       running: 'Working',
@@ -43,12 +61,12 @@ export const pets: Messages['settings']['pets'] = {
     },
   },
   installed: {
-    count: '{n, plural, one {# pet} other {# pets}} · Saved on this device',
+    count: '{n, plural, one {# pet} other {# pets}} · Saved on this computer',
     description:
       'Click to use; right-click or ··· to delete. Imports zips downloaded from codex-pets.net (pet.json + spritesheet)',
     import: 'Import package',
     empty: 'No pets yet',
-    emptyDescription: 'Adopt one from the gallery below, or import a downloaded pet package',
+    emptyDescription: 'Adopt from the gallery, or import a package',
     loadFailed: "Couldn't read pets",
     selected: '{name} (in use)',
     inUse: 'In use',
@@ -75,12 +93,10 @@ export const pets: Messages['settings']['pets'] = {
       random: 'Surprise me',
       randomDescription: 'A random batch — click Shuffle for more',
     },
-    privacy:
-      'Browsing loads preview images from codex-pets.net, and adopting downloads the pet package to this device. None of your data is uploaded. Pets belong to their creators.',
     loading: 'Loading the pet gallery',
     loadFailed: "Couldn't load the pet gallery",
     openSite: 'Open in browser',
-    noResults: 'No pets match “{query}”',
+    noResults: 'No pets match "{query}"',
     noResultsDescription: 'Try another keyword, or clear the search to see the newest pets',
     clearSearch: 'Clear search',
     empty: 'The gallery is empty for now',
@@ -94,31 +110,31 @@ export const pets: Messages['settings']['pets'] = {
     adopt: 'Adopt',
     use: 'Use',
     inUse: 'In use',
-    tileAction: '{action} “{name}”',
+    tileAction: '{action} "{name}"',
     posterFailed: "Preview didn't load",
     by: 'by {author}',
   },
   install: {
-    title: 'Adopting “{name}”',
+    title: 'Adopting "{name}"',
     description:
-      'Downloading the pet package from codex-pets.net, checking the sprite sheet, then saving it to this device.',
-    steps: { download: 'Download pet package', verify: 'Check sprite sheet', save: 'Save to this device' },
-    cancelled: 'Stopped adopting “{name}”',
-    failed: "Couldn't adopt “{name}”",
+      'Downloading the pet package from codex-pets.net, checking the sprite sheet, then saving it to this computer.',
+    steps: { download: 'Download pet package', verify: 'Check sprite sheet', save: 'Save to this computer' },
+    cancelled: 'Stopped adopting "{name}"',
+    failed: 'Couldn\'t adopt "{name}"',
   },
   toast: {
-    adopted: 'Adopted “{name}”',
-    switched: 'Switched to “{name}”',
-    imported: 'Imported “{name}”',
-    withYou: "It's now sitting above the Agent composer",
+    adopted: 'Adopted "{name}"',
+    switched: 'Switched to "{name}"',
+    imported: 'Imported "{name}"',
+    withYou: "It's now sitting above the Agent input box",
     importFailed: "Couldn't import the pet",
-    removed: 'Deleted “{name}”',
+    removed: 'Deleted "{name}"',
     removeFailed: "Couldn't delete the pet",
   },
   remove: {
-    title: 'Delete “{name}”?',
+    title: 'Delete "{name}"?',
     currentDescription:
       "It's your current pet. The built-in pet takes over after deleting; you can adopt or import it again later.",
-    description: 'Its sprite sheet is removed from this device. You can adopt or import it again later.',
+    description: 'Its sprite sheet is removed from this computer. You can adopt or import it again later.',
   },
 }

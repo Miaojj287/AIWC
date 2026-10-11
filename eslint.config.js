@@ -54,6 +54,7 @@ export default tseslint.config(
       'release/**',
       'node_modules/**',
       'Example/**',
+      '.claude/**',
       'docs/**',
       '.tmp*',
       '.cache/**',

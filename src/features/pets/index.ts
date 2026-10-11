@@ -5,6 +5,8 @@
 export { AgentPet, perchInset, PERCH_OVERLAP } from './AgentPet'
 export { hidePet, openPetSettings } from './actions'
 export { PetSprite } from './PetSprite'
+export { PetStatusBar } from './PetStatusBar'
+export { petStatusItems, PREVIEW_FLEET, type PetFleet } from './petStatus'
 export { resolveCurrentPet, sourceLabel, type AgentPetSignal, type PetReaction } from './petModel'
 export { usePetStore, useInstalledPets, useCurrentPet, __resetPetStoreForTests } from './petStore'
 export { animationFor, type PetAnimationId } from './spriteSpec'

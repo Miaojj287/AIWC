@@ -26,6 +26,16 @@ export const pets = {
     hiddenDetail: '可以在「设置 › 宠物」里重新显示',
     hideFailed: '隐藏宠物失败',
   },
+  status: {
+    group: 'Agent 状态',
+    waiting: '{n} 个会话等你确认',
+    running: '{n} 个会话正在运行',
+    done: '{n} 个会话已完成，还没看',
+    failed: '{n} 个会话出错了',
+    unread: '微信 {n} 条未读（{chats} 个聊天）',
+    unreadCapped: '微信至少 {n} 条未读',
+    separator: '；',
+  },
   source: {
     builtin: '内置',
     catalog: 'codex-pets.net',

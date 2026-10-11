@@ -71,6 +71,11 @@ describe('IconRail', () => {
     mount()
     fireEvent.click(screen.getByRole('button', { name: 'AI 克隆' }))
     expect(select).toHaveBeenCalledWith({ fn: 'clone' })
+    // 每日待办 is the sixth.
+    const todo = screen.getByRole('button', { name: '每日待办' })
+    expect(todo.style.backgroundImage).toBe('var(--rail-tile-todo)')
+    fireEvent.click(todo)
+    expect(select).toHaveBeenLastCalledWith({ fn: 'todo' })
     act(() => useShellStore.getState().setRail('clone'))
     expect(screen.getByRole('button', { name: 'AI 克隆' }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByRole('button', { name: '聊天' }).getAttribute('aria-current')).toBeNull()

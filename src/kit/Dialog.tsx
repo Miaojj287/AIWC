@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { Dialog as Radix } from 'radix-ui'
 import {
+  Children,
   forwardRef,
   type ComponentPropsWithoutRef,
   type ComponentRef,
@@ -10,6 +11,7 @@ import {
 import { useT } from '@/i18n'
 import { cn } from './cn'
 import { ICON_SIZE, ICON_STROKE, type IconComponent } from './icon'
+import { IconButton } from './IconButton'
 
 /**
  * Dialog primitives — panel ground, line-10 border, r12, p20, overlay shadow; scrim = the shared `--scrim` (kit.css, via .kit-overlay).
@@ -93,11 +95,14 @@ export const DialogContent = forwardRef<ComponentRef<typeof Radix.Content>, Dial
       >
         {children}
         {hideClose ? null : (
-          <Radix.Close
-            aria-label={t('kit.close')}
-            className="absolute right-4 top-4 inline-flex size-6 items-center justify-center rounded-control text-fg-3 outline-none hover:bg-line-8 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent/70"
-          >
-            <X size={ICON_SIZE.menuAux} strokeWidth={ICON_STROKE} aria-hidden />
+          <Radix.Close asChild>
+            <IconButton
+              size="sm"
+              icon={X}
+              iconSize={ICON_SIZE.menuAux}
+              label={t('kit.close')}
+              className="absolute right-4 top-4 text-fg-3"
+            />
           </Radix.Close>
         )}
       </Radix.Content>
@@ -146,9 +151,26 @@ export function DialogBody({ className, ...rest }: DialogBodyProps) {
   return <div className={cn('flex min-h-0 flex-col gap-2.5 overflow-y-auto', className)} {...rest} />
 }
 
-export type DialogFooterProps = HTMLAttributes<HTMLDivElement>
+export interface DialogFooterProps extends HTMLAttributes<HTMLDivElement> {
+  /**
+   * The children are the dialog's action buttons, written in macOS order (取消 first, the primary last). Windows
+   * puts the affirmative button first and Cancel last, so there the same buttons render in reverse — DOM order
+   * included, which keeps the Tab order equal to the visual order on both platforms.
+   */
+  actions?: boolean
+}
+
+/** True on Windows (main.tsx stamps <html data-platform>): dialogs follow the platform's button order. */
+export function usesWindowsButtonOrder(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.platform === 'win32'
+}
 
 /** Buttons right-aligned, gap 8. Put 取消 first; at most one primary. */
-export function DialogFooter({ className, ...rest }: DialogFooterProps) {
-  return <div className={cn('flex items-center justify-end gap-2', className)} {...rest} />
+export function DialogFooter({ className, actions = false, children, ...rest }: DialogFooterProps) {
+  const ordered = actions && usesWindowsButtonOrder() ? Children.toArray(children).reverse() : children
+  return (
+    <div className={cn('flex flex-wrap items-center justify-end gap-2', className)} {...rest}>
+      {ordered}
+    </div>
+  )
 }

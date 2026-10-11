@@ -51,6 +51,8 @@ export const SECRET_REFS = {
   imageXorKey: 'account.imageXorKey',
   imageAesKey: 'account.imageAesKey',
   providerApiKey: (providerId: string) => `ai.provider.${providerId}.apiKey`,
+  /** TypeSafe (Jev) key for 自动回复的 Jev（beta）回复方式; 设置 › AI 接入 › Jev. */
+  jevApiKey: 'ai.jev.apiKey',
 } as const
 
 export function createSecretStore(opts: SecretStoreOptions): SecretStore {

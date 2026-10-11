@@ -13,7 +13,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import type { WxRichContent } from '@aiwc/protocol'
-import { cn, Dialog, DialogContent, DialogTitle, DialogDescription } from '@/kit'
+import { cn, Dialog, DialogContent, DialogTitle, DialogDescription, ICON_STROKE } from '@/kit'
 import { catalogs } from '@aiwc/i18n'
 import { useT, type MessageKey, type Translator } from '@/i18n'
 import { openUrl } from '@/platform/openExternal'
@@ -89,7 +89,7 @@ function Cover({ url, large, label }: { url?: string; large?: boolean; label: st
           className="size-full object-cover"
         />
       ) : (
-        <FileText size={24} aria-hidden />
+        <FileText size={24} strokeWidth={ICON_STROKE} aria-hidden />
       )}
     </span>
   )
@@ -104,28 +104,25 @@ function TransferCard({ rich, self }: { rich: WxRichContent; self: boolean }) {
   return (
     <div
       className={cn(
-        'relative w-[248px] max-w-full rounded-[6px] px-[14px] pb-[9px] pt-[14px] text-left',
-        settled ? 'bg-[#ad7028] text-[#d5aa73]' : 'bg-[#f59b38] text-white',
+        'relative w-[248px] max-w-full rounded-control px-3.5 pb-2 pt-3.5 text-left',
+        settled ? 'bg-wx-transfer-settled text-wx-transfer-settled-ink' : 'bg-wx-transfer text-white',
       )}
     >
       <span
         aria-hidden
-        className={cn(
-          'absolute top-[14px] size-[8px] rotate-45 rounded-[1px] bg-inherit',
-          self ? '-right-[4px]' : '-left-[4px]',
-        )}
+        className={cn('absolute top-3.5 size-2 rotate-45 rounded-sm bg-inherit', self ? '-right-[4px]' : '-left-[4px]')}
       />
-      <div className="flex items-center gap-[12px]">
-        <StatusIcon size={37} strokeWidth={1.5} className="shrink-0" aria-hidden />
+      <div className="flex items-center gap-3">
+        <StatusIcon size={36} strokeWidth={ICON_STROKE} className="shrink-0" aria-hidden />
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-medium leading-[21px]">{amount || t('chat.rich.transfer')}</div>
-          <div className="mt-[1px] truncate text-[12px] leading-[18px]">
+          <div className="truncate text-bubble font-medium leading-bubble">{amount || t('chat.rich.transfer')}</div>
+          <div className="mt-px truncate text-caption leading-4.5">
             {shown(t, rich.status) || t('chat.rich.transfer')}
             {!settled && rich.title !== TRANSFER_DEFAULTS.transfer ? ` · ${rich.title}` : ''}
           </div>
         </div>
       </div>
-      <div className="mt-[12px] text-[12px] leading-[17px]">{t('chat.rich.types.transfer')}</div>
+      <div className="mt-3 text-caption leading-4.5">{t('chat.rich.types.transfer')}</div>
     </div>
   )
 }
@@ -151,7 +148,7 @@ export function RichCard({ rich, self = false }: { rich: WxRichContent; self?: b
           {rich.description ? (
             <span
               className={cn(
-                'line-clamp-3 whitespace-pre-wrap text-caption leading-[18px]',
+                'line-clamp-3 whitespace-pre-wrap text-caption leading-4.5',
                 warm ? 'text-white/85' : 'text-fg-3',
               )}
             >
@@ -168,7 +165,7 @@ export function RichCard({ rich, self = false }: { rich: WxRichContent; self?: b
           warm ? 'border-white/20 text-white/90' : 'border-line-8 text-fg-3',
         )}
       >
-        <Icon size={12} aria-hidden className="shrink-0" />
+        <Icon size={12} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" />
         <span className="min-w-0 truncate">
           {rich.source ? `${rich.source} · ` : ''}
           {t(labels[rich.type])}
@@ -178,7 +175,7 @@ export function RichCard({ rich, self = false }: { rich: WxRichContent; self?: b
   )
   const className = cn(
     'block w-[280px] max-w-full overflow-hidden rounded-item border text-left',
-    warm ? 'border-orange-400 bg-orange-500 text-white' : 'border-line-8 bg-panel text-fg',
+    warm ? 'border-transparent bg-wx-transfer text-white' : 'border-line-8 bg-panel text-fg',
   )
   if (rich.type === 'article' && rich.entries?.length)
     return (
@@ -193,7 +190,7 @@ export function RichCard({ rich, self = false }: { rich: WxRichContent; self?: b
       {url || history ? (
         <button
           type="button"
-          className={cn(className, 'transition-opacity hover:opacity-85 focus-visible:outline-accent')}
+          className={className}
           aria-label={history ? t('chat.rich.view', { title }) : t('chat.rich.open', { title })}
           onClick={(e) => {
             e.stopPropagation()

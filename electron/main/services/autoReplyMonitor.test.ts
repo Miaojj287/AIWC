@@ -15,7 +15,7 @@ const rule: AutoReplyRule = {
 
 /** `mine` starts the chat with our own message as the last one, i.e. nothing to catch up on. */
 function setup({ mine = false }: { mine?: boolean } = {}) {
-  let owner = 'owner'
+  let owner: string | undefined = 'owner'
   let rules: AutoReplyRule[] = [rule]
   let message = {
     id: 'old',
@@ -28,7 +28,7 @@ function setup({ mine = false }: { mine?: boolean } = {}) {
     text: mine ? '我说的' : '旧消息',
   } as WxMessage
   const substrate = {
-    status: () => ({ connection: 'ready', account: { wxid: owner }, sync: { phase: 'idle' } }),
+    status: () => ({ connection: 'ready', account: owner ? { wxid: owner } : undefined, sync: { phase: 'idle' } }),
     getSession: async () => ({ id: 'alice', title: 'Alice', kind: 'dm', unread: 0 }),
     listMessages: async () => ({ items: [message] }),
     subscribe: () => () => {},
@@ -50,7 +50,7 @@ function setup({ mine = false }: { mine?: boolean } = {}) {
     ingest,
     invalidate,
     accountChanged,
-    setOwner: (value: string) => {
+    setOwner: (value: string | undefined) => {
       owner = value
     },
     disable: () => {
@@ -217,4 +217,21 @@ describe('local WeChat auto-reply monitor', () => {
     if (action === 'account') expect(h.accountChanged).toHaveBeenCalledTimes(1)
     h.monitor.stop()
   })
+})
+
+it('suspends during a reconnect without reporting a different account, but detects a new owner afterwards', async () => {
+  const h = setup({ mine: true })
+  await start(h)
+  h.setOwner(undefined)
+  await h.monitor.refresh()
+  expect(h.accountChanged).not.toHaveBeenCalled()
+  h.setOwner('owner')
+  await h.monitor.refresh()
+  expect(h.accountChanged).not.toHaveBeenCalled()
+  h.setOwner(undefined)
+  await h.monitor.refresh()
+  h.setOwner('other')
+  await h.monitor.refresh()
+  expect(h.accountChanged).toHaveBeenCalledOnce()
+  h.monitor.stop()
 })

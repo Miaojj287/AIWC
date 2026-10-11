@@ -26,6 +26,10 @@ function declarations(selector: string): Record<string, string> {
   return out
 }
 
+function selectorsOf(sheet: string): string[] {
+  return [...sheet.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap((m) => (m[1] ?? '').split(',').map((part) => part.trim()))
+}
+
 function rgb(value: string | undefined): { r: number; g: number; b: number; a: number } {
   const m = /^rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)$/.exec(value ?? '')
   if (!m) throw new Error(`not an rgb() overlay: ${String(value)}`)
@@ -53,21 +57,33 @@ describe('shell.css scrollbar thumb', () => {
     expect(hover.a).toBeGreaterThan(rest.a)
   })
 
+  // Only Windows / Linux draw the custom bars; macOS keeps its native overlay scrollbars (system setting, auto-hide).
+  const THUMB = ":root:not([data-platform='darwin']) *::-webkit-scrollbar-thumb"
+
   it('paints the thumb from the tokens, outside any @layer so it beats tailwind.css @layer base', () => {
-    expect(declarations('*::-webkit-scrollbar-thumb').background).toBe('var(--scrollbar-thumb)')
-    expect(declarations('*::-webkit-scrollbar-thumb:hover').background).toBe('var(--scrollbar-thumb-hover)')
+    expect(declarations(THUMB).background).toBe('var(--scrollbar-thumb)')
+    expect(declarations(`${THUMB}:hover`).background).toBe('var(--scrollbar-thumb-hover)')
     expect(css).not.toMatch(/@layer/)
     // No raw colour literal may sneak back into the thumb rules.
-    for (const sel of ['*::-webkit-scrollbar-thumb', '*::-webkit-scrollbar-thumb:hover']) {
+    for (const sel of [THUMB, `${THUMB}:hover`]) {
       expect(declarations(sel).background).not.toMatch(/rgb\(|#/)
+    }
+  })
+
+  it('never styles scrollbars on macOS, where the native overlay bars follow the system setting', () => {
+    for (const selector of selectorsOf(css)) {
+      if (!selector.includes('::-webkit-scrollbar')) continue
+      // Hiding a bar (the tab strip) is platform-neutral; painting or sizing one is not.
+      if (declarations(selector).display === 'none') continue
+      expect(selector.startsWith(":root:not([data-platform='darwin'])")).toBe(true)
     }
   })
 })
 
 describe('shell.css rail tiles', () => {
-  it('keeps the five rail gradients and nothing else painted with raw colour in :root', () => {
+  it('keeps every rail gradient and nothing else painted with raw colour in :root', () => {
     const root = declarations(':root')
-    for (const fn of ['chat', 'autoreply', 'clone', 'tasks', 'user'])
+    for (const fn of ['chat', 'autoreply', 'clone', 'tasks', 'todo', 'user'])
       expect(root[`--rail-tile-${fn}`]).toMatch(/^linear-gradient\(/)
     const raw = Object.entries(root)
       .filter(([, v]) => /rgb\(|#[0-9a-f]{3,8}\b/i.test(v))
@@ -77,6 +93,7 @@ describe('shell.css rail tiles', () => {
       '--rail-tile-chat',
       '--rail-tile-clone',
       '--rail-tile-tasks',
+      '--rail-tile-todo',
       '--rail-tile-user',
       '--scrollbar-thumb',
       '--scrollbar-thumb-hover',
@@ -169,6 +186,12 @@ describe('shell.css selectors', () => {
     expect(declarations(`${mac} .shell-rail`)['padding-top']).toBe('44px')
     expect(declarations(`${win} .shell-agent-panel:not([hidden])`)['padding-top']).toBe('32px')
     expect(declarations(`${win} .shell-agent-strip`)['padding-top']).toBe('40px')
+    // The caption-button width is read from the Window Controls Overlay, with 138px (3 × 46) as the fallback.
+    expect(declarations(win)['--caption-inset']).toContain('env(titlebar-area-width')
+    expect(declarations(win)['--caption-inset']).toContain('138px')
+    expect(declarations(`${win}[data-agent-collapsed='true'] .workspace-tab-strip`)['padding-right']).toBe(
+      'calc(var(--caption-inset) - 40px)',
+    )
     // Agent window (CLAUDE.md §12): the sidebar makes room like the rail; the header does once the sidebar is gone.
     expect(declarations(`${mac} .shell-agent-sidebar`)['padding-top']).toBe('44px')
     expect(
@@ -176,8 +199,12 @@ describe('shell.css selectors', () => {
     ).toBe('76px')
     expect(
       declarations(`${win} .shell-agent-window[data-pane-visible='false'] .shell-agent-header`)['padding-right'],
-    ).toBe('100px')
-    expect(declarations(`${win} .shell-agent-pane .workspace-tab-strip`)['padding-right']).toBe('100px')
+    ).toBe('var(--caption-inset)')
+    expect(declarations(`${win} .shell-agent-pane .workspace-tab-strip`)['padding-right']).toBe('var(--caption-inset)')
+    // Native full screen: no traffic lights, so the macOS columns stop reserving their band.
+    const full = ":root[data-fullscreen='true']"
+    expect(declarations(`${full} ${mac} .shell-rail`)['padding-top']).toBe('14px')
+    expect(declarations(`${full} ${mac} .shell-agent-sidebar`)['padding-top']).toBe('0')
   })
 
   it('makes the Agent window header the drag region and keeps its controls clickable', () => {

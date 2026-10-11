@@ -29,10 +29,12 @@ function Harness({
   onSubmit,
   onStop,
   streaming = false,
+  history,
 }: {
   onSubmit?: (text: string, mentions: Mention[]) => void
   onStop?: () => void
   streaming?: boolean
+  history?: string[]
 }) {
   const [text, setText] = useState('')
   const [mentions, setMentions] = useState<Mention[]>([])
@@ -45,6 +47,7 @@ function Harness({
         onMentionsChange={setMentions}
         onSubmit={() => onSubmit?.(text, mentions)}
         onStop={onStop}
+        history={history}
         streaming={streaming}
         mentionSources={sources}
         skills={skills}
@@ -54,7 +57,8 @@ function Harness({
   )
 }
 
-const textarea = () => screen.getByRole('textbox', { name: '给 Agent 的消息' }) as HTMLTextAreaElement
+// By label, not by role: the field is a textbox until `@` / `/` suggestions open, then a combobox.
+const textarea = () => screen.getByLabelText('给 Agent 的消息') as HTMLTextAreaElement
 const type = (value: string) => {
   const el = textarea()
   fireEvent.change(el, { target: { value, selectionStart: value.length, selectionEnd: value.length } })
@@ -85,19 +89,74 @@ describe('<Composer>', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it('shows the stop control while streaming', () => {
+  it('shows stop while streaming with an empty draft, and send (steer) once there is text', () => {
     const onStop = vi.fn()
-    render(<Harness onStop={onStop} streaming />)
+    const onSubmit = vi.fn()
+    render(<Harness onStop={onStop} onSubmit={onSubmit} streaming />)
     fireEvent.click(screen.getByRole('button', { name: '停止生成' }))
-    expect(onStop).toHaveBeenCalled()
+    expect(onStop).toHaveBeenCalledTimes(1)
+    type('换个角度')
+    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '发送并引导当前任务' }))
+    expect(onSubmit).toHaveBeenCalledWith('换个角度', [])
+  })
+
+  it('stops a running turn on Esc, but not while a popover is open or when idle', async () => {
+    const onStop = vi.fn()
+    const { rerender } = render(<Harness onStop={onStop} />)
+    fireEvent.keyDown(textarea(), { key: 'Escape' })
+    expect(onStop).not.toHaveBeenCalled()
+    rerender(<Harness onStop={onStop} streaming />)
+    type('@')
+    await waitFor(() => expect(screen.getByRole('listbox', { name: '引用候选' })).toBeTruthy())
+    fireEvent.keyDown(textarea(), { key: 'Escape' })
+    expect(onStop).not.toHaveBeenCalled()
+    fireEvent.keyDown(textarea(), { key: 'Escape' })
+    expect(onStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('steps through earlier prompts with ↑ / ↓ from an empty draft', () => {
+    render(<Harness history={['第一条', '第二条']} />)
+    const state = () => JSON.parse(screen.getByTestId('state').textContent ?? '{}').text as string
+    fireEvent.keyDown(textarea(), { key: 'ArrowUp' })
+    expect(state()).toBe('第二条')
+    fireEvent.keyDown(textarea(), { key: 'ArrowUp' })
+    expect(state()).toBe('第一条')
+    fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(state()).toBe('第二条')
+    fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(state()).toBe('')
+    // a draft being written is never replaced
+    type('草稿')
+    fireEvent.keyDown(textarea(), { key: 'ArrowUp' })
+    expect(state()).toBe('草稿')
+  })
+
+  it('opens the mention popover from ＋ 添加上下文', async () => {
+    render(<Harness />)
+    type('总结')
+    fireEvent.click(screen.getByRole('button', { name: '添加上下文' }))
+    expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('总结 @')
+    await waitFor(() => expect(screen.getByRole('listbox', { name: '引用候选' })).toBeTruthy())
   })
 
   it('opens the mention popover on @, navigates with arrows and inserts a chip on Enter', async () => {
     render(<Harness />)
+    expect(screen.getByRole('textbox', { name: '给 Agent 的消息' })).toBeTruthy()
     type('总结 @')
     await waitFor(() => expect(screen.getByText('产品市场群')).toBeTruthy())
     expect(screen.getByText('投研交流群')).toBeTruthy()
+    // combobox over the listbox itself (not the popover frame), with the highlighted option named
+    const combobox = screen.getByRole('combobox', { name: '给 Agent 的消息' })
+    expect(combobox).toBe(textarea())
+    expect(combobox.getAttribute('aria-haspopup')).toBe('listbox')
+    expect(combobox.getAttribute('aria-autocomplete')).toBe('list')
+    const listbox = screen.getByRole('listbox', { name: '引用候选' })
+    expect(combobox.getAttribute('aria-controls')).toBe(listbox.id)
+    expect(combobox.getAttribute('aria-activedescendant')).toBe(screen.getAllByRole('option')[0]?.id)
+    expect(screen.getByText('2 个候选项').closest('[aria-live="polite"]')).toBeTruthy()
     fireEvent.keyDown(textarea(), { key: 'ArrowDown' })
+    expect(combobox.getAttribute('aria-activedescendant')).toBe(screen.getAllByRole('option')[1]?.id)
     fireEvent.keyDown(textarea(), { key: 'Enter' })
     await waitFor(() =>
       expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').mentions).toEqual([
@@ -106,8 +165,8 @@ describe('<Composer>', () => {
     )
     expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('总结 ')
     expect(screen.queryByText('引用候选')).toBeNull()
-    // the chip is removable
-    fireEvent.click(screen.getByRole('button', { name: '移除 投研交流群' }))
+    // the chip is removable from the keyboard: Delete on the focused chip
+    fireEvent.keyDown(screen.getByRole('button', { name: '投研交流群' }), { key: 'Delete' })
     await waitFor(() => expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').mentions).toEqual([]))
   })
 
@@ -118,6 +177,16 @@ describe('<Composer>', () => {
     expect(screen.queryByText('产品市场群')).toBeNull()
     fireEvent.keyDown(textarea(), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('listbox', { name: '引用候选' })).toBeNull())
+    expect(screen.getByRole('textbox', { name: '给 Agent 的消息' })).toBeTruthy()
+  })
+
+  it('announces an empty result politely and keeps it outside the listbox', async () => {
+    render(<Harness />)
+    type('@不存在的会话')
+    const empty = await screen.findByText('没有匹配项')
+    expect(empty.closest('[aria-live="polite"]')).toBeTruthy()
+    expect(empty.closest('[role="listbox"]')).toBeNull()
+    expect(textarea().getAttribute('aria-activedescendant')).toBeNull()
   })
 
   it('opens the skills popover on / and inserts the command', async () => {
@@ -129,5 +198,32 @@ describe('<Composer>', () => {
     expect(screen.queryByText('总结当前会话')).toBeNull()
     fireEvent.keyDown(textarea(), { key: 'Enter' })
     await waitFor(() => expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('/周报 '))
+  })
+
+  it('works with a Chinese input method: 、 typed first opens skills, @ after Chinese text opens mentions', async () => {
+    render(<Harness />)
+    await act(async () => {
+      type('、')
+    })
+    expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('/')
+    await waitFor(() => expect(screen.getByText('生成周报草稿')).toBeTruthy())
+    fireEvent.keyDown(textarea(), { key: 'Escape' })
+    type('')
+    type('总结@产品')
+    await waitFor(() => expect(screen.getByText('产品市场群')).toBeTruthy())
+    fireEvent.keyDown(textarea(), { key: 'Enter' })
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}')).toEqual({
+        text: '总结',
+        mentions: [{ kind: 'session', id: 's1', label: '产品市场群' }],
+      }),
+    )
+  })
+
+  it('keeps 、 inside a sentence as punctuation', () => {
+    render(<Harness />)
+    type('苹果')
+    type('苹果、')
+    expect(JSON.parse(screen.getByTestId('state').textContent ?? '{}').text).toBe('苹果、')
   })
 })

@@ -34,7 +34,7 @@ export const HelpTip = forwardRef<HTMLButtonElement, HelpTipProps>(function Help
         aria-label={subject ? t('kit.helpFor', { subject }) : t('kit.help')}
         className={cn(
           'inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-chip text-fg-3 outline-none',
-          'transition-colors duration-(--dur-fast) hover:text-fg-2 focus-visible:ring-2 focus-visible:ring-accent/70',
+          'transition-colors duration-(--dur-fast) hover:text-fg-2',
           className,
         )}
         {...rest}

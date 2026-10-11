@@ -69,9 +69,10 @@ describe('AiPage vendor rail + provider panel', () => {
   it("lists every vendor preset plus 自定义 and lands on the default model's vendor", async () => {
     seedConfig([glm()])
     render(<AiPage />)
-    const rail = await screen.findByRole('tablist', { name: '模型厂商' })
-    const tabs = within(rail).getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent)).toEqual([
+    // The rail is a nav of buttons (every row a Tab stop, the selected one `aria-current`), not a tablist.
+    const rail = await screen.findByRole('navigation', { name: '模型厂商' })
+    const rows = within(rail).getAllByRole('button')
+    expect(rows.map((t) => t.textContent)).toEqual([
       'DeepSeek',
       'Kimi',
       'GLM',
@@ -85,7 +86,9 @@ describe('AiPage vendor rail + provider panel', () => {
       'Ollama',
       '自定义',
     ])
-    expect(within(rail).getByRole('tab', { name: /GLM/ }).getAttribute('aria-selected')).toBe('true')
+    expect(within(rail).getByRole('button', { name: /GLM/ }).getAttribute('aria-current')).toBe('true')
+    expect(within(rail).getByRole('button', { name: 'Kimi' }).hasAttribute('aria-current')).toBe(false)
+    expect(screen.queryByRole('tablist')).toBeNull()
     // connected vendor: status dot, 编辑 Key / 断开, enabled toggles, no primary on the page
     expect(within(rail).getByLabelText('已接入')).toBeTruthy()
     expect(screen.getByRole('button', { name: '编辑 Key' })).toBeTruthy()
@@ -100,7 +103,9 @@ describe('AiPage vendor rail + provider panel', () => {
   it('shows an honest empty state and a single 接入 primary before connecting', async () => {
     seedConfig([glm()])
     render(<AiPage />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'Kimi' }))
+    fireEvent.click(
+      within(await screen.findByRole('navigation', { name: '模型厂商' })).getByRole('button', { name: 'Kimi' }),
+    )
     expect(screen.getByRole('button', { name: '接入' })).toBeTruthy()
     expect(primaryButtons()).toHaveLength(1)
     expect(primaryButtons()[0]?.textContent).toBe('接入')
@@ -112,7 +117,9 @@ describe('AiPage vendor rail + provider panel', () => {
   it('opens the 接入 dialog without static model suggestions and a 前往官网获取 link', async () => {
     seedConfig([])
     render(<AiPage />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'DeepSeek' }))
+    fireEvent.click(
+      within(await screen.findByRole('navigation', { name: '模型厂商' })).getByRole('button', { name: 'DeepSeek' }),
+    )
     fireEvent.click(screen.getByRole('button', { name: '接入' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('接入 DeepSeek')).toBeTruthy()
@@ -126,10 +133,12 @@ describe('AiPage vendor rail + provider panel', () => {
       pressed: true,
     })
     expect(chips).toHaveLength(0)
-    // key missing → 确认 disabled with the reason
+    // key missing → 确认 disabled with the reason (kit `disabledReason`: a tooltip plus the accessible description;
+    // a `title` on a disabled button never showed)
     const confirm = within(dialog).getByRole('button', { name: '确认' })
     expect((confirm as HTMLButtonElement).disabled).toBe(true)
-    expect(confirm.getAttribute('title')).toBe('请填写 API Key')
+    expect(confirm.getAttribute('aria-description')).toBe('请填写 API Key')
+    expect(confirm.hasAttribute('title')).toBe(false)
   })
 
   it('lists hand-configured endpoints under 自定义接口', async () => {
@@ -141,11 +150,11 @@ describe('AiPage vendor rail + provider panel', () => {
     }
     seedConfig([custom])
     render(<AiPage />)
-    const rail = await screen.findByRole('tablist', { name: '模型厂商' })
+    const rail = await screen.findByRole('navigation', { name: '模型厂商' })
     expect(
       within(rail)
-        .getByRole('tab', { name: /公司网关/ })
-        .getAttribute('aria-selected'),
+        .getByRole('button', { name: /公司网关/ })
+        .getAttribute('aria-current'),
     ).toBe('true')
     expect(screen.getByRole('button', { name: '编辑' })).toBeTruthy()
   })
@@ -162,7 +171,7 @@ describe('AiPage primary button budget with the transcription form', () => {
   it('has no 保存 button when 转写模式 is 本地', async () => {
     seedConfig([glm()], 'local')
     render(<AiPage />)
-    await screen.findByRole('tablist', { name: '模型厂商' })
+    await screen.findByRole('navigation', { name: '模型厂商' })
     expect(screen.queryAllByRole('button', { name: '保存' })).toHaveLength(0)
     expect(primaryButtons().length).toBeLessThanOrEqual(1)
   })

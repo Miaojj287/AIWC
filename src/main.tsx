@@ -5,12 +5,18 @@ import { ErrorBoundary } from '@/kit'
 import { initialLanguage, setLanguage, t } from './i18n'
 import { getBridge } from './platform/bridge'
 import { setTransparencySupport } from './platform/appearance'
+import { restoreBootTheme } from './platform/themeBoot'
 import { App } from './app/App'
 
 async function bootstrap() {
+  // Last known theme and palette first, so a light-theme window never opens dark for a few frames.
+  restoreBootTheme()
   // Boot screen language until configStore hydrates `general.language`.
   setLanguage(initialLanguage())
   const bridge = await getBridge()
+  // Platform hooks for CSS that must differ per OS (scrollbars, native chrome): html[data-platform] / [data-runtime].
+  document.documentElement.dataset.platform = bridge.platform
+  document.documentElement.dataset.runtime = bridge.runtime
   // One startup handshake: warms version info and gives `electron . --smoke` a reliable signal that
   // the renderer booted with a working IPC bridge, regardless of which screen renders first.
   void bridge

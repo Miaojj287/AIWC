@@ -45,6 +45,8 @@ export interface IlinkAdapterOptions {
   stateDir: string
   /** Keep the QR-login token across app restarts. Defaults to true. */
   persistSession?: boolean
+  /** Where the login lives instead of the plaintext file in stateDir (the host keeps it in its encrypted store). */
+  sessionStore?: IlinkSessionStore
   onQr?: (dataUrl: string) => void
   /** Injectables (tests / composition). */
   fetch?: FetchLike
@@ -81,6 +83,8 @@ export interface IlinkAdapter extends PlatformAdapter, AdapterExtras {
   /** Disconnect and forget the stored session (next connect shows a QR). */
   logout(): Promise<void>
   readonly lastError: string | undefined
+  /** Where a QR login stands: `qr` = a code is showing, `scanned` = waiting for the phone to confirm. */
+  readonly loginPhase: 'idle' | 'qr' | 'scanned'
 }
 
 const QR_DEADLINE_MS = 5 * 60_000
@@ -114,7 +118,8 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
   const sleep = opts.sleep ?? defaultSleep
   const fetchImpl: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init))
   const client = opts.client ?? createIlinkClient({ fetch: fetchImpl, ...opts.clientOptions })
-  const store: IlinkSessionStore = createIlinkSessionStore(opts.stateDir, { persist: opts.persistSession })
+  const store: IlinkSessionStore =
+    opts.sessionStore ?? createIlinkSessionStore(opts.stateDir, { persist: opts.persistSession })
   const mediaDir = join(opts.stateDir, 'media')
   const allowedMediaRoots: MediaRoots = opts.allowedMediaRoots ?? [mediaDir]
   const renderQr = opts.renderQr ?? defaultRenderQr
@@ -135,6 +140,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
   let loopAbort: AbortController | undefined
   let loopDone: Promise<void> = Promise.resolve()
   let loginAbort: AbortController | undefined
+  let loginPhase: IlinkAdapter['loginPhase'] = 'idle'
   const seen = new Set<string>()
   const lastContextToken = new Map<string, string>()
   const typingTickets = new Map<string, string>()
@@ -264,6 +270,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
   // ── login ────────────────────────────────────────────────────────────────────────────────────
   async function login(signal: AbortSignal): Promise<boolean> {
     let qr = await client.fetchQrcode()
+    loginPhase = 'qr'
     qrEvents.emit(await renderQr(qr.qrcodeContent))
     setState('connecting', '请用微信扫码')
     const deadline = now() + qrDeadlineMs
@@ -282,8 +289,10 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
         refreshes += 1
         if (refreshes > QR_MAX_REFRESH) throw new Error('二维码多次过期，请重试')
         qr = await client.fetchQrcode()
+        loginPhase = 'qr'
         qrEvents.emit(await renderQr(qr.qrcodeContent))
       } else if (status.status === 'scaned') {
+        loginPhase = 'scanned'
         setState('connecting', '已扫码，请在手机上确认')
       } else if (status.status === 'confirmed') {
         session = {
@@ -369,6 +378,9 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
     get lastError() {
       return lastError
     },
+    get loginPhase() {
+      return loginPhase
+    },
     onMessage: (handler) => messages.on((e) => void handler(e)),
     onStateChange: (handler) => states.on(({ state: s, detail }) => handler(s, detail)),
     onQr: (handler) => qrEvents.on(handler),
@@ -392,6 +404,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
           throw err
         } finally {
           if (loginAbort === abort) loginAbort = undefined
+          loginPhase = 'idle'
         }
       }
       setState('connected')
@@ -402,6 +415,7 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
       if (!loginAbort) return
       loginAbort.abort()
       loginAbort = undefined
+      loginPhase = 'idle'
       if (state === 'connecting') setState(session ? 'disconnected' : 'needs_login')
     },
 
@@ -434,11 +448,21 @@ export function createIlinkAdapter(opts: IlinkAdapterOptions): IlinkAdapter {
       if (req.to.channel !== 'wechat-ilink') return { ok: false, error: `通道不匹配：${req.to.channel}` }
       const to = req.to.chatId || req.to.peerId
       if (!to) return { ok: false, error: '缺少接收方' }
-      const contextToken = req.contextToken ?? lastContextToken.get(to)
+      let contextToken = req.contextToken ?? lastContextToken.get(to)
       try {
         let messageId: string | undefined
         for (const part of req.parts) {
-          const id = await sendPart(current, to, part, contextToken)
+          let id: string | undefined
+          try {
+            id = await sendPart(current, to, part, contextToken)
+          } catch (err) {
+            // A -14 on a send that echoed a context token usually means the token went stale (hours after the peer's
+            // last message), not the login: iLink accepts token-less sends, so retry once without it before logging out.
+            if (!contextToken || !isSessionExpiredError(err)) throw err
+            lastContextToken.delete(to)
+            contextToken = undefined
+            id = await sendPart(current, to, part, undefined)
+          }
           if (id) messageId = id
         }
         return { ok: true, messageId }

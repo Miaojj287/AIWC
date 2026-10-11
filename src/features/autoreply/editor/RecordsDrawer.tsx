@@ -75,7 +75,7 @@ export function RecordsDrawer({
           className="h-6"
         />
       }
-      className="w-[400px]"
+      width={400}
     >
       <div className="mb-2 flex items-center gap-1.5">
         {RECORD_RANGES.map((r) => (
@@ -101,7 +101,7 @@ export function RecordsDrawer({
           variant={records.length === 0 ? 'empty' : 'no-results'}
           title={records.length === 0 ? t('autoreply.records.emptyTitle') : t('autoreply.records.noneInRange')}
           description={
-            records.length === 0 ? t('autoreply.records.drawerEmptyDescription') : t('autoreply.records.tryOtherFilter')
+            records.length === 0 ? t('autoreply.records.emptyDescription') : t('autoreply.records.tryOtherFilter')
           }
         />
       ) : (

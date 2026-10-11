@@ -1,175 +1,109 @@
 /**
- * Renders the markdownParser.ts AST for Agent replies. Every element class comes from markdownStyles.ts
- * (shared with the file / diary Markdown preview, CLAUDE.md §3); this surface only adds layout: min-w-0 so
- * code can scroll inside the 360 column, pre-wrap so soft breaks in a reply stay visible, and a hover 复制
- * button over fenced code (CLAUDE.md §4.1).
+ * Agent replies through the kit Markdown renderer: one parser and one look with the file preview (CLAUDE.md §3).
+ * This wrapper adds only what the Agent needs: soft line breaks stay visible, a `wx://` link becomes a CitationChip
+ * that checks the quotes its block pairs with it (table cells included), a table can be saved as CSV, and a local
+ * image (![alt](/path/chart.png)) shows and opens in the zoomable viewer.
  */
-import { Check, Copy } from 'lucide-react'
-import { memo, useMemo, useState, type ReactNode } from 'react'
-import { useT } from '@/i18n'
-import { cn, IconButton } from '@/kit'
-import { parseCitation } from './citations'
+import { memo, useCallback, type ReactNode } from 'react'
+import {
+  inlineText,
+  Markdown as KitMarkdown,
+  MarkdownInlines,
+  type MarkdownInline,
+  type MarkdownRenderInlines,
+  type MarkdownTableActions,
+} from '@/kit'
+import { toMediaUrl } from '@/platform/mediaUrl'
+import { parseCitation, planCitations, type CitationClaim, type CitationToken } from './citations'
 import { CitationChip } from './CitationChip'
-import { parseMarkdown, type Block, type Inline } from './markdownParser'
-import { MARKDOWN_CLASS, MARKDOWN_HEADING_CLASS } from './markdownStyles'
+import { saveTableCsv } from './saveTableCsv'
 
 export interface MarkdownProps {
   text: string
   className?: string
-  /** Called after a fenced block was copied (the panel shows a toast). */
-  onCopied?: () => void
 }
 
-export const Markdown = memo(function Markdown({ text, className, onCopied }: MarkdownProps) {
-  const blocks = useMemo(() => parseMarkdown(text), [text])
+export const Markdown = memo(function Markdown({ text, className }: MarkdownProps) {
   return (
-    <div className={cn(MARKDOWN_CLASS.root, 'min-w-0 break-words', className)}>
-      {blocks.map((b, i) => (
-        <BlockView key={i} block={b} onCopied={onCopied} />
-      ))}
-    </div>
+    <KitMarkdown
+      source={text}
+      className={className}
+      preserveLineBreaks
+      renderInlines={renderCitationInlines}
+      tableActions={TABLE_ACTIONS}
+    />
   )
 })
 
-function BlockView({ block, onCopied }: { block: Block; onCopied?: () => void }) {
-  switch (block.type) {
-    case 'heading': {
-      const Tag = `h${block.level}` as const
-      return (
-        <Tag className={cn(MARKDOWN_CLASS.heading, MARKDOWN_HEADING_CLASS[block.level])}>
-          <Inlines nodes={block.children} />
-        </Tag>
-      )
-    }
-    case 'paragraph':
-      return (
-        <p className={cn(MARKDOWN_CLASS.paragraph, 'whitespace-pre-wrap')}>
-          <Inlines nodes={block.children} />
-        </p>
-      )
-    case 'list': {
-      const Tag = block.ordered ? 'ol' : 'ul'
-      return (
-        <Tag
-          start={block.ordered ? block.start : undefined}
-          className={cn(MARKDOWN_CLASS.list, block.ordered ? 'list-decimal' : 'list-disc')}
-        >
-          {block.items.map((item, i) => (
-            <li key={i} className={MARKDOWN_CLASS.listItem}>
-              <Inlines nodes={item} />
-            </li>
-          ))}
-        </Tag>
-      )
-    }
-    case 'code':
-      return <CodeBlock lang={block.lang} code={block.code} onCopied={onCopied} />
-    case 'quote':
-      return (
-        <blockquote className={cn(MARKDOWN_CLASS.quote, 'whitespace-pre-wrap')}>
-          <Inlines nodes={block.children} />
-        </blockquote>
-      )
-    case 'rule':
-      return <hr className={MARKDOWN_CLASS.hr} />
-  }
-}
+const TABLE_ACTIONS: MarkdownTableActions = { onSaveCsv: (csv) => void saveTableCsv(csv) }
 
-/** Plain text of an inline node — what a citation chip checks its quotes against. */
-function inlineText(node: Inline): string {
-  switch (node.type) {
-    case 'text':
-    case 'code':
-    case 'link':
-      return node.text
-    case 'bold':
-    case 'italic':
-      return node.children.map(inlineText).join('')
-  }
-}
+type CitationPlan = ReadonlyMap<MarkdownInline, CitationClaim>
+
+/** One plan per scope (a block's run, or a whole table): every cell of a table shares its table's plan. */
+const plans = new WeakMap<readonly MarkdownInline[], CitationPlan>()
 
 /**
- * Renders the inline run; a `wx://` link becomes a CitationChip that receives the text written
- * since the previous citation in this block, so the quote it verifies is the one it follows.
+ * Pairs a block's quotes with its `wx://` links the way the host's audit does (@aiwc/protocol planCitations), so a
+ * chip checks exactly the quotes written for it. Bold / italic runs are part of the same block; a table is one
+ * block, as the audit reads it, so a quote in one cell vouches for a citation in the next.
  */
-function Inlines({ nodes }: { nodes: Inline[] }) {
-  const out: ReactNode[] = []
-  let context = ''
-  nodes.forEach((n, i) => {
-    const ref = n.type === 'link' ? parseCitation(n.href) : undefined
-    if (n.type === 'link' && ref) {
-      out.push(
-        <CitationChip key={i} sessionId={ref.sessionId} messageId={ref.messageId} label={n.text} context={context} />,
-      )
-      context = ''
-      return
-    }
-    out.push(renderInline(n, i))
-    context += inlineText(n)
-  })
-  return <>{out}</>
-}
-
-function renderInline(node: Inline, key: number): ReactNode {
-  switch (node.type) {
-    case 'text':
-      return node.text
-    case 'bold':
-      return (
-        <strong key={key} className={MARKDOWN_CLASS.strong}>
-          <Inlines nodes={node.children} />
-        </strong>
-      )
-    case 'italic':
-      return (
-        <em key={key}>
-          <Inlines nodes={node.children} />
-        </em>
-      )
-    case 'code':
-      return (
-        <code key={key} className={MARKDOWN_CLASS.inlineCode}>
-          {node.text}
-        </code>
-      )
-    case 'link':
-      // No navigation from the panel: links stay visible as text with the target in the title.
-      return (
-        <span key={key} title={node.href} className={MARKDOWN_CLASS.link}>
-          {node.text}
-        </span>
-      )
-  }
-}
-
-function CodeBlock({ lang, code, onCopied }: { lang?: string; code: string; onCopied?: () => void }) {
-  const t = useT()
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard?.writeText(code)
-      setCopied(true)
-      onCopied?.()
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* clipboard unavailable */
+function planFor(scope: readonly MarkdownInline[]): CitationPlan {
+  const cached = plans.get(scope)
+  if (cached) return cached
+  const tokens: CitationToken[] = []
+  const links: MarkdownInline[] = []
+  const walk = (list: readonly MarkdownInline[]) => {
+    for (const n of list) {
+      const ref = n.type === 'link' ? parseCitation(n.href) : undefined
+      if (n.type === 'link' && ref) {
+        tokens.push({ kind: 'cite', label: inlineText(n.children), link: n.href, ...ref })
+        links.push(n)
+      } else if (n.type === 'strong' || n.type === 'em') walk(n.children)
+      else tokens.push({ kind: 'text', text: inlineText([n]) })
     }
   }
-  return (
-    <div className="group/code relative min-w-0">
-      <pre className={MARKDOWN_CLASS.codeBlock}>
-        <code data-lang={lang}>{code}</code>
-      </pre>
-      <IconButton
-        size="xs"
-        icon={copied ? Check : Copy}
-        label={copied ? t('agent.markdown.copied') : t('agent.markdown.copyCode')}
-        onClick={() => void copy()}
-        className={cn(
-          'absolute right-1 top-1 text-fg-3 opacity-0 transition-opacity group-hover/code:opacity-100 focus-visible:opacity-100',
-          copied && 'opacity-100 text-ok',
-        )}
-      />
-    </div>
+  walk(scope)
+  const claims = planCitations(tokens)
+  const plan = new Map(links.flatMap((n, i) => (claims[i] ? [[n, claims[i]] as const] : [])))
+  plans.set(scope, plan)
+  return plan
+}
+
+const NO_QUOTES: readonly string[] = []
+const NO_RUN: readonly CitationClaim['run'][number][] = []
+
+const renderCitationInlines: MarkdownRenderInlines = (nodes, scope) => <CitationInlines nodes={nodes} scope={scope} />
+
+/** The kit's inline run, with every `wx://` link (at any depth) as a CitationChip. Other links stay inert text. */
+function CitationInlines({ nodes, scope }: { nodes: readonly MarkdownInline[]; scope: readonly MarkdownInline[] }) {
+  const renderNode = useCallback(
+    (node: MarkdownInline, key: number): ReactNode => {
+      const ref = node.type === 'link' ? parseCitation(node.href) : undefined
+      if (node.type !== 'link' || !ref) return undefined
+      const claim = planFor(scope).get(node)
+      return (
+        <CitationChip
+          key={key}
+          sessionId={ref.sessionId}
+          messageId={ref.messageId}
+          label={inlineText(node.children)}
+          quotes={claim?.quotes ?? NO_QUOTES}
+          run={claim?.run ?? NO_RUN}
+        />
+      )
+    },
+    [scope],
   )
+  return <MarkdownInlines nodes={nodes} renderNode={renderNode} resolveImage={resolveReplyImage} />
+}
+
+/** Local files the reply points at (a generated chart, a decrypted chat image); remote images stay links. */
+const LOCAL_IMAGE = /^(data:image\/|aiwc-media:|\/|[a-zA-Z]:[\\/])/
+
+/**
+ * An image in a reply: local paths and data URLs load through the media protocol (its allow-list decides what may
+ * be served); a remote URL is never fetched (nothing leaves the machine because a reply mentioned it).
+ */
+export function resolveReplyImage(src: string): string | undefined {
+  return LOCAL_IMAGE.test(src.trim()) ? toMediaUrl(src.trim()) : undefined
 }

@@ -20,7 +20,7 @@ import {
 import { createCliEnv, killAllCliProcesses, type CliEnv, type NodeRuntime, type SegmentClassifier } from '@aiwc/shell'
 import { createCliRunner, OfficeError, parseVersion, type CliRunner } from './cli/runner'
 import { createPushHistory, type PushHistory } from './history'
-import { hostMatches } from './platforms/common'
+import { hostMatches, REFUSE_CLI_CREDENTIALS } from './platforms/common'
 import { dingtalk } from './platforms/dingtalk'
 import { feishu } from './platforms/feishu'
 import type { AppendTarget, ConnectHooks, PlatformModule, PlatformSpec, PushContext } from './platforms/types'
@@ -63,8 +63,6 @@ export interface PushTableResult {
   warnings: string[]
 }
 
-
-
 export interface OfficeService {
   spec(platform: OfficePlatform): PlatformSpec
   status(opts?: { refresh?: boolean; platforms?: readonly OfficePlatform[] }): Promise<OfficePlatformStatus[]>
@@ -92,6 +90,16 @@ export interface OfficeService {
 
 const STATUS_TTL_MS = 60_000
 const KEEP_FINISHED_SESSIONS = 20
+
+/**
+ * The directories the vendor CLIs keep their tokens in. The shell sandbox must let the CLIs write
+ * there and lets every command read anywhere, so a command line that names one of them is graded like
+ * any other credential file (@aiwc/shell's own secret-path rule): confirmed every time, never
+ * pre-approvable. A flag's value counts too — `--data @~/.dws/credentials.json` is the whole point.
+ */
+const CLI_CREDENTIAL_RE = /(?:^|[\s/"'=@~])(?:\.lark-cli|\.dws|dws-cli|\.config[/\\]wecom)(?:[/\\\s"']|$)/
+
+const namesCredentialStore = (args: readonly string[]): boolean => args.some((a) => CLI_CREDENTIAL_RE.test(a))
 
 interface Located {
   cli: CliRunner
@@ -261,7 +269,9 @@ export function createOfficeService(deps: OfficeServiceDeps): OfficeService {
       link: async (input) => {
         if (!hostMatches(input.url, module.spec.authHostSuffixes)) {
           log('warn', 'office auth link rejected', { platform: req.platform, url: input.url })
-          return
+          // Dropping it silently would leave the CLI blocking on a link the user never sees, until
+          // the flow times out minutes later with nothing to act on.
+          throw new OfficeError('cli_error', `${module.spec.label}返回了无法验证的授权链接，已中止连接`)
         }
         const qrDataUrl = input.qrDataUrl?.startsWith('data:image/png;base64,')
           ? input.qrDataUrl
@@ -474,12 +484,18 @@ export function createOfficeService(deps: OfficeServiceDeps): OfficeService {
       return (argv) => {
         const bin = argv[0]?.split(/[\\/]/).pop()
         const module = bin ? byBin.get(bin) : undefined
-        if (!module || !bin) return undefined
         const args = argv.slice(1)
+        // A CLI's own path may live under its state directory, so only the arguments are searched
+        // for it; for every other program the whole line counts.
+        if (namesCredentialStore(module ? args : argv)) return { risk: 'destructive', note: REFUSE_CLI_CREDENTIALS }
+        if (!module || !bin) return undefined
         const allowKey = [bin, ...args.filter((a) => !a.startsWith('-')).slice(0, 2)].join(' ')
         const refusal = module.refusal(args)
         if (refusal) return { risk: 'destructive', note: refusal, allowKey }
-        return module.isReadOnly(args) ? { risk: 'read', allowKey } : { risk: 'write', allowKey }
+        // Anything that is not a known read puts content into the vendor's cloud — the same outward
+        // send office_push_table is, so it asks unless the thread runs on Autopilot. Grading it as a
+        // write would let bypass threads and scheduled runs send messages with nobody confirming.
+        return module.isReadOnly(args) ? { risk: 'read', allowKey } : { risk: 'send', allowKey }
       }
     },
 

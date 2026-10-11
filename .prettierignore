@@ -1,5 +1,6 @@
 # Never scanned: reference repos, dependencies, build output, caches.
 Example/
+.claude/
 node_modules/
 dist/
 dist-electron/

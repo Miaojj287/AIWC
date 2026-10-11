@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { z } from 'zod'
 import type { ChannelKind, ItemId, ThreadId, ThreadOrigin, ThreadSettings, ToolProfile } from '@aiwc/protocol'
-import type { ThreadRecord } from '../ports'
+import type { RolloutSearchHit, RolloutSearchOptions, ThreadRecord } from '../ports'
 import { shapeIssues, ThreadOriginSchema, ThreadSettingsSchema } from './rolloutLine'
 
 /** Trigram tokenizer needs ≥ 3 characters; shorter queries fall back to LIKE. */
@@ -51,16 +51,21 @@ export interface RolloutIndex {
   list(opts?: {
     query?: string
     limit?: number
+    /** Rows to skip (paging); applied after the filters and the pinned / newest-first order. */
+    offset?: number
     channel?: ChannelKind
     includeArchived?: boolean
+    /** Only archived threads (wins over `includeArchived`). */
+    archivedOnly?: boolean
     excludeProfiles?: readonly ToolProfile[]
+    /** Leave out threads with no recorded item (created, then nothing was ever sent). */
+    nonEmpty?: boolean
   }): ThreadRecord[]
-  search(
-    query: string,
-    opts?: { limit?: number; threadId?: ThreadId },
-  ): Array<{ threadId: ThreadId; itemId: ItemId; snippet: string; ts: number }>
+  search(query: string, opts?: RolloutSearchOptions): RolloutSearchHit[]
   close(): void
 }
+
+const DEFAULT_MARKS: readonly [string, string] = ['[', ']']
 
 export function openRolloutIndex(dbPath: string, logger?: RolloutLogger): RolloutIndex {
   if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true })
@@ -215,7 +220,8 @@ export function openRolloutIndex(dbPath: string, logger?: RolloutLogger): Rollou
     list(opts) {
       const where: string[] = []
       const params: Array<string | number> = []
-      if (!opts?.includeArchived) where.push('archived = 0')
+      if (opts?.archivedOnly) where.push('archived = 1')
+      else if (!opts?.includeArchived) where.push('archived = 0')
       if (opts?.channel) {
         where.push(`${jsonField('origin_json', '$.channel')} = ?`)
         params.push(opts.channel)
@@ -225,6 +231,7 @@ export function openRolloutIndex(dbPath: string, logger?: RolloutLogger): Rollou
         where.push(`COALESCE(${jsonField('settings_json', '$.profile')}, '') NOT IN (${placeholders})`)
         params.push(...opts.excludeProfiles)
       }
+      if (opts?.nonEmpty) where.push('item_count > 0')
       const q = opts?.query?.trim()
       if (q) {
         const sub = ftsPredicate(q)
@@ -232,32 +239,48 @@ export function openRolloutIndex(dbPath: string, logger?: RolloutLogger): Rollou
         params.push(`%${escapeLike(q)}%`, sub.param)
       }
       const sql = `SELECT * FROM threads ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-                   ORDER BY pinned DESC, updated_at DESC LIMIT ?`
-      params.push(Math.max(1, Math.min(opts?.limit ?? 100, 1000)))
+                   ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?`
+      params.push(Math.max(1, Math.min(opts?.limit ?? 100, 1000)), Math.max(0, Math.floor(opts?.offset ?? 0)))
       return (db.prepare(sql).all(...params) as Record<string, unknown>[]).map(rowToRecord)
     },
     search(query, opts) {
       const q = query.trim()
       if (!q) return []
+      const [open, close] = opts?.marks ?? DEFAULT_MARKS
       const sub = ftsPredicate(q)
       const where = [sub.sql]
       const params: Array<string | number> = [sub.param]
       if (opts?.threadId) {
-        where.push('thread_id = ?')
+        where.push('items_fts.thread_id = ?')
         params.push(opts.threadId)
       }
+      if (!opts?.includeArchived) where.push('threads.archived = 0')
+      if (opts?.channel) {
+        where.push(`${jsonField('origin_json', '$.channel')} = ?`)
+        params.push(opts.channel)
+      }
+      if (opts?.excludeProfiles?.length) {
+        where.push(
+          `COALESCE(${jsonField('settings_json', '$.profile')}, '') NOT IN (${opts.excludeProfiles.map(() => '?').join(', ')})`,
+        )
+        params.push(...opts.excludeProfiles)
+      }
       params.push(Math.max(1, Math.min(opts?.limit ?? 20, 500)))
-      const snippetExpr = sub.fts ? "snippet(items_fts, 3, '[', ']', '…', 16)" : 'text'
+      const snippetExpr = sub.fts ? "snippet(items_fts, 3, ?, ?, '…', 16)" : 'items_fts.text'
       const rows = db
         .prepare(
-          `SELECT thread_id, item_id, ts, ${snippetExpr} AS snippet FROM items_fts WHERE ${where.join(' AND ')} ORDER BY ts DESC LIMIT ?`,
+          `SELECT items_fts.thread_id AS thread_id, items_fts.item_id AS item_id, items_fts.ts AS ts,
+                  ${snippetExpr} AS snippet, threads.title AS title
+           FROM items_fts JOIN threads ON threads.thread_id = items_fts.thread_id
+           WHERE ${where.join(' AND ')} ORDER BY items_fts.ts DESC LIMIT ?`,
         )
-        .all(...params) as Record<string, unknown>[]
+        .all(...(sub.fts ? [open, close] : []), ...params) as Record<string, unknown>[]
       return rows.map((r) => ({
         threadId: String(r.thread_id) as ThreadId,
         itemId: String(r.item_id) as ItemId,
         ts: Number(r.ts),
-        snippet: sub.fts ? String(r.snippet) : likeSnippet(String(r.snippet), q),
+        snippet: sub.fts ? String(r.snippet) : likeSnippet(String(r.snippet), q, open, close),
+        title: String(r.title ?? ''),
       }))
     },
     close() {
@@ -271,17 +294,17 @@ function ftsPredicate(q: string): { sql: string; param: string; fts: boolean } {
   if ([...q].length >= TRIGRAM_MIN) {
     return { sql: 'items_fts MATCH ?', param: `"${q.replace(/"/g, '""')}"`, fts: true }
   }
-  return { sql: "text LIKE ? ESCAPE '\\'", param: `%${escapeLike(q)}%`, fts: false }
+  return { sql: "items_fts.text LIKE ? ESCAPE '\\'", param: `%${escapeLike(q)}%`, fts: false }
 }
 
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`)
 }
 
-function likeSnippet(text: string, q: string, radius = 24): string {
+function likeSnippet(text: string, q: string, open = '[', close = ']', radius = 24): string {
   const idx = text.toLowerCase().indexOf(q.toLowerCase())
   if (idx < 0) return text.slice(0, radius * 2)
   const start = Math.max(0, idx - radius)
   const end = Math.min(text.length, idx + q.length + radius)
-  return `${start > 0 ? '…' : ''}${text.slice(start, idx)}[${text.slice(idx, idx + q.length)}]${text.slice(idx + q.length, end)}${end < text.length ? '…' : ''}`
+  return `${start > 0 ? '…' : ''}${text.slice(start, idx)}${open}${text.slice(idx, idx + q.length)}${close}${text.slice(idx + q.length, end)}${end < text.length ? '…' : ''}`
 }

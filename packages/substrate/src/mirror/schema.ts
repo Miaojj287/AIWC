@@ -1,4 +1,5 @@
 import { Db } from './db'
+import { addPinyinColumns, fillMissingPinyin } from './pinyinColumns'
 
 export const MIRROR_SCHEMA_VERSION = 4
 
@@ -191,6 +192,14 @@ export function openMirrorDb(dbPath: string): Db {
   if (current !== String(MIRROR_SCHEMA_VERSION))
     db.run('INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)', 'schema_version', String(MIRROR_SCHEMA_VERSION))
   installExtrasTriggers(db)
+  // Pinyin keys for chat / contact search (zs → 张三). The columns must exist before any upsert writes them;
+  // a failed backfill only leaves some rows unmatched by pinyin until the next sync rewrites them.
+  addPinyinColumns(db)
+  try {
+    fillMissingPinyin(db)
+  } catch {
+    /* rows left NULL are retried on the next open; plain substring search still finds them */
+  }
   // Rows written before message_extras existed: index their quoted replies / transcripts once.
   // Best effort — a failure here must not keep the mirror from opening.
   if (!db.get('SELECT v FROM meta WHERE k = ?', 'message_extras_v1')) {

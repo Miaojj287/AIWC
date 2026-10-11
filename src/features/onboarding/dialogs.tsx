@@ -46,12 +46,13 @@ export function AgreementDialog({
           title={t('onboarding.agreement.title')}
           description={t('onboarding.agreement.description')}
         />
+        {/* Legal text has one look; 设置 › 关于 renders its terms with these same classes. */}
         <DialogBody className="max-h-[52vh] gap-4 pr-1">
           {AGREEMENT_SECTIONS.map((s) => (
             <section key={s.title} className="flex flex-col gap-1.5">
               <h3 className="text-body font-medium text-fg">{t(s.title)}</h3>
               {s.body.map((p, i) => (
-                <p key={i} className="text-caption leading-[18px] text-fg-2">
+                <p key={i} className="text-caption leading-5 text-fg-2">
                   {t(p)}
                 </p>
               ))}

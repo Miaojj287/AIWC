@@ -132,8 +132,14 @@ export function runProcess(command: string, args: readonly string[], opts: RunOp
   })
 }
 
+/**
+ * The whole group, not just the leader: a shim that forks the real binary and exits leaves children
+ * holding the pipes, so `close` never fires and a timeout would otherwise never end the run. The leader
+ * having exited is exactly when the group still needs signalling; `process.kill` throws ESRCH once the
+ * group is really gone, which the catch below swallows.
+ */
 function killGroup(child: ChildProcess, sig: NodeJS.Signals): void {
-  if (child.pid === undefined || child.exitCode !== null) return
+  if (child.pid === undefined) return
   try {
     if (process.platform === 'win32') {
       spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on(

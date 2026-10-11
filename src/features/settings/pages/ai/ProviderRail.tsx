@@ -1,6 +1,8 @@
 /**
  * 模型厂商 rail (Figma 164:4211 left column): one row per vendor preset, then hand-configured endpoints,
  * then 「+ 自定义」. Status dot = providerStatus (green connected, red last test failed).
+ * A `nav` of buttons with `aria-current`, not a tablist: every row is a Tab stop, which is what a tablist without
+ * arrow keys and without a tabpanel promised and did not deliver.
  */
 import { Plus } from 'lucide-react'
 import type { ProviderConfig } from '@aiwc/protocol'
@@ -40,13 +42,12 @@ function RailItem({
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={selected}
+      aria-current={selected ? 'true' : undefined}
       onClick={onClick}
       className={cn(
+        // No transition: the rail is switched like a list, and selection answers at once (CLAUDE.md §13).
         'flex h-8 shrink-0 items-center gap-2 rounded-control px-2 text-left text-body outline-none @min-[560px]:w-full',
-        'transition-colors duration-(--dur-fast) hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/70',
-        selected ? 'bg-accent-12 text-fg hover:bg-accent-12' : 'text-fg-2',
+        selected ? 'bg-accent-12 text-fg' : 'text-fg-2 hover:bg-hover-5',
       )}
     >
       <Icon
@@ -74,10 +75,8 @@ export function ProviderRail({ providers, selection, onSelect }: ProviderRailPro
     // Narrow cards (settings column under ~560px) lay the rail out as wrapping rows above the panel, so no vendor
     // name is ever cut at a scroll edge;
     // the Figma two-column form kicks in once the card is wide enough (Tailwind container query).
-    <div
-      role="tablist"
+    <nav
       aria-label={t('settings.ai.rail.title')}
-      aria-orientation="vertical"
       className="flex shrink-0 flex-wrap gap-0.5 border-b border-line-6 p-2 @min-[560px]:w-[168px] @min-[560px]:flex-col @min-[560px]:flex-nowrap @min-[560px]:border-b-0 @min-[560px]:border-r"
     >
       <div className="hidden px-2 pb-1.5 pt-1 text-note text-fg-3 @min-[560px]:block">
@@ -114,6 +113,6 @@ export function ProviderRail({ providers, selection, onSelect }: ProviderRailPro
         selected={selection.kind === 'new-custom'}
         onClick={() => onSelect({ kind: 'new-custom' })}
       />
-    </div>
+    </nav>
   )
 }

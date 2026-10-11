@@ -6,6 +6,7 @@
 import { onCommand, runCommand, type CommandMap } from '@/app/commands'
 import { t } from '@/i18n'
 import { toast } from '@/kit'
+import { selectedQuote } from '@/platform/focusScope'
 import { useShellStore } from '@/shell/shellStore'
 import type { TabDescriptor } from '@/workspace/tabRegistry'
 import { TAB_FUNCTION, useTabsStore } from '@/workspace/tabsStore'
@@ -51,11 +52,16 @@ export function descriptorFor<K extends keyof TabCommandPayloads>(
     case 'tab.openTask': {
       const p = payload as CommandMap['tab.openTask'] | undefined
       if (!p?.id) return undefined
+      const state = {
+        ...(p.templateId ? { templateId: p.templateId } : {}),
+        ...(p.name ? { name: p.name } : {}),
+        ...(p.prompt ? { prompt: p.prompt } : {}),
+      }
       return {
         kind: 'task',
         objectId: p.id,
         title: p.title ?? '',
-        state: p.templateId ? { templateId: p.templateId } : undefined,
+        state: Object.keys(state).length ? state : undefined,
       }
     }
     case 'tab.openFile': {
@@ -63,14 +69,10 @@ export function descriptorFor<K extends keyof TabCommandPayloads>(
       if (!p?.path) return undefined
       return { kind: 'file', objectId: p.path, title: p.title || fileName(p.path) }
     }
-    case 'tab.openDiary': {
-      const p = payload as CommandMap['tab.openDiary'] | undefined
-      return {
-        kind: 'diary',
-        objectId: 'diary',
-        title: t('app.tabs.diary'),
-        state: p?.date ? { date: p.date } : undefined,
-      }
+    case 'tab.openTodo': {
+      const p = payload as CommandMap['tab.openTodo'] | undefined
+      // `sourceId: undefined` is merged too: opening the dashboard from the rail clears a chat filter.
+      return { kind: 'todo', objectId: 'todo', title: t('app.tabs.todo'), state: { sourceId: p?.sourceId } }
     }
     case 'tab.openReplyDesk':
       return { kind: 'replydesk', objectId: 'replydesk', title: t('app.tabs.replyDesk') }
@@ -88,6 +90,17 @@ export function descriptorFor<K extends keyof TabCommandPayloads>(
     }
     case 'tab.openKit':
       return { kind: 'kit', objectId: 'gallery', title: t('app.tabs.kit') }
+    case 'tab.openAgentRun': {
+      const p = payload as CommandMap['tab.openAgentRun'] | undefined
+      if (!p?.childId) return undefined
+      // the title is the sub-agent's own label (data); the tab registration wraps it in UI copy
+      return {
+        kind: 'agentRun',
+        objectId: p.childId,
+        title: p.label,
+        state: p.threadId ? { threadId: p.threadId } : undefined,
+      }
+    }
     default:
       return undefined
   }
@@ -100,10 +113,11 @@ type TabCommandPayloads = Pick<
   | 'tab.openClone'
   | 'tab.openTask'
   | 'tab.openFile'
-  | 'tab.openDiary'
+  | 'tab.openTodo'
   | 'tab.openReplyDesk'
   | 'tab.openSettings'
   | 'tab.openKit'
+  | 'tab.openAgentRun'
 >
 const OPEN_COMMANDS = [
   'tab.openChat',
@@ -111,10 +125,11 @@ const OPEN_COMMANDS = [
   'tab.openClone',
   'tab.openTask',
   'tab.openFile',
-  'tab.openDiary',
+  'tab.openTodo',
   'tab.openReplyDesk',
   'tab.openSettings',
   'tab.openKit',
+  'tab.openAgentRun',
 ] as const
 
 /** Open or re-activate; switch the rail to the tab's function; merge defined state keys. */
@@ -167,6 +182,12 @@ export function installTabCommands(deps: TabCommandDeps): () => void {
       if (payload?.fn) useShellStore.getState().setRail(payload.fn)
     }),
     onCommand('agent.quoteActiveTab', () => {
+      // A text selection inside a quotable region wins over the tab as a whole (platform/focusScope.ts).
+      const selection = selectedQuote()
+      if (selection) {
+        runCommand('agent.quoteText', selection)
+        return
+      }
       const { tabs, activeId } = useTabsStore.getState()
       const tab = tabs.find((t) => t.id === activeId)
       const ref = tab ? quoteRefFor(tab) : undefined

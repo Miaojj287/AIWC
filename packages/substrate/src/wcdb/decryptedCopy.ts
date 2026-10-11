@@ -14,8 +14,10 @@
  */
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   existsSync,
+  fchmodSync,
   fstatSync,
   ftruncateSync,
   mkdirSync,
@@ -29,8 +31,8 @@ import {
 import { basename, join } from 'node:path'
 import { SQLCIPHER_PAGE_SIZE } from '../key/sqlcipherPage'
 import type { WcdbLogger } from './bridge'
-import { decryptPageInto, PAGE_BODY_END } from './sqlcipherCodec'
-import { readWalSnapshot, type WalSnapshot } from './sqliteWal'
+import { decryptPageInto, PAGE_BODY_END, type PageCipher } from './sqlcipherCodec'
+import { readWalSnapshot, walPageCeiling, type WalSnapshot } from './sqliteWal'
 
 const PAGE = SQLCIPHER_PAGE_SIZE
 /** Pages per read/write batch (512 KiB). */
@@ -38,32 +40,71 @@ const PAGES_PER_CHUNK = 128
 /** Bytes of each page IV remembered to detect rewritten pages; IVs are random, so 8 is plenty. */
 const IV_PREFIX = 8
 const DEFAULT_REFRESH_INTERVAL_MS = 100
-const COPY_DIR_NAME = 'wcdb-plain'
+/**
+ * Folder under the cache directory that holds the plaintext copies. Exported because the main process
+ * has to keep it out of the agent's reach, and a second spelling of the name would silently drift.
+ */
+export const DECRYPTED_COPY_DIR_NAME = 'wcdb-plain'
+/** Every plaintext copy of a WeChat database lives here and nowhere else. */
+export function decryptedCopyDir(cacheDir: string): string {
+  return join(cacheDir, DECRYPTED_COPY_DIR_NAME)
+}
+/** The copy is the account's chat history in the clear, so it is owner-only like a private key. */
+const COPY_DIR_MODE = 0o700
+const COPY_FILE_MODE = 0o600
 
 export interface DecryptedCopyOptions {
   /** The encrypted source database. */
   dbPath: string
-  /** 32-byte AES key from `resolvePageCipher`. */
-  key: Buffer
-  /** Hex of the database's KDF salt — part of the copy's name, so a replaced database never reuses it. */
-  saltHex: string
+  /**
+   * Page keys from `resolvePageCipher`. Its `saltHex` names the copy, so a replaced database (new
+   * salt) never reuses an older one.
+   */
+  cipher: PageCipher
   /** Root for the copies (the app cache directory). */
   cacheDir: string
   refreshIntervalMs?: number
   logger?: WcdbLogger
 }
 
-function fileStamp(path: string): string {
+/**
+ * Keep the plaintext out of reach of other accounts on the machine. A mode passed to mkdir/open only
+ * applies to what this process creates, so an existing directory or copy — from an earlier build, or
+ * from a cache directory the user picked — is tightened as well. Windows has no POSIX modes: the
+ * cache inherits the user profile's ACL there, which is why this is a no-op on win32.
+ */
+function restrict(target: string | number, mode: number, logger?: WcdbLogger): void {
+  if (process.platform === 'win32') return
   try {
-    const stat = statSync(path)
-    return `${stat.size}:${stat.mtimeMs}`
-  } catch {
-    return ''
+    if (typeof target === 'number') fchmodSync(target, mode)
+    else chmodSync(target, mode)
+  } catch (error) {
+    logger?.('debug', '[wcdb] could not restrict access to the decrypted copy', error)
   }
 }
 
-/** `<sha12 of source path>-<stem>-<salt>.db`; the stem is only there to keep the cache readable. */
+interface FileStamp {
+  size: number
+  /** Empty when the file is not there; otherwise it changes whenever the file was written. */
+  stamp: string
+}
+
+function fileStamp(path: string): FileStamp {
+  try {
+    const stat = statSync(path)
+    return { size: stat.size, stamp: `${stat.size}:${stat.mtimeMs}` }
+  } catch {
+    return { size: 0, stamp: '' }
+  }
+}
+
+/**
+ * `<sha12 of source path>-<stem>-<salt>.db`; the stem is only there to keep the cache readable.
+ * The salt comes out of the database file itself, so it is checked before it becomes a path segment
+ * (a 32-hex string can hold no separator, but the type alone does not say so).
+ */
 function copyFileName(dbPath: string, saltHex: string): { name: string; prefix: string } {
+  if (!/^[0-9a-f]{32}$/.test(saltHex)) throw new Error(`数据库盐值非法: ${saltHex.slice(0, 40)}`)
   const prefix = `${createHash('sha256').update(dbPath).digest('hex').slice(0, 12)}-`
   const stem = basename(dbPath)
     .replace(/\.db$/i, '')
@@ -77,7 +118,7 @@ export class DecryptedCopy {
   readonly path: string
   private readonly dbPath: string
   private readonly walPath: string
-  private readonly key: Buffer
+  private readonly cipher: PageCipher
   private readonly refreshIntervalMs: number
   private readonly logger?: WcdbLogger
   /** IV prefixes of the pages currently in the copy, page N at (N-1) * IV_PREFIX. */
@@ -95,12 +136,13 @@ export class DecryptedCopy {
   constructor(opts: DecryptedCopyOptions) {
     this.dbPath = opts.dbPath
     this.walPath = `${opts.dbPath}-wal`
-    this.key = opts.key
+    this.cipher = opts.cipher
     this.refreshIntervalMs = opts.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS
     this.logger = opts.logger
-    const dir = join(opts.cacheDir, COPY_DIR_NAME)
-    mkdirSync(dir, { recursive: true })
-    const { name, prefix } = copyFileName(opts.dbPath, opts.saltHex)
+    const { name, prefix } = copyFileName(opts.dbPath, opts.cipher.saltHex)
+    const dir = decryptedCopyDir(opts.cacheDir)
+    mkdirSync(dir, { recursive: true, mode: COPY_DIR_MODE })
+    restrict(dir, COPY_DIR_MODE, this.logger)
     this.path = join(dir, name)
     this.removeStaleCopies(dir, prefix, name)
   }
@@ -113,26 +155,27 @@ export class DecryptedCopy {
     const now = Date.now()
     if (!force && this.ready && now - this.checkedAt < this.refreshIntervalMs) return false
     this.checkedAt = now
-    const mainStamp = fileStamp(this.dbPath)
-    const walStamp = fileStamp(this.walPath)
-    if (this.ready && mainStamp === this.mainStamp && walStamp === this.walStamp) return false
+    const main = fileStamp(this.dbPath)
+    const wal = fileStamp(this.walPath)
+    if (this.ready && main.stamp === this.mainStamp && wal.stamp === this.walStamp) return false
 
-    const snapshot = walStamp ? readWalSnapshot(this.walPath, PAGE) : null
+    const snapshot = wal.stamp ? readWalSnapshot(this.walPath, PAGE, walPageCeiling(main.size, wal.size, PAGE)) : null
     const walReset = (snapshot?.salt ?? '') !== this.walSalt
     if (walReset) this.walApplied.clear()
     const existed = existsSync(this.path)
-    const fd = openSync(this.path, existed ? 'r+' : 'w+')
+    const fd = openSync(this.path, existed ? 'r+' : 'w+', COPY_FILE_MODE)
     let changed = false
     try {
+      restrict(fd, COPY_FILE_MODE, this.logger)
       if (!this.ready && existed) this.seedFromCopy(fd)
-      if (!this.ready || walReset || mainStamp !== this.mainStamp) changed = this.copyMainPages(fd) || changed
+      if (!this.ready || walReset || main.stamp !== this.mainStamp) changed = this.copyMainPages(fd) || changed
       if (snapshot) changed = this.applyWal(fd, snapshot) || changed
       changed = this.resize(fd, snapshot?.dbSizePages ?? this.mainPages) || changed
     } finally {
       closeSync(fd)
     }
-    this.mainStamp = mainStamp
-    this.walStamp = walStamp
+    this.mainStamp = main.stamp
+    this.walStamp = wal.stamp
     this.walSalt = snapshot?.salt ?? ''
     this.ready = true
     return changed
@@ -222,7 +265,9 @@ export class DecryptedCopy {
         flush(slot)
         continue
       }
-      if (!decryptPageInto(page, this.key, pageNumber, output, slot * PAGE)) {
+      if (!decryptPageInto(page, this.cipher, pageNumber, output, slot * PAGE)) {
+        // Neither written nor remembered: refresh() leaves the source stamp alone when it throws, so
+        // a page caught mid-write is read again instead of landing in the copy as garbage.
         flush(slot)
         throw new Error(`数据库页解密失败（第 ${pageNumber} 页）`)
       }
@@ -246,8 +291,12 @@ export class DecryptedCopy {
       for (const frame of snapshot.frames.values()) {
         const { pageNumber, offset } = frame
         if (pageNumber > snapshot.dbSizePages || this.walApplied.get(pageNumber) === offset) continue
-        if (readSync(fd, input, 0, PAGE, offset) !== PAGE) break
-        if (!decryptPageInto(input, this.key, pageNumber, output, 0)) {
+        // Throwing rather than stopping: refresh() records the WAL as applied only when it returns,
+        // so giving up quietly here would leave the missing frames behind until the WAL changes again.
+        if (readSync(fd, input, 0, PAGE, offset) !== PAGE) {
+          throw new Error(`WAL 帧读取不完整（第 ${pageNumber} 页）`)
+        }
+        if (!decryptPageInto(input, this.cipher, pageNumber, output, 0)) {
           throw new Error(`数据库页解密失败（第 ${pageNumber} 页）`)
         }
         // A zeroed tail marks the page as "came from the WAL", so the next main pass revisits it.
@@ -264,12 +313,16 @@ export class DecryptedCopy {
     return changed
   }
 
-  /** Cut the copy back to the committed page count (a WAL commit may have shrunk the database). */
+  /**
+   * Cut the copy back to the committed page count: a WAL commit may have shrunk the database, and a
+   * source WeChat truncated away has nothing left to serve — a copy longer than its source would keep
+   * handing out chat history that no longer exists.
+   */
   private resize(fd: number, pages: number): boolean {
     const wanted = pages * PAGE
     const size = fstatSync(fd).size
     let changed = false
-    if (wanted > 0 && size > wanted) {
+    if (size > wanted) {
       ftruncateSync(fd, wanted)
       changed = true
     } else if (wanted > size) {

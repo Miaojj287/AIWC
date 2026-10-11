@@ -48,6 +48,7 @@ function nextTimes(schedule: TaskSchedule, now: number, count: number): number[]
     for (let i = 1; i <= count; i++) out.push(now + i * schedule.everyMinutes * 60_000)
     return out
   }
+  if (schedule.kind === 'once') return schedule.at > now ? [schedule.at] : undefined
   if (schedule.kind === 'cron') {
     if (schedule.expression.trim().split(/\s+/).length !== 6) return undefined
     for (let i = 1; i <= count; i++) out.push(now + i * HOUR)

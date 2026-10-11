@@ -30,3 +30,6 @@ export function openSettings({ page, highlight }: { page?: string; highlight?: s
   if (existing) tabs.update(id, { state: { ...(existing.state ?? {}), ...nextState } })
   return id
 }
+
+/** 首次引导 › 接入模型: the onboarding wizard renders it through the app root. */
+export { ModelSetupStep } from './pages/ai/ModelSetupStep'

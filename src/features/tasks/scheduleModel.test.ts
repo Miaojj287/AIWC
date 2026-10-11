@@ -21,6 +21,8 @@ const task = (patch: Partial<ScheduledTask>): ScheduledTask => ({
   schedule: { kind: 'daily', time: '08:30' },
   enabled: true,
   permissionMode: 'bypass',
+  action: 'agent',
+  catchUp: 'once',
   createdAt: 1,
   updatedAt: 1,
   ...patch,
@@ -39,6 +41,14 @@ describe('describeSchedule', () => {
 })
 
 describe('draft', () => {
+  it('carries 完成后推送到我的微信 and treats switching it as an edit', () => {
+    expect(emptyDraft().pushToPhone).toBe(false)
+    expect(draftFromTask(task({})).pushToPhone).toBe(false)
+    const pushed = draftFromTask(task({ pushToPhone: true }))
+    expect(pushed.pushToPhone).toBe(true)
+    expect(sameDraft(pushed, { ...pushed, pushToPhone: false })).toBe(false)
+  })
+
   it('starts from a template and keeps the time of day across kind switches', () => {
     const draft = emptyDraft({
       id: 'x',

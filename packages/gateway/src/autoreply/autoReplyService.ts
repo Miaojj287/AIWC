@@ -17,6 +17,7 @@ import type {
   AutoReplyRule,
   ChannelKind,
   GatewayEvent,
+  JevDecision,
   MessageEvent,
   ReplyDecision,
   ReplyDraft,
@@ -42,18 +43,24 @@ export interface GenerateContext {
   signal?: AbortSignal
 }
 
+/**
+ * What a generator hands back. A plain string is the reply. `confirm` parks the reply for the user's
+ * click whatever the rule's send mode says (Jev was not sure enough); `skip` records the message as
+ * answered-by-silence with the given reason and produces no draft (Jev chose not to reply).
+ */
+export type GenerateResult =
+  | string
+  | { text: string; suggestions?: string[]; jev?: JevDecision; confirm?: boolean }
+  | { skip: string; jev?: JevDecision }
+
 export interface AutoReplyServiceDeps {
   gateway: Pick<Gateway, 'onInbound' | 'outbound'> & { emit?: (e: GatewayEvent) => void }
   records: AutoReplyRecordStore
   countdownMs: () => number
   queueGapMs?: () => number
   onDraft: (draft: ReplyDraft) => void
-  /** Model call for rules with source 'ai'. Receives the gated event and the rule. */
-  generate: (
-    event: MessageEvent,
-    rule: AutoReplyRule,
-    ctx: GenerateContext,
-  ) => Promise<string | { text: string; suggestions?: string[] }>
+  /** Model call for rules with source 'ai' / 'jev'. Receives the gated event and the rule. */
+  generate: (event: MessageEvent, rule: AutoReplyRule, ctx: GenerateContext) => Promise<GenerateResult>
   onRecord?: (record: AutoReplyRecord) => void
   /** Resolve {昵称} / {群名} when the adapter did not supply display names. */
   resolveNames?: (event: MessageEvent) => Promise<{ nickname?: string; groupName?: string }>
@@ -326,13 +333,13 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
 
     // A manual retry from the reply desk is the user asking to look at it first; otherwise the
     // rule's own send mode decides between the countdown and the 确认发送 button.
-    const effective: ReplyDraft['mode'] = opts.manualRetry || rule.sendMode === 'confirm' ? 'confirm' : 'auto'
+    let effective: ReplyDraft['mode'] = opts.manualRetry || rule.sendMode === 'confirm' ? 'confirm' : 'auto'
 
     // A newer message from the same chat makes any pending draft stale — real people answer the latest one.
     service.invalidate(event.source.chatId, '被同一会话的新消息取代')
     const controller = new AbortController()
     generations.set(event.source.chatId, controller)
-    if (rule.source === 'ai') {
+    if (rule.source !== 'fixed') {
       generatingNames.set(event.source.chatId, event.source.displayName ?? event.source.chatId)
       emit({
         type: 'autoreply.generating',
@@ -365,14 +372,27 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
 
     let text: string
     let suggestions: string[] | undefined
+    let jev: JevDecision | undefined
     try {
       if (rule.source === 'fixed') {
         const names = deps.resolveNames ? await deps.resolveNames(event) : {}
         text = substituteTemplate(rule.fixedText ?? '', templateVars(event, names, now()))
       } else {
         const result = await deps.generate(event, rule, { sessionKey, decision, signal: controller.signal })
-        text = typeof result === 'string' ? result : result.text
-        suggestions = typeof result === 'string' ? undefined : result.suggestions
+        if (typeof result === 'string') text = result
+        else if ('skip' in result) {
+          // The decider answered "do not reply": the message counts as handled, so no retry latches on it,
+          // and the record explains the silence. The trigger stays latched — silence was the answer.
+          finishGeneration(event.source.chatId)
+          if (controller.signal.aborted) releaseTrigger(triggerKey)
+          updateRecord(recordId, { status: 'rejected', error: result.skip, jev: result.jev })
+          return
+        } else {
+          text = result.text
+          suggestions = result.suggestions
+          jev = result.jev
+          if (result.confirm) effective = 'confirm'
+        }
       }
     } catch (err) {
       if (controller.signal.aborted) {
@@ -441,7 +461,12 @@ export function createAutoReplyService(deps: AutoReplyServiceDeps): AutoReplySer
     const raw = event.raw as { context_token?: string } | undefined
     const entry = track(draft, { contextToken: raw?.context_token, recordId, triggerKey })
     persistDraft(draft)
-    updateRecord(recordId, { replyText: text, draftId: draft.id })
+    updateRecord(recordId, {
+      replyText: text,
+      draftId: draft.id,
+      sendMode: effective === 'auto' ? 'auto' : 'confirm',
+      ...(jev ? { jev } : {}),
+    })
     emit({ type: 'autoreply.queued', draftId: draft.id })
 
     if (effective === 'auto') scheduleCountdown(entry)

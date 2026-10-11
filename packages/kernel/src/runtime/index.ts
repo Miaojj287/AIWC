@@ -6,3 +6,4 @@ export * from './context/fragments'
 
 export * from './model'
 export { createDelegateTool } from './delegate'
+export { createWorkflowTool } from './workflow'

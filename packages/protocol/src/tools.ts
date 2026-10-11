@@ -6,6 +6,8 @@
 import type { z } from 'zod'
 import type { CallId, JsonValue, StepId, ThreadId, TurnId } from './ids'
 import type { ChannelKind } from './gateway'
+import type { QuestionAnswer, UserQuestionOption } from './turnSignals'
+import type { SubagentTrace, ToolSummary } from './turnDisplay'
 
 /**
  * Risk drives approval: read = never asks, write = asks unless allow-listed (free in Bypass),
@@ -23,7 +25,8 @@ export type ToolProfile = 'desktop-chat' | 'wechat-bot' | 'cron' | 'subagent' | 
 export type ToolExposure = 'direct' | 'hidden'
 
 export interface ToolProgress {
-  (message: string, fraction?: number): void
+  /** `detail` is structured state for the tool's own transcript card (a workflow's step list). */
+  (message: string, fraction?: number, detail?: JsonValue): void
 }
 
 /** Open bag of services the composition root wires. Tools pick the fields they need. */
@@ -45,6 +48,23 @@ export interface ToolContext<S extends ToolServices = ToolServices> {
   progress: ToolProgress
   /** Depth 0 = main agent, 1 = subagent. */
   depth: number
+  /**
+   * Ask the user a multiple-choice question and wait for the answer (the turn's time budget pauses meanwhile).
+   * Absent where nobody can answer (scheduled runs, WeChat bot threads, sub-agents).
+   */
+  askUser?: (question: UserQuestionRequest) => Promise<QuestionAnswer>
+  /**
+   * Stop this call's timeout and the turn's time budget while something the call started waits for the user (a
+   * workflow write step's approval); the returned function resumes them. Absent where nothing can pause them.
+   */
+  pauseTimeouts?: () => () => void
+}
+
+/** What `ToolContext.askUser` shows: a question with 2–5 options and, when `allowOther`, a free-text 其他. */
+export interface UserQuestionRequest {
+  question: string
+  options: UserQuestionOption[]
+  allowOther: boolean
 }
 
 export interface ToolArtifact {
@@ -61,6 +81,8 @@ export interface ToolResult {
   artifacts?: ToolArtifact[]
   /** Free-form metadata surfaced to the UI (e.g. evidence anchors), never sent to the model. */
   meta?: Record<string, JsonValue>
+  /** What the call's sub-agents did, kept with the result for the transcript; never sent to the model. */
+  subagents?: SubagentTrace[]
 }
 
 /**
@@ -101,8 +123,26 @@ export interface ToolDefinition<I = unknown, S extends ToolServices = ToolServic
   timeoutMs?: number
   /** Output cap before truncation at record time. Default: kernel policy (16k chars). */
   maxOutputChars?: number
-  /** One-line human summary for approval popovers, e.g. (i) => `发送到 ${i.to}`. */
+  /**
+   * One-line summary for logs and channels without the UI catalog (WeChat approvals), e.g. (i) => `发送到 ${i.to}`.
+   * The panel words the row itself from the tool name and input (agent.toolSummary.<name>).
+   */
   summarize?: (input: I) => string
+  /**
+   * The summary as data, for a tool whose sentence needs more than its input (a task's name looked up by id, an MCP
+   * server's label). Recorded with the call, so history renders the same row.
+   */
+  describe?: (input: I) => ToolSummary
+  /**
+   * The JSON Schema the model sees, when the tool comes with one of its own (an MCP server's tool); `inputSchema`
+   * then only guards the shape loosely and the owner of the schema validates the rest.
+   */
+  inputJsonSchema?: Record<string, unknown>
+  /**
+   * True when executing the tool sends its input off this machine (a remote MCP server). Such a tool is never mounted
+   * on a thread whose model runs locally: that thread's data must stay on the machine (AGENTS §6).
+   */
+  offDevice?: boolean
   execute(input: I, ctx: ToolContext<S>): Promise<ToolResult>
 }
 

@@ -24,7 +24,8 @@ export function OfficeConnectCard({ call }: ToolCardProps) {
   const session = useSessionForCall(call.callId, platformOf(call.input), call.status === 'running')
   // Nothing before approval, and nothing once main has forgotten the session (the row still says how it went).
   if (!session) return null
-  return <OfficeConnectPanel session={session} className="rounded-item border border-line-6 bg-panel px-2.5 py-2" />
+  // Nested in the tool group: a tool result keeps the content ground (CLAUDE.md §14), like ArtifactCard.
+  return <OfficeConnectPanel session={session} className="rounded-item border border-line-8 bg-content px-2.5 py-2" />
 }
 
 export function OfficePushCard({ call }: ToolCardProps) {
@@ -43,14 +44,14 @@ export function OfficePushCard({ call }: ToolCardProps) {
   // The agent panel is 360px wide: text first at full width, actions on their own line underneath.
   return (
     <div
-      className="flex items-start gap-2.5 rounded-item border border-line-6 bg-panel px-2.5 py-2"
+      className="flex items-start gap-2.5 rounded-item border border-line-8 bg-content px-2.5 py-2"
       data-testid="office-push-card"
     >
       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-control bg-accent-15 text-accent">
         <Table2 size={14} strokeWidth={ICON_STROKE} aria-hidden />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="break-words text-caption font-medium leading-[18px] text-fg">
+        <span className="break-words text-caption font-medium leading-4.5 text-fg">
           {typeof out.title === 'string' ? out.title : summary}
         </span>
         <span className="text-micro text-fg-3">{summary}</span>

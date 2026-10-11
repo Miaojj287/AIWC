@@ -11,14 +11,19 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type ReactNode,
 } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
+import { TextQuote } from 'lucide-react'
 import type { WxMessage } from '@aiwc/protocol'
-import { EmptyState, Spinner, cn } from '@/kit'
+import { runCommand } from '@/app/commands'
+import { EmptyState, SelectionAction, Spinner, cn } from '@/kit'
 import { useT } from '@/i18n'
+import { quoteScopeProps } from '@/platform/focusScope'
 import { DayPill, MessageRow, type MessageActions } from './MessageRow'
 import { rowIndexOfMessage, type StreamRow } from './streamModel'
+import { selectedMessageIds } from './selectionQuote'
 import type { StreamChange } from './useMessages'
 
 const TOP_THRESHOLD = 240
@@ -52,6 +57,8 @@ export interface MessageStreamProps extends MessageActions {
   peerAvatar?: string
   mac: boolean
   filtered: boolean
+  /** The chat itself: selecting text offers 引用到 Agent with this chat (and the touched messages) as the source. */
+  quoteSource?: { id: string; label: string }
 }
 
 const BottomAligned = forwardRef<HTMLDivElement, { style: CSSProperties; children: ReactNode }>(function BottomAligned(
@@ -64,6 +71,18 @@ const BottomAligned = forwardRef<HTMLDivElement, { style: CSSProperties; childre
     </div>
   )
 })
+
+/** ↑ / ↓ on a focused bubble move to the previous / next mounted bubble, so history is readable without a mouse. */
+function bubbleKeyNav(event: KeyboardEvent<HTMLDivElement>): void {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  const current = event.target
+  if (!(current instanceof HTMLElement) || !current.hasAttribute('data-message-bubble')) return
+  const bubbles = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-message-bubble]')]
+  const next = bubbles[bubbles.indexOf(current) + (event.key === 'ArrowDown' ? 1 : -1)]
+  if (!next) return
+  event.preventDefault()
+  next.focus()
+}
 
 export function MessageStream(props: MessageStreamProps) {
   const {
@@ -91,6 +110,7 @@ export function MessageStream(props: MessageStreamProps) {
     peerAvatar,
     mac,
     filtered,
+    quoteSource,
     ...actions
   } = props
   const t = useT()
@@ -194,9 +214,27 @@ export function MessageStream(props: MessageStreamProps) {
     <div
       ref={scrollRef}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain py-2"
-      role="log"
+      // A region, not role="log": a log is an implicit live region, and a virtualised history would announce every
+      // row it mounts while scrolling.
+      role="region"
       aria-label={t('chat.stream.label')}
+      onKeyDown={bubbleKeyNav}
+      {...(quoteSource ? quoteScopeProps({ kind: 'session', ...quoteSource }) : {})}
     >
+      {quoteSource ? (
+        <SelectionAction
+          containerRef={scrollRef}
+          icon={TextQuote}
+          label={t('chat.actions.quoteToAgent')}
+          onAction={(text) => {
+            const messageIds = selectedMessageIds(scrollRef.current)
+            runCommand('agent.quoteText', {
+              text,
+              source: { kind: 'session', ...quoteSource, ...(messageIds.length ? { messageIds } : {}) },
+            })
+          }}
+        />
+      ) : null}
       <Virtualizer
         ref={handle}
         data={rows}

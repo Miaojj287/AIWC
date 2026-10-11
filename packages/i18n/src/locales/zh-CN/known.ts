@@ -56,6 +56,12 @@ export const known = {
     injectAutomationDenied:
       '未授予自动化权限，请在系统设置 → 隐私与安全性 → 自动化中允许 AIWC 控制微信和 System Events',
     injectNoPermission: '未授予辅助功能权限。若列表里已有 AIWC 却仍报此错，请先用「−」移除再重新添加并勾选',
+    // The send tools' own refusals (gateway tools/gatewayTools.ts, core/mediaPolicy.ts), shown on the Agent's send card.
+    originUnknown: '来源会话未知，无法发送',
+    recipientRequired: '请指定接收会话 to（微信会话 id）',
+    mediaRootsMissing: '未配置允许发送的本机目录，已拒绝发送文件',
+    mediaPathNotAbsolute: '媒体路径必须是绝对路径',
+    mediaOutsideRoots: '文件不在允许发送的目录内：{name}',
   },
   ilink: {
     expired: '微信连接已过期，请重新扫码',
@@ -103,6 +109,10 @@ export const known = {
     listHttp: '拉取模型列表失败（HTTP {status}）',
     listInvalid: '接口未返回有效的模型列表',
     listCursorMissing: '模型列表缺少分页游标',
+    contentFiltered: '模型服务商的内容过滤拦下了这次回答',
+    emptyResponse: '模型没有返回任何内容',
+    outputTruncated: '回答超出了模型的输出上限，已自动续写 {n} 次仍未写完',
+    streamStalled: '模型 {seconds} 秒没有输出，已重新连接 {n} 次仍未恢复',
   },
   substrate: {
     notConnected: '尚未连接微信数据',
@@ -147,12 +157,10 @@ export const known = {
     imageAesMissing: '缺少图片 AES 密钥，请先在设置中获取',
   },
   keys: {
-    readingMemory: '正在从微信进程内存中读取密钥',
     fromMemory: '已从微信进程内存获取密钥',
     fromDump: '已从微信崩溃转储获取密钥',
     sipEnabled: 'SIP（系统完整性保护）已开启，无法获取密钥。请关闭 SIP 后重试。',
     atLogin: '已在登录时捕获密钥',
-    restarting: '正在重启微信以捕获启动阶段密钥…',
     atRestart: '已在微信重启时捕获密钥',
     needAuthorization: '需要授权：请在「系统设置 › 隐私与安全性 › 开发者工具」中允许 AIWC，或关闭 SIP 后重试',
     notFoundRetry: '未能从内存或崩溃转储获取密钥，请确认微信已登录并进入任意聊天后重试',
@@ -160,8 +168,6 @@ export const known = {
     notInMemory: '内存中未找到匹配的数据库密钥，请在登录后重试',
     memoryUnreadable: '无法读取微信进程内存（可能需要管理员权限）',
     unsupportedPlatform: '不支持的平台: {platform}',
-    computingXor: '正在从模板文件计算 XOR 密钥',
-    scanningAes: '正在扫描微信进程内存获取图片 AES 密钥',
     xorKey: 'XOR 密钥 0x{hex}',
     xorFailed: '未能获取 XOR 密钥',
     aesDone: '图片 AES 密钥获取成功',
@@ -183,8 +189,6 @@ export const known = {
     hookTimeout: '已定位目标，但等待超时（{detail}）。请在提示出现后登录微信或退出后重新登录。',
     hookTargetOnly: '仅定位到目标地址，尚未捕获到最终密钥（{detail}）',
     acquireFailed: '密钥获取失败',
-    hookInstalling: '已找到微信进程 PID={pid}，正在安装挂钩…',
-    hookReady: '已准备就绪，现在登录微信，或退出登录后重新登录微信',
     xorTemplateMissing: '未找到图片模板文件，无法计算 XOR 密钥（请在微信中打开几张图片后重试）',
   },
   keyInput: {
@@ -193,14 +197,5 @@ export const known = {
     aesFormat: 'AES 密钥应为 16 个字符或 32 位十六进制',
     hexOnly: '密钥只能包含 0-9 和 a-f',
     hexLength: '密钥应为 {length} 位十六进制字符，当前 {current} 位',
-  },
-  diary: {
-    stepSelect: '选材',
-    stepSummarize: '按会话小结',
-    stepCombine: '综合',
-    stepWrite: '写入',
-    modelUnavailable: '模型不可用',
-    modelCallFailed: '模型调用失败（{error}）',
-    dateFormat: '日期格式应为 YYYY-MM-DD：{date}',
   },
 }

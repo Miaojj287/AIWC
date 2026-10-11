@@ -112,8 +112,6 @@ export function PushTableApproval({ request }: ApprovalBodyProps) {
   )
 }
 
-
-
 export function ConnectApproval({ request }: ApprovalBodyProps) {
   const t = useT()
   const platform = record(request.input)?.platform
@@ -121,7 +119,7 @@ export function ConnectApproval({ request }: ApprovalBodyProps) {
   return (
     <ol className="m-0 flex list-none flex-col gap-0.5 rounded-control border border-line-6 bg-content px-2.5 py-2">
       {STEPS[platform].map((key, i) => (
-        <li key={key} className="flex items-center gap-2 text-caption leading-[18px] text-fg-2">
+        <li key={key} className="flex items-center gap-2 text-caption leading-4.5 text-fg-2">
           <span className="font-latin text-micro text-fg-3">{i + 1}</span>
           {t(key)}
         </li>

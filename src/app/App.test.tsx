@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultConfig, type AiwcBridge, type AppConfig, type ConfigPatch } from '@aiwc/protocol'
 import { clearToasts } from '@/kit'
@@ -8,13 +9,20 @@ import { __resetConfigStoreForTests } from '@/platform/configStore'
 import { App } from './App'
 import { runCommand } from './commands'
 
-// Only App's own wiring is under test: the wizard is a button that finishes, the Shell a landmark.
+// Only App's own wiring is under test: the wizard is a button that finishes (labelled by mode), the splash ends as
+// soon as the app is ready, the Shell is a landmark.
 vi.mock('@/features/onboarding', () => ({
-  OnboardingWizard: ({ onDone }: { onDone(): void }) => (
+  OnboardingWizard: ({ onDone, returning }: { onDone(): void; returning?: boolean }) => (
     <button type="button" onClick={onDone}>
-      完成向导
+      {returning ? '进入' : '完成向导'}
     </button>
   ),
+  LaunchSplash: function LaunchSplash({ ready, onFinished }: { ready: boolean; onFinished(): void }) {
+    useEffect(() => {
+      if (ready) onFinished()
+    }, [ready, onFinished])
+    return null
+  },
 }))
 vi.mock('@/shell/Shell', () => ({ Shell: () => <main>工作台</main> }))
 vi.mock('@/features/agent', () => ({ AgentWindow: () => <main>Agent 窗口</main> }))
@@ -98,12 +106,28 @@ describe('App onboarding', () => {
   })
 })
 
+describe('App later launches', () => {
+  it('stops on the connect page first and opens the Shell only after 进入, without writing config', async () => {
+    initialConfig = { ...defaultConfig(), onboarding: { completed: true } }
+    __setBridgeForTests(fakeBridge())
+    render(<App />)
+    await flush()
+    expect(screen.queryByRole('main')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '进入' }))
+    await flush()
+    expect(screen.getByRole('main').textContent).toBe('工作台')
+    expect(writes).toEqual([])
+  })
+})
+
 describe('App layout (CLAUDE.md §12)', () => {
   it('renders the Agent window for ui.shellMode = agent and returns to the workbench on shell.toggleMode', async () => {
     const base = defaultConfig()
     initialConfig = { ...base, onboarding: { completed: true }, ui: { ...base.ui, shellMode: 'agent' } }
     __setBridgeForTests(fakeBridge())
     render(<App />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: '进入' }))
     await flush()
     expect(screen.getByRole('main').textContent).toBe('Agent 窗口')
 

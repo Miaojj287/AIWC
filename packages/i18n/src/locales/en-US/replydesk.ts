@@ -3,9 +3,7 @@ import type { Messages } from '../zh-CN'
 export const replydesk: Messages['replydesk'] = {
   tab: {
     title: 'Reply desk',
-    pendingSubtitle:
-      '{n, plural, one {# AI-drafted reply is waiting for you to confirm} other {# AI-drafted replies are waiting for you to confirm}}',
-    idleSubtitle: 'Nothing is sent until you confirm',
+    pendingSubtitle: '{n} to confirm',
     halted: 'Auto send stopped: {reason}',
     resume: 'Resume',
     resumeFailed: 'Resume failed',
@@ -13,7 +11,7 @@ export const replydesk: Messages['replydesk'] = {
     loading: 'Loading replies to confirm…',
     loadFailed: "Couldn't load",
     emptyTitle: 'No replies to confirm',
-    emptyDescription: 'Replies that are waiting for confirmation or failed to send appear here',
+    emptyDescription: 'Replies awaiting confirmation or failed sends appear here',
   },
   mode: { suggest: 'Suggestion', confirm: 'To confirm', auto: 'Auto send' },
   draft: {
@@ -33,6 +31,7 @@ export const replydesk: Messages['replydesk'] = {
     retrySend: 'Retry send',
     regenerate: 'Regenerate',
     regenerateFailed: 'Regeneration failed',
+    holdFailed: "Couldn't pause auto send",
     reject: 'Reject',
     sendEdited: 'Send edited',
     editToEnable: 'Edit the draft first',

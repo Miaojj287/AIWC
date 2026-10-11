@@ -33,7 +33,10 @@ import { formatTime } from '@/platform/format'
 import { useInvoke } from '@/platform/hooks'
 import type { TabRendererProps } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
+import { PushToPhoneRow } from './editor/PushToPhoneRow'
+import { SkillParamsHint } from './editor/SkillParamsHint'
 import { RunsCard } from './editor/RunsCard'
+import { ActionRow } from './editor/ActionRow'
 import { ScheduleCard } from './editor/ScheduleCard'
 import { describeSchedule } from './scheduleModel'
 import { runTaskNow, stopTask, taskMenu, TaskTile } from './TaskList'
@@ -73,23 +76,18 @@ export function TaskTab({ tab, update }: TabRendererProps) {
     )
 
   const running = Boolean(task?.running)
-  const badge = editor.isNew
-    ? { tone: 'neutral' as const, text: t('tasks.editor.badgeNew') }
-    : running
-      ? { tone: 'accent' as const, text: t('tasks.editor.badgeRunning') }
-      : draft.enabled
-        ? { tone: 'ok' as const, text: t('tasks.editor.badgeOn') }
-        : { tone: 'neutral' as const, text: t('tasks.editor.badgePaused') }
   const meta = [
     describeSchedule(draft.schedule, t),
     editor.isNew
-      ? t('tasks.editor.metaNew')
+      ? ''
       : task?.nextRunAt
         ? t('tasks.editor.metaNext', { time: formatTime(task.nextRunAt) })
         : task?.lastRunAt
           ? t('tasks.editor.metaLast', { time: formatTime(task.lastRunAt) })
           : t('tasks.editor.metaNoRun'),
-  ].join(' · ')
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const title = draft.name.trim() || (editor.isNew ? t('tasks.tab.new') : (task?.name ?? ''))
   const saveReason = !editor.valid
     ? Object.values(editor.errors)[0]
@@ -100,16 +98,20 @@ export function TaskTab({ tab, update }: TabRendererProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-content">
-      <header className="flex h-[60px] shrink-0 items-center gap-3 border-b border-line-6 px-5">
+      <header className="flex min-h-18 shrink-0 items-center gap-3 border-b border-line-6 px-5 py-3">
         <TaskTile running={running} paused={!draft.enabled} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-bubble font-medium leading-5 text-fg">{title}</span>
-            <Badge tone={badge.tone}>{badge.text}</Badge>
+            <span className="min-w-0 truncate text-bubble font-semibold leading-5 text-fg" title={title}>
+              {title}
+            </span>
+            {running ? <Badge tone="accent">{t('tasks.editor.badgeRunning')}</Badge> : null}
           </div>
-          <span className="truncate text-caption text-fg-3">{meta}</span>
+          <span className="truncate text-caption text-fg-3" title={meta}>
+            {meta}
+          </span>
         </div>
-        <label className="flex items-center gap-2 text-caption text-fg-2">
+        <label className="flex shrink-0 items-center gap-2 text-caption text-fg-2">
           {t('common.enable')}
           <Toggle
             label={t('common.enable')}
@@ -135,9 +137,9 @@ export function TaskTab({ tab, update }: TabRendererProps) {
       </header>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="flex w-full max-w-[880px] flex-col gap-4 px-5 pb-6 pt-4">
+        <div className="mx-auto flex w-full max-w-[880px] flex-col gap-6 px-5 pb-8 pt-5">
           <section className="flex flex-col gap-2">
-            <h2 className="text-caption text-fg-3">{t('tasks.editor.sectionTask')}</h2>
+            <h2 className="text-body font-semibold text-fg">{t('tasks.editor.sectionTask')}</h2>
             <Card variant="rows">
               <SettingRow
                 title={t('tasks.editor.name')}
@@ -157,7 +159,12 @@ export function TaskTab({ tab, update }: TabRendererProps) {
                   autoFocus={editor.isNew}
                 />
               </SettingRow>
-              <SettingRow title={t('tasks.editor.prompt')} description={t('tasks.editor.promptDescription')} stacked>
+              <SettingRow
+                title={t('tasks.editor.prompt')}
+                help={t('tasks.editor.promptHelp')}
+                stacked
+                footer={<SkillParamsHint prompt={draft.prompt} />}
+              >
                 {/* Same composer card as the Agent panel: the text, then the mode / model toolbar underneath. */}
                 <div className="flex flex-col gap-2 rounded-item border border-line-8 bg-content p-2">
                   <Textarea
@@ -174,7 +181,7 @@ export function TaskTab({ tab, update }: TabRendererProps) {
                     <PermissionSelect
                       value={draft.permissionMode}
                       onChange={(permissionMode) => editor.patch({ permissionMode })}
-                      onOpenRules={() => runCommand('tab.openSettings', { page: 'ai', highlight: 'permissions' })}
+                      onOpenRules={() => runCommand('tab.openSettings', { page: 'ai', highlight: 'ai.permissions' })}
                     />
                     <span className="flex-1" />
                     <ModelSelect
@@ -186,21 +193,25 @@ export function TaskTab({ tab, update }: TabRendererProps) {
                   </div>
                 </div>
               </SettingRow>
+              <ActionRow value={draft.action} onChange={(action) => editor.patch({ action })} />
+              <PushToPhoneRow checked={draft.pushToPhone} onChange={(pushToPhone) => editor.patch({ pushToPhone })} />
             </Card>
           </section>
 
           <section className="flex flex-col gap-2">
-            <h2 className="text-caption text-fg-3">{t('tasks.editor.sectionSchedule')}</h2>
+            <h2 className="text-body font-semibold text-fg">{t('tasks.editor.sectionSchedule')}</h2>
             <ScheduleCard
               schedule={draft.schedule}
               errors={editor.errors}
               onChange={(schedule) => editor.patch({ schedule })}
+              catchUp={draft.catchUp}
+              onCatchUpChange={(catchUp) => editor.patch({ catchUp })}
             />
           </section>
 
           {task ? (
             <section className="flex flex-col gap-2">
-              <h2 className="text-caption text-fg-3">{t('tasks.editor.sectionRuns')}</h2>
+              <h2 className="text-body font-semibold text-fg">{t('tasks.editor.sectionRuns')}</h2>
               <RunsCard
                 task={task}
                 runs={editor.runs}
@@ -214,10 +225,11 @@ export function TaskTab({ tab, update }: TabRendererProps) {
 
       <footer className="flex h-12 shrink-0 items-center gap-3 border-t border-line-6 px-5">
         <span className="min-w-0 flex-1 truncate text-caption text-fg-3">
-          {task?.updatedAt
-            ? t('tasks.editor.lastSaved', { time: formatTime(task.updatedAt) })
-            : t('tasks.editor.notSaved')}
-          {dirty ? ` · ${t('tasks.editor.unsaved')}` : ''}
+          {dirty
+            ? t('tasks.editor.unsaved')
+            : task?.updatedAt
+              ? t('tasks.editor.lastSaved', { time: formatTime(task.updatedAt) })
+              : ''}
         </span>
         {task ? (
           running ? (
@@ -229,7 +241,7 @@ export function TaskTab({ tab, update }: TabRendererProps) {
               variant="ghost"
               icon={Play}
               disabled={Boolean(runReason)}
-              title={runReason}
+              disabledReason={runReason}
               onClick={() => void runTaskNow(task, t)}
             >
               {t('tasks.editor.runNow')}
@@ -242,8 +254,8 @@ export function TaskTab({ tab, update }: TabRendererProps) {
         <Button
           variant="primary"
           disabled={!dirty || !editor.valid}
+          disabledReason={saveReason}
           loading={editor.saving}
-          title={saveReason}
           onClick={() => void editor.save()}
         >
           {editor.isNew ? t('tasks.editor.create') : t('tasks.editor.save')}

@@ -21,7 +21,7 @@ export const legal: Messages['legal'] = {
     },
     disclaimer: {
       heading: '5. Disclaimer',
-      body: 'The developers are not liable for data loss or other damage caused by using this software. We recommend regularly backing up your WeChat data and this software’s configuration folder.',
+      body: "The developers are not liable for data loss or other damage caused by using this software. We recommend regularly backing up your WeChat data and this software's configuration folder.",
     },
   },
   privacy: {
@@ -36,7 +36,7 @@ export const legal: Messages['legal'] = {
     },
     logs: {
       heading: 'Logs',
-      body: 'Logs record only runtime status and errors, never chat content; logs are exported only when you do it yourself.',
+      body: 'Logs record only runtime status and errors, never chat content; logs are exported only when you do it yourself, with paths, accounts, emails, phone numbers and keys removed.',
     },
     control: {
       heading: 'Your control',

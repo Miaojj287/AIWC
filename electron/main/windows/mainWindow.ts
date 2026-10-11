@@ -3,8 +3,9 @@
  * hides the native title bar (macOS inset traffic lights / Windows title-bar overlay), and turns
  * the close button into the configured behaviour (quit / minimize / ask).
  */
-import { BrowserWindow, screen, shell, type WebContents } from 'electron'
-import { DEFAULT_APPEARANCE } from '@aiwc/protocol'
+import { BrowserWindow, Menu, nativeTheme, screen, shell, type WebContents } from 'electron'
+import { DEFAULT_APPEARANCE, type EventMap } from '@aiwc/protocol'
+import { t } from '../i18n'
 import type { ConfigService } from '../config/configService'
 import type { Logger } from '../log'
 import type { AppPaths } from '../paths'
@@ -14,26 +15,33 @@ import {
   loadWindowState,
   MIN_WINDOW_HEIGHT,
   MIN_WINDOW_WIDTH,
+  minimumSizeFor,
   saveWindowState,
   type WindowState,
 } from './windowState'
+import { editContextMenuTemplate } from './editContextMenu'
 import {
   describeLoadFailure,
   describePreloadError,
   describeRendererGone,
   type RendererFault,
 } from './preloadDiagnostics'
-import { applyTransparency, currentSystemVersion, transparencyOptionsFor } from './transparency'
+import { applyNativeChrome, nativeChromeColors, titleBarOverlayFor, type NativeChromeColors } from './nativeChrome'
+import { applyTransparency, currentSystemVersion, supportsTransparency, transparencyOptionsFor } from './transparency'
 
 export type { RendererFault } from './preloadDiagnostics'
 
 /** Chromium's ERR_ABORTED: a navigation superseded by another one, not a real failure. */
 const ERR_ABORTED = -3
 
-/** First-paint colours before the renderer applies the user's palette: the default dark appearance, never a local grey. */
-export const SHELL_BACKGROUND = DEFAULT_APPEARANCE.dark.background
+/**
+ * First-paint colours when no palette is known (tests, callers without a config): the default dark shell ground,
+ * never a local grey. The live window derives them from the user's palette (nativeChrome.ts).
+ */
+export const SHELL_BACKGROUND = DEFAULT_APPEARANCE.dark.surface
 export const SHELL_FOREGROUND = DEFAULT_APPEARANCE.dark.foreground
 export const TITLE_BAR_HEIGHT = 32
+const DEFAULT_CHROME: NativeChromeColors = { background: SHELL_BACKGROUND, foreground: SHELL_FOREGROUND }
 
 export interface MainWindowDeps {
   paths: AppPaths
@@ -49,6 +57,8 @@ export interface MainWindowDeps {
   isQuitting: () => boolean
   /** closeBehavior === 'ask': tell the renderer to show the choice dialog. */
   onCloseRequested: (win: BrowserWindow) => void
+  /** About to hide the window instead of closing it: the host makes sure it can be brought back (the tray). */
+  onBeforeHide?: () => void
   requestQuit: () => void
   /**
    * The renderer will never come up: preload failed to load, main-frame load failed, or the renderer
@@ -75,6 +85,7 @@ export function windowOptionsFor(
   appIcon?: string,
   transparency = false,
   systemVersion?: string,
+  chrome: NativeChromeColors = DEFAULT_CHROME,
 ): Electron.BrowserWindowConstructorOptions {
   const base: Electron.BrowserWindowConstructorOptions = {
     width: state.width,
@@ -85,7 +96,8 @@ export function windowOptionsFor(
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: 'AIWC',
-    backgroundColor: SHELL_BACKGROUND,
+    // The page base before the renderer paints: the shell ground of the user's palette, so launch never flashes.
+    backgroundColor: chrome.background,
     ...(appIcon ? { icon: appIcon } : {}),
     ...transparencyOptionsFor(platform, transparency, systemVersion),
     webPreferences: {
@@ -106,7 +118,7 @@ export function windowOptionsFor(
       ...base,
       frame: true,
       titleBarStyle: 'hidden',
-      titleBarOverlay: { color: SHELL_BACKGROUND, symbolColor: SHELL_FOREGROUND, height: TITLE_BAR_HEIGHT },
+      titleBarOverlay: titleBarOverlayFor(chrome, TITLE_BAR_HEIGHT),
     }
   }
   return base
@@ -128,23 +140,83 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
     const displays = screen.getAllDisplays().map((d) => d.workArea)
     const state = fitToDisplays(loadWindowState(deps.paths.windowStateFile), displays)
     const systemVersion = currentSystemVersion()
-    const w = new BrowserWindow(
-      windowOptionsFor(
+    const general = deps.config.get().general
+    const chrome = () => nativeChromeColors(deps.config.get().general, nativeTheme.shouldUseDarkColors)
+    const glass = (transparency: boolean) => transparency && supportsTransparency(platform, systemVersion)
+    const bounds = { x: state.x ?? 0, y: state.y ?? 0, width: state.width, height: state.height }
+    const minimum = minimumSizeFor(screen.getDisplayMatching(bounds).workArea)
+    const w = new BrowserWindow({
+      ...windowOptionsFor(
         platform,
         state,
         deps.preload,
         deps.isPackaged,
         deps.appIcon,
-        deps.config.get().general.transparency,
+        general.transparency,
         systemVersion,
+        nativeChromeColors(general, nativeTheme.shouldUseDarkColors),
       ),
-    )
+      webPreferences: {
+        ...windowOptionsFor(platform, state, deps.preload, deps.isPackaged).webPreferences,
+        ...(deps.paths.accountScope ? { partition: `persist:account-${deps.paths.accountScope}` } : {}),
+      },
+      minWidth: minimum.width,
+      minHeight: minimum.height,
+    })
     win = w
+    // The minimum follows the display the window is on: moving to a small or heavily scaled screen must not leave
+    // a window that cannot fit its work area.
+    const fitMinimumSize = () => {
+      if (w.isDestroyed()) return
+      const next = minimumSizeFor(screen.getDisplayMatching(w.getBounds()).workArea)
+      w.setMinimumSize(next.width, next.height)
+    }
+    screen.on('display-metrics-changed', fitMinimumSize)
+    w.on('moved', fitMinimumSize)
+    // The renderer lays its custom chrome out around the native state (macOS controls hide in full screen).
+    const sendWindowState = () => {
+      if (w.isDestroyed() || w.webContents.isDestroyed()) return
+      const payload: EventMap['app:windowState'] = { fullscreen: w.isFullScreen(), maximized: w.isMaximized() }
+      w.webContents.send('app:windowState', payload)
+    }
+    for (const event of ['enter-full-screen', 'leave-full-screen', 'maximize', 'unmaximize'] as const)
+      w.on(event as 'maximize', sendWindowState)
+    w.webContents.on('did-finish-load', sendWindowState)
+    // Native text menu (Undo … Select All / Copy). The app's own object menus cancel the DOM event, so only
+    // text fields and selections get here.
+    w.webContents.on('context-menu', (_event, params) => {
+      const template = editContextMenuTemplate(params, {
+        undo: t('menu.undo'),
+        redo: t('menu.redo'),
+        cut: t('menu.cut'),
+        copy: t('menu.copy'),
+        paste: t('menu.paste'),
+        selectAll: t('menu.selectAll'),
+      })
+      if (template) Menu.buildFromTemplate(template).popup({ window: w })
+    })
     // 透明效果 toggled from the settings row: swap the native material in place.
     const unsubscribeTransparency = deps.config.subscribe((next, prev) => {
       if (next.general.transparency === prev.general.transparency || w.isDestroyed()) return
-      applyTransparency(w, platform, next.general.transparency, systemVersion)
+      applyTransparency(w, platform, next.general.transparency, systemVersion, chrome().background)
     })
+    // Native chrome follows the palette: the Windows caption buttons and the opaque page base repaint when the theme
+    // or a palette colour changes, and when the OS switches appearance while the theme follows the system.
+    const repaintChrome = () => {
+      if (w.isDestroyed()) return
+      applyNativeChrome(w, platform, chrome(), {
+        transparent: glass(deps.config.get().general.transparency),
+        overlayHeight: TITLE_BAR_HEIGHT,
+      })
+    }
+    const unsubscribeChrome = deps.config.subscribe((next, prev) => {
+      if (
+        next.general.theme !== prev.general.theme ||
+        JSON.stringify(next.general.appearance) !== JSON.stringify(prev.general.appearance)
+      )
+        repaintChrome()
+    })
+    nativeTheme.on('updated', repaintChrome)
     // Render fixed-size traffic lights; newer macOS versions enlarge native buttons.
     if (platform === 'darwin') {
       w.setWindowButtonVisibility(false)
@@ -181,6 +253,7 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
       const behavior = deps.config.get().general.closeBehavior
       e.preventDefault()
       if (behavior === 'minimize') {
+        deps.onBeforeHide?.()
         w.hide()
         return
       }
@@ -193,6 +266,9 @@ export function createWindowManager(deps: MainWindowDeps): WindowManager {
 
     w.on('closed', () => {
       unsubscribeTransparency()
+      unsubscribeChrome()
+      nativeTheme.off('updated', repaintChrome)
+      screen.off('display-metrics-changed', fitMinimumSize)
       trusted.delete(webContentsId)
       if (win === w) win = undefined
     })

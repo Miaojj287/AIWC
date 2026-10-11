@@ -1,10 +1,12 @@
 /**
  * acquireKeys — obtain the db key and image keys for an account, reporting progress through onStep.
- * Steps mirror the KeyAcquireStep contract: db_key → image_xor → image_aes → verify. Every native
- * call has a timeout; a permission failure yields a `failed` step with detail '需要授权' rather than
- * silently prompting for sudo.
+ * Steps mirror the KeyAcquireStep contract: db_key → image_xor → image_aes → verify. Each running step
+ * carries a `phase` code (what is happening now) and each failed step a `failure` code (why it
+ * stopped), so the UI can name the stage in its own language. Every native call has a timeout, the
+ * whole run honours `signal`, and the result always closes every step (`done` or `failed`) — a
+ * cancelled or crashed run never leaves a step spinning.
  */
-import type { KeyAcquireStep } from '@aiwc/protocol'
+import type { KeyAcquireScope, KeyAcquireStep } from '@aiwc/protocol'
 import {
   findMessageShards,
   findNamedDb,
@@ -25,22 +27,42 @@ import {
   scanMacImageAesKey,
 } from './macosMemoryScanner'
 import { scanWindowsDbKey, scanWindowsImageAesKey } from './windowsMemoryScanner'
+import { runMacDbKeyFlow, type RelaunchCapture } from './macDbKeyFlow'
+import { StepTracker } from './stepTracker'
+
+export type { RelaunchCapture } from './macDbKeyFlow'
+
+/** Budget of one read-only memory / dump scan. */
+const DB_SCAN_TIMEOUT_MS = 30_000
+/** How long the armed login hook waits for the user to log out and back in (they need time to read the prompt). */
+const HOOK_WAIT_MS = 120_000
+/** How long a relaunched WeChat gets to log in (QR scan / phone confirmation included). */
+const RELAUNCH_WAIT_MS = 120_000
 
 export interface AcquireKeysOptions {
   dbRoot: string
   wxid: string
+  /** `memory_scan` = read-only paths only (live memory + crash dumps); never hooks or restarts WeChat. */
   strategy: 'auto' | 'memory_scan'
+  /** 'image' = only the image keys: no db-key scan, no hook, no restart, no verify step. */
+  scope?: KeyAcquireScope
   nativeDir: string
   onStep: (step: KeyAcquireStep) => void
-  /** Overall wall-clock budget for the db-key scan (ms). */
+  /** Budget of each read-only db-key scan (ms). */
   dbKeyTimeoutMs?: number
+  /** How long the macOS login hook waits for the user (ms). */
+  hookTimeoutMs?: number
+  /** How long the relaunch capture waits for WeChat to log in again (ms). */
+  relaunchTimeoutMs?: number
   imageKeyTimeoutMs?: number
+  /** Cancels the run: running helpers are killed and every open step ends `failed` / 'cancelled'. */
+  signal?: AbortSignal
   /**
    * Host-provided last-resort capture that restarts WeChat and scans the fresh login process for the
-   * db key (returns the 64-hex key or undefined). Injected by electron main because only it may kill
-   * and relaunch WeChat; the pure package never touches processes on its own.
+   * db key. Injected by electron main because only it may kill and relaunch WeChat; the pure package
+   * never touches processes on its own.
    */
-  relaunchCapture?: (input: { sessionDb: string; timeoutMs: number }) => Promise<string | undefined>
+  relaunchCapture?: RelaunchCapture
 }
 
 export interface AcquireKeysResult {
@@ -48,42 +70,14 @@ export interface AcquireKeysResult {
   imageXorHex?: string
   imageAesHex?: string
   steps: KeyAcquireStep[]
+  /** The run was aborted through `signal`. */
+  cancelled?: boolean
 }
 
-const STEP_LABELS: Record<KeyAcquireStep['id'], string> = {
-  db_key: '获取数据库密钥',
-  image_xor: '获取图片 XOR 密钥',
-  image_aes: '获取图片 AES 密钥',
-  verify: '校验密钥',
-}
+const isAbort = (error: unknown): boolean =>
+  error instanceof Error && (error.name === 'AbortError' || (error as { code?: string }).code === 'ABORT_ERR')
 
-class StepTracker {
-  readonly steps: KeyAcquireStep[] = []
-  private readonly byId = new Map<KeyAcquireStep['id'], KeyAcquireStep>()
-  constructor(private readonly onStep: (step: KeyAcquireStep) => void) {}
-
-  private emit(id: KeyAcquireStep['id'], status: KeyAcquireStep['status'], detail?: string): void {
-    let step = this.byId.get(id)
-    if (!step) {
-      step = { id, label: STEP_LABELS[id], status }
-      this.byId.set(id, step)
-      this.steps.push(step)
-    }
-    step.status = status
-    if (detail !== undefined) step.detail = detail
-    this.onStep({ ...step })
-  }
-
-  start(id: KeyAcquireStep['id'], detail?: string): void {
-    this.emit(id, 'doing', detail)
-  }
-  done(id: KeyAcquireStep['id'], detail?: string): void {
-    this.emit(id, 'done', detail)
-  }
-  fail(id: KeyAcquireStep['id'], detail: string): void {
-    this.emit(id, 'failed', detail)
-  }
-}
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /**
  * The databases this one key has to open. The reader needs all of them, and every SQLCipher file has
@@ -103,78 +97,47 @@ async function acquireDbKey(
   dbStoragePath: string,
   tracker: StepTracker,
 ): Promise<string | undefined> {
-  tracker.start('db_key', '正在从微信进程内存中读取密钥')
-  const pid = findWeChatPidSync()
-  const timeout = opts.dbKeyTimeoutMs ?? 30_000
+  const timeout = opts.dbKeyTimeoutMs ?? DB_SCAN_TIMEOUT_MS
 
   if (process.platform === 'darwin') {
     // The helper reads the SQLCipher salt from a concrete session.db, so scan against that file, not
-    // the db_storage directory. Order: live read-only scan (freshest, needs the app's debugger grant)
-    // → crash-dump scan (reads files only, always available) → optional relaunch capture. The dump
-    // fallback ALWAYS runs even when the live scan reports needsAuthorization.
+    // the db_storage directory.
     const sessionDb = findSessionDbCandidates(dbStoragePath)[0]
     if (!sessionDb) {
       tracker.fail('db_key', `未找到 session.db：${dbStoragePath}`)
       return undefined
     }
-    let needsAuthorization = false
-    if (pid) {
-      const live = await scanMacDbKey(pid, sessionDb, opts.nativeDir, timeout)
-      if (live.key) {
-        tracker.done('db_key', '已从微信进程内存获取密钥')
-        return live.key
-      }
-      if (live.needsAuthorization) needsAuthorization = true
-    }
-    const dump = await scanMacDbKeyFromDumps(sessionDb, opts.nativeDir, timeout)
-    if (dump.key) {
-      tracker.done('db_key', '已从微信崩溃转储获取密钥')
-      return dump.key
-    }
-    // Login-time hook capture via the bundled wechat_xkey_helper — the reliable WeChat 4.x macOS
-    // path. It attaches to the running process, installs a hook and returns the raw key the next time
-    // the user logs in (the helper's status prompts them to re-login). Needs debugger access.
-    if (pid) {
-      if (await isSipEnabled()) {
-        tracker.fail('db_key', 'SIP（系统完整性保护）已开启，无法获取密钥。请关闭 SIP 后重试。')
-        return undefined
-      }
-      const hook = await captureMacDbKeyViaHook(
-        pid,
-        opts.nativeDir,
-        (message) => tracker.start('db_key', message),
-        Math.max(timeout, 60_000),
-      )
-      if (hook.key) {
-        tracker.done('db_key', '已在登录时捕获密钥')
-        return hook.key
-      }
-      if (hook.needsAuthorization) needsAuthorization = true
-    }
-    // Last resort: relaunch WeChat and scan the fresh login process. Only the host (electron main)
-    // can restart WeChat, so it injects `relaunchCapture`; the pure package never kills processes.
-    if (opts.relaunchCapture) {
-      tracker.start('db_key', '正在重启微信以捕获启动阶段密钥…')
-      const relaunched = await opts.relaunchCapture({ sessionDb, timeoutMs: timeout }).catch(() => undefined)
-      if (relaunched) {
-        tracker.done('db_key', '已在微信重启时捕获密钥')
-        return relaunched
-      }
-    }
-    tracker.fail(
-      'db_key',
-      needsAuthorization
-        ? '需要授权：请在「系统设置 › 隐私与安全性 › 开发者工具」中允许 AIWC，或关闭 SIP 后重试'
-        : pid
-          ? '未能从内存或崩溃转储获取密钥，请确认微信已登录并进入任意聊天后重试'
-          : '未检测到微信进程，请先登录微信',
+    const outcome = await runMacDbKeyFlow(
+      {
+        findPid: findWeChatPidSync,
+        scanLive: (pid, db, ms, signal) => scanMacDbKey(pid, db, opts.nativeDir, ms, signal),
+        scanDumps: (db, ms, signal) => scanMacDbKeyFromDumps(db, opts.nativeDir, ms, signal),
+        isSipEnabled,
+        captureHook: (pid, options) => captureMacDbKeyViaHook(pid, opts.nativeDir, options),
+        relaunchCapture: opts.relaunchCapture,
+      },
+      {
+        sessionDb,
+        strategy: opts.strategy,
+        scanTimeoutMs: timeout,
+        hookTimeoutMs: opts.hookTimeoutMs ?? HOOK_WAIT_MS,
+        relaunchTimeoutMs: opts.relaunchTimeoutMs ?? RELAUNCH_WAIT_MS,
+        signal: opts.signal,
+        onPhase: (phase, waitUntil) => tracker.phase('db_key', phase, waitUntil),
+      },
     )
+    if (outcome.key) {
+      tracker.done('db_key', outcome.detail)
+      return outcome.key
+    }
+    tracker.fail('db_key', outcome.detail, outcome.failure)
     return undefined
   }
 
   if (process.platform === 'win32') {
+    const pid = findWeChatPidSync()
     if (!pid) {
-      tracker.fail('db_key', '未检测到微信进程，请先登录微信')
+      tracker.fail('db_key', '未检测到微信进程，请先登录微信', 'wechat_not_running')
       return undefined
     }
     const sessionDb = findSessionDbCandidates(dbStoragePath)[0]
@@ -182,15 +145,16 @@ async function acquireDbKey(
       tracker.fail('db_key', '未找到 session.db')
       return undefined
     }
+    tracker.phase('db_key', 'reading_memory')
+    // Synchronous native scan bounded by its own deadline (it cannot observe `signal` mid-scan).
     const scan = scanWindowsDbKey(pid, sessionDb, Date.now() + timeout, accountDbTargets(dbStoragePath))
     if (scan.key) {
       tracker.done('db_key', '已从微信进程内存获取密钥')
       return scan.key
     }
-    tracker.fail(
-      'db_key',
-      scan.opened ? '内存中未找到匹配的数据库密钥，请在登录后重试' : '无法读取微信进程内存（可能需要管理员权限）',
-    )
+    if (scan.opened) tracker.fail('db_key', '内存中未找到匹配的数据库密钥，请在登录后重试', 'not_found')
+    // No code: the coded needs_authorization copy is about macOS; this package text names the Windows fix.
+    else tracker.fail('db_key', '无法读取微信进程内存（可能需要管理员权限）')
     return undefined
   }
 
@@ -203,7 +167,7 @@ async function acquireImageKeys(
   accountDir: string,
   tracker: StepTracker,
 ): Promise<{ xorHex?: string; aesHex?: string }> {
-  tracker.start('image_xor', '正在从模板文件计算 XOR 密钥')
+  tracker.phase('image_xor', 'deriving_image_key')
   const wxidCandidates = Array.from(
     new Set([basenameOf(accountDir), opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean)),
   )
@@ -211,18 +175,20 @@ async function acquireImageKeys(
   const pid = findWeChatPidSync()
   const memoryScan = pid
     ? async (ciphertext: Buffer): Promise<string | null> => {
-        tracker.start('image_aes', '正在扫描微信进程内存获取图片 AES 密钥')
-        if (process.platform === 'darwin') return scanMacImageAesKey(pid, ciphertext, opts.nativeDir, timeout)
+        if (opts.signal?.aborted) return null
+        tracker.phase('image_aes', 'scanning_image_key')
+        if (process.platform === 'darwin')
+          return scanMacImageAesKey(pid, ciphertext, opts.nativeDir, timeout, opts.signal)
         if (process.platform === 'win32') return scanWindowsImageAesKey(pid, ciphertext, Date.now() + timeout)
         return null
       }
     : undefined
 
   const result = await resolveImageKeys(accountDir, wxidCandidates, memoryScan)
+  if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError')
   if (result.xorHex) tracker.done('image_xor', `XOR 密钥 0x${result.xorHex}`)
   else tracker.fail('image_xor', result.error ?? '未能获取 XOR 密钥')
 
-  tracker.start('image_aes')
   if (result.aesHex) tracker.done('image_aes', '图片 AES 密钥获取成功')
   else tracker.fail('image_aes', result.error ?? '未能获取图片 AES 密钥（可仅使用 XOR 密钥）')
   return { xorHex: result.xorHex, aesHex: result.aesHex }
@@ -237,42 +203,67 @@ function basenameOf(dir: string): string {
   )
 }
 
+/**
+ * Run the key acquisition. Never throws: an abort ends every open step as 'cancelled', an unexpected
+ * error fails the running step with its message ('unexpected') and closes the rest as 'skipped'.
+ */
 export async function acquireKeys(opts: AcquireKeysOptions): Promise<AcquireKeysResult> {
-  const tracker = new StepTracker(opts.onStep)
+  const tracker = new StepTracker(opts.onStep, opts.scope)
+  const found: { dbKeyHex?: string; imageXorHex?: string; imageAesHex?: string } = {}
+  try {
+    const result = await runAcquisition(opts, tracker, found)
+    return { ...result, steps: tracker.finish('skipped') }
+  } catch (error) {
+    if (isAbort(error) || opts.signal?.aborted) return { steps: tracker.finish('cancelled'), cancelled: true }
+    const running = tracker.steps.find((s) => s.status === 'doing')
+    tracker.fail(running?.id ?? 'db_key', errorText(error), 'unexpected')
+    // Keys found before the crash are still good, except an unverified db key.
+    return { imageXorHex: found.imageXorHex, imageAesHex: found.imageAesHex, steps: tracker.finish('skipped') }
+  }
+}
+
+async function runAcquisition(
+  opts: AcquireKeysOptions,
+  tracker: StepTracker,
+  found: { imageXorHex?: string; imageAesHex?: string },
+): Promise<Omit<AcquireKeysResult, 'steps'>> {
   const dbStoragePath = resolveDbStoragePath(opts.dbRoot, opts.wxid)
   const accountDir = resolveAccountDir(opts.dbRoot, opts.wxid)
   if (!dbStoragePath || !accountDir) {
-    tracker.fail('db_key', `未找到账号目录或 db_storage：${opts.dbRoot}`)
-    return { steps: tracker.steps }
+    tracker.fail(opts.scope === 'image' ? 'image_xor' : 'db_key', `未找到账号目录或 db_storage：${opts.dbRoot}`)
+    return {}
+  }
+  if (opts.scope === 'image') {
+    const image = await acquireImageKeys(opts, accountDir, tracker)
+    return { imageXorHex: image.xorHex, imageAesHex: image.aesHex }
   }
 
   const dbKeyHex = await acquireDbKey(opts, dbStoragePath, tracker)
+  if (opts.signal?.aborted) throw new DOMException('aborted', 'AbortError')
   const image = await acquireImageKeys(opts, accountDir, tracker)
+  found.imageXorHex = image.xorHex
+  found.imageAesHex = image.aesHex
+  const imageKeys = { imageXorHex: image.xorHex, imageAesHex: image.aesHex }
 
-  tracker.start('verify')
-  if (dbKeyHex) {
-    const check = validateKeyHexDetailed(dbKeyHex)
-    if (!check.ok) {
-      tracker.fail('verify', check.error ?? '密钥格式非法')
-      return { steps: tracker.steps, imageXorHex: image.xorHex, imageAesHex: image.aesHex }
-    }
-    // The session database is the gate. Whether this one key also covers the others depends on the
-    // platform: WeChat on Windows keys every database separately and the rest are resolved at read
-    // time (key/dbKeyResolver.ts), so covering only the session database is normal there.
-    const targets = accountDbTargets(dbStoragePath)
-    const across = verifyDbKeyAcross(targets, dbKeyHex)
-    const sessionDb = targets[0]
-    const sessionOnly = !across.ok && sessionDb ? verifyDbKey(sessionDb, dbKeyHex) : undefined
-    if (across.ok) tracker.done('verify', '数据库密钥校验通过')
-    else if (sessionOnly?.ok) tracker.done('verify', '会话数据库密钥校验通过；其余数据库在读取时各自取用密钥')
-    else tracker.fail('verify', across.error ?? '密钥校验失败')
-    return {
-      steps: tracker.steps,
-      dbKeyHex: across.ok || sessionOnly?.ok ? check.normalized : undefined,
-      imageXorHex: image.xorHex,
-      imageAesHex: image.aesHex,
-    }
+  if (!dbKeyHex) {
+    tracker.fail('verify', '未获取到数据库密钥', 'skipped')
+    return imageKeys
   }
-  tracker.fail('verify', '未获取到数据库密钥')
-  return { steps: tracker.steps, imageXorHex: image.xorHex, imageAesHex: image.aesHex }
+  tracker.phase('verify', 'verifying')
+  const check = validateKeyHexDetailed(dbKeyHex)
+  if (!check.ok) {
+    tracker.fail('verify', check.error ?? '密钥格式非法')
+    return imageKeys
+  }
+  // The session database is the gate. Whether this one key also covers the others depends on the
+  // platform: WeChat on Windows keys every database separately and the rest are resolved at read
+  // time (key/dbKeyResolver.ts), so covering only the session database is normal there.
+  const targets = accountDbTargets(dbStoragePath)
+  const across = verifyDbKeyAcross(targets, dbKeyHex)
+  const sessionDb = targets[0]
+  const sessionOnly = !across.ok && sessionDb ? verifyDbKey(sessionDb, dbKeyHex) : undefined
+  if (across.ok) tracker.done('verify', '数据库密钥校验通过')
+  else if (sessionOnly?.ok) tracker.done('verify', '会话数据库密钥校验通过；其余数据库在读取时各自取用密钥')
+  else tracker.fail('verify', across.error ?? '密钥校验失败')
+  return { ...imageKeys, dbKeyHex: across.ok || sessionOnly?.ok ? check.normalized : undefined }
 }

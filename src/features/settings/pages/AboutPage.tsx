@@ -2,9 +2,9 @@
  * 版本与支持 — version block, 检查更新 state machine (app:checkUpdate + 'app:update'), 协议 / 隐私 dialogs
  * and 导出日志 with a 定位文件 toast action. Figma 128:1854, board 151:415 ⑥.
  */
-import { FileText, RefreshCw } from 'lucide-react'
+import { Download, FileText, RefreshCw, RotateCw } from 'lucide-react'
 import { useState } from 'react'
-import type { UpdateStatus } from '@aiwc/protocol'
+import type { UpdateStatus, UpdateUnavailableReason } from '@aiwc/protocol'
 import {
   Button,
   Card,
@@ -24,10 +24,22 @@ import { errorMessage } from '../hooks'
 import { PRIVACY, TERMS, type LegalDoc } from '../legalText'
 import { SRow } from '../pageKit'
 
+/** Why 检查更新 is disabled, per UpdateUnavailableReason. */
+const UNAVAILABLE_REASON = {
+  dev_build: 'settings.about.update.unavailable.dev_build',
+  no_feed: 'settings.about.update.unavailable.no_feed',
+  unsupported_platform: 'settings.about.update.unavailable.unsupported_platform',
+} as const satisfies Record<UpdateUnavailableReason, string>
+
 export function AboutPage() {
   const t = useT()
   const info = useInvoke('app:getInfo', undefined, [])
-  const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' })
+  // Main's updater state (it may already have found an update in the background); local state takes over
+  // once this page checks or an 'app:update' event arrives.
+  const updateState = useInvoke('update:getState', undefined, [])
+  const [localUpdate, setUpdate] = useState<UpdateStatus | undefined>()
+  const update: UpdateStatus = localUpdate ?? updateState.data?.status ?? { state: 'idle' }
+  const unavailable = updateState.data?.unavailable ?? null
   const [legal, setLegal] = useState<LegalDoc | null>(null)
   const [exporting, setExporting] = useState(false)
   const [updateDialog, setUpdateDialog] = useState(false)
@@ -44,6 +56,20 @@ export function AboutPage() {
       setUpdate({ state: 'error', error: errorMessage(e) })
     }
   }
+
+  const download = async () => {
+    setUpdateDialog(false)
+    try {
+      await invoke('update:download', undefined)
+    } catch (e) {
+      toast.error(t('settings.about.update.downloadFailed'), { detail: errorMessage(e) })
+    }
+  }
+
+  const install = () =>
+    void invoke('update:install', undefined).catch((e: unknown) =>
+      toast.error(t('settings.about.update.installFailed'), { detail: errorMessage(e) }),
+    )
 
   const exportLogs = async () => {
     setExporting(true)
@@ -88,7 +114,14 @@ export function AboutPage() {
         <SRow
           id="about.update"
           title={t('settings.about.update.title')}
-          footer={<UpdateFooter update={update} onRetry={() => void check()} onDetail={() => setUpdateDialog(true)} />}
+          footer={
+            <UpdateFooter
+              update={update}
+              onRetry={() => void check()}
+              onDetail={() => setUpdateDialog(true)}
+              onInstall={install}
+            />
+          }
         >
           {update.state === 'checking' ? (
             <span className="flex items-center gap-2 text-caption text-fg-3">
@@ -99,7 +132,9 @@ export function AboutPage() {
               variant="ghost"
               icon={RefreshCw}
               onClick={() => void check()}
-              disabled={update.state === 'downloading'}
+              // Never a fake 已是最新: a build that cannot update says why instead (no feed, dev build…).
+              disabled={unavailable !== null || update.state === 'downloading' || updateState.loading}
+              disabledReason={unavailable ? t(UNAVAILABLE_REASON[unavailable]) : undefined}
             >
               {update.state === 'idle' ? t('settings.about.update.check') : t('settings.about.update.recheck')}
             </Button>
@@ -130,12 +165,13 @@ export function AboutPage() {
             title={legal ? t(legal.title) : ''}
             description={legal ? t('settings.about.legalUpdated', { date: legal.updated }) : undefined}
           />
-          <DialogBody className="max-h-[52vh] pr-1">
+          {/* Legal text has one look; the onboarding agreement dialog renders with these same classes. */}
+          <DialogBody className="max-h-[52vh] gap-4 pr-1">
             {legal?.sections.map((s) => (
-              <div key={s.heading} className="flex flex-col gap-1">
-                <div className="text-tab font-medium text-fg">{t(s.heading)}</div>
-                <p className="text-caption leading-[18px] text-fg-2">{t(s.body)}</p>
-              </div>
+              <section key={s.heading} className="flex flex-col gap-1.5">
+                <h3 className="text-body font-medium text-fg">{t(s.heading)}</h3>
+                <p className="text-caption leading-5 text-fg-2">{t(s.body)}</p>
+              </section>
             ))}
           </DialogBody>
           <DialogFooter>
@@ -154,9 +190,12 @@ export function AboutPage() {
             title={t('settings.about.update.dialogTitle', { version: update.version ?? '' })}
             description={t('settings.about.update.dialogDescription', { version: version ?? '' })}
           />
-          <DialogFooter>
+          <DialogFooter actions>
             <Button variant="ghost" onClick={() => setUpdateDialog(false)}>
               {t('settings.about.update.later')}
+            </Button>
+            <Button icon={Download} onClick={() => void download()}>
+              {t('settings.about.update.download')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -169,10 +208,12 @@ function UpdateFooter({
   update,
   onRetry,
   onDetail,
+  onInstall,
 }: {
   update: UpdateStatus
   onRetry: () => void
   onDetail: () => void
+  onInstall: () => void
 }) {
   const t = useT()
   switch (update.state) {
@@ -212,7 +253,14 @@ function UpdateFooter({
       )
     case 'ready':
       return (
-        <InlineHint kind="success">{t('settings.about.update.ready', { version: update.version ?? '' })}</InlineHint>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <InlineHint kind="success" truncate>
+            {t('settings.about.update.ready', { version: update.version ?? '' })}
+          </InlineHint>
+          <Button size="sm" icon={RotateCw} onClick={onInstall}>
+            {t('settings.about.update.installNow')}
+          </Button>
+        </div>
       )
     case 'error':
       return (

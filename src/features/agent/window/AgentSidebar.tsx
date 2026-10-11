@@ -1,9 +1,11 @@
 /**
- * Agent window sidebar (CLAUDE.md §12): 新会话, the search box (⌘K), a segmented switch between the thread
- * list and the 定时任务 object list, the grouped thread rows (hover ···, right-click, running / awaiting-approval
- * status — the same menu as the panel via threadMenus), and the account tile → 设置 at the bottom.
+ * Agent window sidebar (CLAUDE.md §12, laid out like ZCode's): quiet 32px navigation rows — 新会话 (⌘N), the search
+ * field (⌘K), 定时任务 (switches the list below to the 定时任务 object list and back) — then the grouped single-line
+ * thread rows (status in the leading slot, time on the right, hover ···, right-click — the same menu as the panel via
+ * threadMenus), and the account row → 设置 with 记忆与规则 beside it at the bottom. Selection is a neutral ground, never
+ * the accent: the sidebar sits beside the conversation and stays quiet.
  */
-import { Brain, CircleAlert, Ellipsis, MessageSquare, Plus, UserRound } from 'lucide-react'
+import { Brain, CalendarClock, CircleAlert, Ellipsis, Plus, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ThreadSummary } from '@aiwc/protocol'
 import { runCommand } from '@/app/commands'
@@ -11,9 +13,7 @@ import { shortcutLabel } from '@/app/shortcuts'
 import { useT, type MessageKey } from '@/i18n'
 import {
   Avatar,
-  Button,
   Chip,
-  cn,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItems,
@@ -26,16 +26,17 @@ import {
   ErrorBoundary,
   ICON_STROKE,
   IconButton,
-  Kbd,
+  type IconComponent,
   ListItem,
   ScrollArea,
   SearchBox,
-  SegmentedControl,
+  SkeletonListRows,
   Spinner,
   Tooltip,
 } from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { formatTime } from '@/platform/format'
+import { listKeyNav } from '@/platform/listNavigation'
 import { toMediaUrl } from '@/platform/mediaUrl'
 import { useAccountStatus } from '@/platform/useAccountStatus'
 import { ListHeaderContext, type ListHeaderApi } from '@/shell/objectList/listHeaderContext'
@@ -45,19 +46,18 @@ import { useShellStore } from '@/shell/shellStore'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { isUntitledTitle } from '../model'
 import { threadRowMenu } from '../threadMenus'
+import { ThreadAttentionMark, ThreadQuestionMark } from '../ThreadAttentionMark'
 import type { AgentSurface } from '../useAgentSurface'
 import { useAgentWindowStore, type SidebarView } from './agentWindowStore'
+import { contentOnlyHits, useThreadSearch } from '../threadSearch'
+import { SidebarArchived } from './SidebarArchived'
+import { SidebarContentHits, SidebarLoadMore } from './SidebarSearchHits'
 import { filterThreads, groupThreads, type ThreadGroupId } from './threadGroups'
 
 export interface AgentSidebarProps {
   surface: AgentSurface
   mac: boolean
 }
-
-const VIEW_OPTIONS: ReadonlyArray<{ value: SidebarView; labelKey: MessageKey }> = [
-  { value: 'threads', labelKey: 'agent.window.sidebar.views.threads' },
-  { value: 'tasks', labelKey: 'agent.window.sidebar.views.tasks' },
-]
 
 const GROUP_LABEL: Record<ThreadGroupId, MessageKey> = {
   pinned: 'agent.window.sidebar.groups.pinned',
@@ -83,6 +83,8 @@ export function AgentSidebar({ surface, mac }: AgentSidebarProps) {
   const searchLabel =
     view === 'threads' ? t('agent.window.sidebar.searchThreads') : t('agent.window.sidebar.searchTasks')
   const newKbd = shortcutLabel('agent.newThread', mac)
+  const tasksOpen = view === 'tasks'
+  const setView = (next: SidebarView) => useAgentWindowStore.getState().setSidebarView(next)
 
   return (
     <nav
@@ -90,17 +92,24 @@ export function AgentSidebar({ surface, mac }: AgentSidebarProps) {
       className="flex h-full min-h-0 flex-col"
       data-testid="agent-sidebar"
     >
-      <div className="flex shrink-0 flex-col gap-2 px-3 pb-2 pt-3">
-        <Button
-          variant="outline"
-          icon={Plus}
-          className="w-full justify-start"
-          onClick={() => runCommand('agent.newThread', {})}
+      <div className="flex shrink-0 flex-col gap-px px-2 pb-2 pt-3">
+        <ListItem
+          compact
+          leading={<NavIcon icon={Plus} />}
+          title={t('agent.window.sidebar.newThread')}
+          meta={newKbd}
+          onSelect={() => runCommand('agent.newThread', {})}
           data-testid="agent-sidebar-new"
-        >
-          <span className="min-w-0 flex-1 truncate text-left">{t('agent.window.sidebar.newThread')}</span>
-          {newKbd ? <Kbd keys={newKbd} className="ml-auto" /> : null}
-        </Button>
+        />
+        <ListItem
+          compact
+          leading={<NavIcon icon={CalendarClock} active={tasksOpen} />}
+          title={t('agent.window.sidebar.views.tasks')}
+          selected={tasksOpen}
+          aria-pressed={tasksOpen}
+          onSelect={() => setView(tasksOpen ? 'threads' : 'tasks')}
+          data-testid="agent-sidebar-tasks"
+        />
         <SearchBox
           ref={searchRef}
           value={query}
@@ -108,15 +117,9 @@ export function AgentSidebar({ surface, mac }: AgentSidebarProps) {
           placeholder={searchLabel}
           shortcut={mac ? '⌘K' : 'Ctrl+K'}
           aria-label={searchLabel}
-          wrapperClassName="h-8 min-w-0 rounded-item"
-        />
-        <SegmentedControl
-          size="sm"
-          fullWidth
-          aria-label={t('agent.window.sidebar.label')}
-          options={VIEW_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-          value={view}
-          onValueChange={(next) => useAgentWindowStore.getState().setSidebarView(next)}
+          landmark
+          // A quiet filled field, not a bordered box: it reads as one more row of the sidebar until it has focus.
+          wrapperClassName="mt-1.5 h-8 min-w-0 rounded-item border-transparent bg-hover-5 hover:border-transparent"
         />
       </div>
       <div className="min-h-0 flex-1">
@@ -125,42 +128,85 @@ export function AgentSidebar({ surface, mac }: AgentSidebarProps) {
           {view === 'threads' ? <ThreadRows surface={surface} query={query} /> : <TaskRows query={query} />}
         </ErrorBoundary>
       </div>
-      <AccountTile mac={mac} />
+      <AccountTile />
     </nav>
   )
+}
+
+/** 16px navigation glyph: secondary text colour, full foreground while its row is the open view. */
+function NavIcon({ icon: Icon, active = false }: { icon: IconComponent; active?: boolean }) {
+  return <Icon size={16} strokeWidth={ICON_STROKE} aria-hidden className={active ? 'text-fg' : 'text-fg-2'} />
 }
 
 /* ------------------------------------------------------------------ threads */
 
 function ThreadRows({ surface, query }: { surface: AgentSurface; query: string }) {
   const t = useT()
-  const { threads } = surface
+  const { threads, hydrating, loadError, store } = surface
   const untitled = t('agent.thread.untitled')
   const filtered = useMemo(() => filterThreads(threads, query, untitled), [threads, query, untitled])
   const groups = useMemo(() => groupThreads(filtered), [filtered])
-  if (threads.length === 0)
+  const search = useThreadSearch(query)
+  const contentHits = useMemo(() => contentOnlyHits(search.hits, filtered), [search.hits, filtered])
+  // Loading and failure are not "no chats yet": say which one it is, and offer the retry the conversation column has.
+  if (threads.length === 0 && hydrating) return <SkeletonListRows rows={6} avatar={false} className="px-4 pt-3" />
+  if (threads.length === 0 && loadError)
     return (
       <EmptyState
         compact
-        variant="empty"
-        title={t('agent.window.sidebar.empty')}
-        description={t('agent.window.sidebar.emptyHint')}
+        variant="error"
+        title={t('agent.panel.threadsLoadFailed')}
+        action={{ label: t('common.retry'), onClick: () => void store().hydrate() }}
         className="h-full"
       />
     )
-  if (filtered.length === 0)
-    return <EmptyState compact variant="no-results" title={t('agent.window.sidebar.noResults')} className="h-full" />
+  if (threads.length === 0)
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <EmptyState
+          compact
+          variant="empty"
+          title={t('agent.window.sidebar.empty')}
+          description={t('agent.window.sidebar.emptyHint')}
+          className="min-h-0 flex-1"
+        />
+        <div className="shrink-0 px-2 pb-1">
+          <SidebarArchived surface={surface} query={query} />
+        </div>
+      </div>
+    )
+  if (filtered.length === 0 && contentHits.length === 0)
+    return search.loading ? (
+      <EmptyState compact variant="loading" title={t('agent.history.searching')} className="h-full" />
+    ) : (
+      <EmptyState
+        compact
+        variant={search.error ? 'error' : 'no-results'}
+        title={
+          search.error ? t('agent.history.searchFailed', { detail: search.error }) : t('agent.window.sidebar.noResults')
+        }
+        description={search.active && !search.error ? t('agent.history.searchLocal') : undefined}
+        className="h-full"
+      />
+    )
   return (
     <ScrollArea className="h-full">
-      <div role="list" aria-label={t('agent.window.sidebar.list')} className="flex flex-col px-2 py-1">
+      <div
+        role="list"
+        aria-label={t('agent.window.sidebar.list')}
+        className="flex flex-col px-2 pb-2"
+        onKeyDown={listKeyNav}
+      >
         {groups.map((group) => (
-          <section key={group.id} className="flex flex-col gap-px pb-1.5" data-group={group.id}>
-            <h2 className="m-0 px-2.5 pb-1 pt-2 text-micro font-medium text-fg-3">{t(GROUP_LABEL[group.id])}</h2>
+          <section key={group.id} className="flex flex-col gap-px pb-2" data-group={group.id}>
+            <h2 className="m-0 px-2.5 pb-1 pt-2 text-caption font-medium text-fg-3">{t(GROUP_LABEL[group.id])}</h2>
             {group.threads.map((thread) => (
               <ThreadRow key={thread.threadId} thread={thread} surface={surface} />
             ))}
           </section>
         ))}
+        {search.active ? <SidebarContentHits hits={contentHits} loading={search.loading} /> : <SidebarLoadMore />}
+        <SidebarArchived surface={surface} query={query} />
       </div>
     </ScrollArea>
   )
@@ -210,28 +256,24 @@ function ThreadRow({ thread, surface }: { thread: ThreadSummary; surface: AgentS
         />
       </Tooltip>
     )
+  else if (view?.pendingQuestions?.length) status = <ThreadQuestionMark />
   else if (view?.isStreaming) status = <Spinner size={12} label={t('agent.window.sidebar.streaming')} />
-  const subtitle = !saved ? t('agent.window.sidebar.draft') : (thread.contextRef?.label ?? t('agent.history.noContext'))
+  else status = <ThreadAttentionMark threadId={id} />
+  // One line per thread, like ZCode: the status mark sits in the leading slot, the right edge says when (or that the
+  // draft was never sent); the context object stays in the row's tooltip and in the header chip of the open thread.
+  const meta = saved ? formatTime(thread.updatedAt) : t('agent.window.sidebar.draft')
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <ListItem
-          dense
+          compact
           selected={selected}
           onSelect={() => store().setActive(id)}
-          leading={
-            <MessageSquare
-              size={15}
-              strokeWidth={ICON_STROKE}
-              aria-hidden
-              className={cn(selected ? 'text-accent' : 'text-fg-3')}
-            />
-          }
+          leading={status}
           title={title}
-          subtitle={subtitle}
-          meta={formatTime(thread.updatedAt)}
-          trailing={status}
+          meta={meta}
+          tooltip={thread.contextRef ? t('agent.window.header.context', { label: thread.contextRef.label }) : undefined}
           hoverActions={
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -273,7 +315,7 @@ function TaskRows({ query }: { query: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {segments.length > 0 ? (
-        <div className="flex shrink-0 items-center gap-1 px-3 pb-1.5">
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1 px-3 pb-1.5">
           {segments.map((s) => (
             <Chip
               key={s.id}
@@ -296,8 +338,11 @@ function TaskRows({ query }: { query: string }) {
 
 /* ------------------------------------------------------------------ account */
 
-/** Bottom tile: the current account → 设置 (like the rail avatar), plus 记忆与规则 → 设置 › 记忆. */
-function AccountTile({ mac }: { mac: boolean }) {
+/**
+ * Bottom row (ZCode's footer): the current account → 设置 (like the rail avatar), with
+ * 记忆与规则 → 设置 › 记忆 as a quiet icon button beside it. No rule above it: the list's own end is separation enough.
+ */
+function AccountTile() {
   const t = useT()
   const wxid = useConfig((c) => c.account.wxid)
   const { data: status } = useAccountStatus()
@@ -305,43 +350,32 @@ function AccountTile({ mac }: { mac: boolean }) {
   const name = account?.nickname?.trim() || account?.wxid || wxid || ''
   const settingsActive = useTabsStore((s) => s.activeId === 'settings:settings')
   return (
-    <div className="shrink-0 border-t border-line-6 px-2 py-1.5">
+    <div className="flex shrink-0 items-center gap-0.5 px-2 pb-3 pt-2">
       <ListItem
         dense
+        quiet
         selected={settingsActive}
         onSelect={() => runCommand('tab.openSettings', {})}
         aria-label={name ? t('agent.window.sidebar.accountSettings', { name }) : t('agent.window.sidebar.settings')}
         leading={
           name ? (
-            <Avatar id={account?.wxid ?? wxid ?? ''} name={name} src={toMediaUrl(account?.avatarPath)} size={36} />
+            <Avatar id={account?.wxid ?? wxid ?? ''} name={name} src={toMediaUrl(account?.avatarPath)} size={28} />
           ) : (
-            <UserRound size={18} strokeWidth={ICON_STROKE} aria-hidden className="text-fg-2" />
+            <UserRound size={16} strokeWidth={ICON_STROKE} aria-hidden className="text-fg-2" />
           )
         }
         title={name || t('agent.window.sidebar.settings')}
-        subtitle={
-          <span className="flex items-center gap-1">
-            <span className="min-w-0 truncate">{t('agent.window.sidebar.settings')}</span>
-            {shortcutLabel('tab.openSettings', mac) ? (
-              <Kbd keys={shortcutLabel('tab.openSettings', mac) ?? ''} />
-            ) : null}
-          </span>
-        }
-        trailing={
-          <Tooltip content={t('agent.window.sidebar.memory')}>
-            <IconButton
-              size="sm"
-              icon={Brain}
-              label={t('agent.window.sidebar.memory')}
-              onClick={(e) => {
-                e.stopPropagation()
-                runCommand('tab.openSettings', { page: 'memory' })
-              }}
-            />
-          </Tooltip>
-        }
+        className="min-h-10 min-w-0 flex-1 gap-2 px-1.5 py-1"
         data-testid="agent-sidebar-account"
       />
+      <Tooltip content={t('agent.window.sidebar.memory')}>
+        <IconButton
+          icon={Brain}
+          label={t('agent.window.sidebar.memory')}
+          onClick={() => runCommand('tab.openSettings', { page: 'memory' })}
+          className="text-fg-2"
+        />
+      </Tooltip>
     </div>
   )
 }

@@ -2,23 +2,31 @@ import { discoverModels, listRemoteModels, testModel } from '@aiwc/kernel'
 import type { AppContext } from '../contracts'
 import type { Handle, HostBridge } from './register'
 import { t } from '../i18n'
+import { isProviderKeyRef } from '../security/secretRefPolicy'
 
 export function registerAiIpc(ctx: AppContext, _host: HostBridge, handle: Handle): void {
   const log = ctx.logger.child('ipc:ai')
+  // The provider comes from the renderer: its apiKeyRef may only name a provider key, never another secret (the
+  // iLink session, an MCP token, the database key) that a test call would then send to the renderer-chosen baseUrl.
+  const storedKey = (ref: string | undefined): string | undefined => {
+    if (!ref) return undefined
+    if (!isProviderKeyRef(ref)) throw new Error(t('main.config.secretRefRefused', { ref: ref.slice(0, 128) }))
+    return ctx.secrets.reveal(ref) ?? undefined
+  }
 
   handle('ai:testModel', ({ provider, modelId, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
-    return testModel({ provider, modelId, apiKey: key })
+    const key = apiKey ?? storedKey(provider.apiKeyRef)
+    return testModel({ provider, modelId, apiKey: key, fetchImpl: ctx.modelOps.fetchFor(provider) })
   })
 
   handle('ai:discoverModels', ({ provider, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
-    return discoverModels({ provider, apiKey: key })
+    const key = apiKey ?? storedKey(provider.apiKeyRef)
+    return discoverModels({ provider, apiKey: key, fetchImpl: ctx.modelOps.fetchFor(provider) })
   })
 
   handle('ai:listRemoteModels', ({ provider, apiKey }) => {
-    const key = apiKey ?? (provider.apiKeyRef ? (ctx.secrets.reveal(provider.apiKeyRef) ?? undefined) : undefined)
-    return listRemoteModels({ provider, apiKey: key })
+    const key = apiKey ?? storedKey(provider.apiKeyRef)
+    return listRemoteModels({ provider, apiKey: key, fetchImpl: ctx.modelOps.fetchFor(provider) })
   })
 
   // Local speech-to-text runtime is not part of this milestone. The settings page still renders

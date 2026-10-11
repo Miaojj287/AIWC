@@ -1,28 +1,14 @@
 /**
  * Outbound text shaping for WeChat: explicit bubble separators and hard length chunking.
  */
+import { splitOutboundBubbles } from '@aiwc/protocol'
 import { ILINK_MAX_TEXT_LENGTH } from './protocol'
 
 /**
- * The separator wherever it appears, not only alone on its own line.
- *
- * Models are told to put it on its own line and mostly do — but "mostly" is not good enough here:
- * an inline `…想吃什么？ ---wx-next--- 先垫垫…` used to survive the split and get pasted into WeChat
- * verbatim, so the contact received our internal marker. Matching it anywhere makes a stray marker
- * impossible to leak, and the surrounding whitespace is eaten so both halves stay clean.
- *
- * Leading dashes are allowed to vary (`--` … `-----`) because that is the one detail models get
- * wrong while still clearly meaning the separator.
+ * Split on the '---wx-next---' marker (anywhere, not only on its own line) into separate bubbles, trimmed and
+ * empties dropped. The rule lives in @aiwc/protocol so the Agent's send preview splits exactly as the senders do.
  */
-const SEPARATOR_RE = /[ \t]*-{2,}wx-next-{2,}[ \t]*/gi
-
-/** Split on the '---wx-next---' marker into separate bubbles (trimmed, empties dropped). */
-export function splitExplicitBubbles(text: string): string[] {
-  return text
-    .split(SEPARATOR_RE)
-    .map((b) => b.trim())
-    .filter(Boolean)
-}
+export const splitExplicitBubbles: (text: string) => string[] = splitOutboundBubbles
 
 /**
  * Chunk one bubble to `maxLen` code points, preferring to break at a newline, then at sentence

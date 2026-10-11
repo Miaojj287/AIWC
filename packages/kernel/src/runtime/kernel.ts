@@ -15,9 +15,14 @@ import {
   type ToolProfile,
   type UserInput,
 } from '@aiwc/protocol'
-import type { RolloutStore, ThreadRecord } from '../ports'
+import type { RolloutLine, RolloutStore, ThreadRecord } from '../ports'
 import { createEmitter } from './emitter'
+import { trackPendingAsks } from './pendingAsks'
+import { forkItems } from './fork'
+import { postAssistantNote } from './notes'
 import { Thread, type ThreadDeps } from './thread'
+import { childEventBridge } from './childBridge'
+import { buildSubagentTrace, watchApprovalWaits } from './childRun'
 import type { ChildRunOptions, KernelInternal, KernelOptions } from './types'
 
 export function profileForChannel(channel: ChannelKind): ToolProfile {
@@ -26,6 +31,9 @@ export function profileForChannel(channel: ChannelKind): ToolProfile {
       return 'desktop-chat'
     case 'cron':
       return 'cron'
+    // The owner at their own phone: the desktop toolset, asking for approval in the chat (permission mode Ask by default).
+    case 'wechat-remote':
+      return 'desktop-chat'
     case 'wechat-ilink':
     case 'wechat-ui':
     case 'observed':
@@ -73,6 +81,7 @@ export function createKernel(opts: KernelOptions): KernelInternal {
   const { services } = opts
   const logger = opts.logger
   const emitter = createEmitter((err) => logger?.('warn', 'event listener threw', err))
+  const pendingAsks = trackPendingAsks(emitter.on)
   const threads = new Map<ThreadId, Thread>()
   const loading = new Map<ThreadId, Promise<Thread | undefined>>()
   /** In-flight ensureThread lookups per bot chat, so concurrent inbound messages share one thread. */
@@ -85,6 +94,7 @@ export function createKernel(opts: KernelOptions): KernelInternal {
     systemPrompt: opts.systemPrompt,
     emit: emitter.emit,
     logger,
+    onGlobalGrant: opts.onGlobalGrant,
     ...extra,
   })
 
@@ -98,7 +108,9 @@ export function createKernel(opts: KernelOptions): KernelInternal {
     return {
       permissionMode: origin.channel === 'desktop' ? config.defaultPermissionMode : 'bypass',
       profile: profileForChannel(origin.channel),
-      allowAlways: [...config.allowAlways],
+      // Global grants are read live at each call (turn.ts effectiveAllowAlways), never copied: a revoke must apply
+      // to threads created before it too.
+      allowAlways: [],
       ...patch,
     }
   }
@@ -182,6 +194,12 @@ export function createKernel(opts: KernelOptions): KernelInternal {
         await createThread(op.threadId, op.origin, op.settings)
         return
       }
+      if (op.type === 'question.answer') {
+        // Answered straight at the gate: the waiting tool call emits question.resolved itself.
+        await requireThread(op.threadId)
+        services.questions?.resolve(op.questionId, op.answer, op.threadId)
+        return
+      }
       const thread = await requireThread(op.threadId)
       await thread.submit(op)
       if (op.type === 'thread.shutdown') threads.delete(op.threadId)
@@ -233,38 +251,70 @@ export function createKernel(opts: KernelOptions): KernelInternal {
       const parent = threads.get(child.parentThreadId)
       if (!parent) throw new Error(`unknown parent thread: ${child.parentThreadId}`)
       const childId = newThreadId()
+      const profile = child.profile ?? 'subagent'
       const settings: ThreadSettings = {
         permissionMode: parent.settings.permissionMode,
         model: parent.settings.model,
-        profile: 'subagent',
-        allowAlways: [],
+        profile,
+        // A write-capable child acts as the parent would: the user's grants for that conversation still apply.
+        allowAlways: profile === 'subagent' ? [] : [...parent.settings.allowAlways],
         title: child.label,
       }
       // Registered so ops (interrupt, approvals) and kernel shutdown reach it, but never announced with
       // thread.created: the renderer lists every created thread, and a child is not a conversation.
+      // The child's approval waits hold the parent's clocks (the calling tool's timeout, the workflow step's limit).
+      const waits = watchApprovalWaits(
+        childEventBridge(emitter.emit, { childId, parentId: child.parentThreadId, parentTurnId: child.parentTurnId }),
+        childId,
+        child.onApprovalWait,
+      )
       const thread = new Thread(
         {
           ...threadDeps({ depth: child.depth, maxSteps: child.maxSteps }),
+          emit: waits.emit,
           services: { ...services, rollout: EPHEMERAL_ROLLOUT },
         },
         { threadId: childId, origin: child.origin, settings },
       )
       threads.set(childId, thread)
-      emitter.emit({ type: 'subagent', threadId: child.parentThreadId, childId, status: 'started', label: child.label })
-      try {
-        const result = await runToCompletion(thread, child.input, child.signal)
-        emitter.emit({ type: 'subagent', threadId: child.parentThreadId, childId, status: 'done', label: child.label })
-        return result
-      } catch (err) {
+      // The child's approvals are answered (and cancelled) from the parent conversation.
+      const unalias = services.approvals.alias?.(childId, child.parentThreadId)
+      const startedAt = (services.clock ?? Date.now)()
+      // The parent's row shows the child's work under the calling tool call (live from the child's own events).
+      const announce = (status: 'started' | 'done' | 'failed'): void =>
         emitter.emit({
           type: 'subagent',
           threadId: child.parentThreadId,
           childId,
-          status: 'failed',
+          status,
           label: child.label,
+          ...(child.parentCallId ? { callId: child.parentCallId } : {}),
+          ...(child.step ? { step: child.step } : {}),
         })
-        throw err
+      announce('started')
+      let status: 'done' | 'failed' = 'failed'
+      try {
+        const result = await runToCompletion(thread, child.input, child.signal)
+        status = 'done'
+        return result
       } finally {
+        announce(status)
+        waits.stop()
+        unalias?.()
+        try {
+          child.onTrace?.(
+            buildSubagentTrace(thread.context.all(), {
+              childId,
+              label: child.label,
+              status,
+              ...(child.step ? { step: child.step } : {}),
+              startedAt,
+              durationMs: Math.max(0, (services.clock ?? Date.now)() - startedAt),
+            }),
+          )
+        } catch (err) {
+          logger?.('warn', 'child trace failed', err)
+        }
         await thread.shutdown().catch((err) => logger?.('warn', 'child thread shutdown failed', err))
         threads.delete(childId)
       }
@@ -272,6 +322,10 @@ export function createKernel(opts: KernelOptions): KernelInternal {
 
     listThreads(listOpts) {
       return services.rollout.list({ ...listOpts, excludeProfiles: UNLISTED_PROFILES })
+    },
+
+    searchThreads(query, searchOpts) {
+      return services.rollout.search(query, { ...searchOpts, excludeProfiles: UNLISTED_PROFILES })
     },
 
     async getThread(threadId) {
@@ -292,7 +346,16 @@ export function createKernel(opts: KernelOptions): KernelInternal {
         archived: false,
         itemCount: items.length,
       }
-      return { record: { ...record, settings: thread.settings, title: thread.settings.title ?? record.title }, items }
+      return {
+        record: { ...record, settings: thread.settings, title: thread.settings.title ?? record.title },
+        items,
+        running: thread.activeTurn !== undefined,
+        pendingAsks: pendingAsks.forThread(threadId),
+      }
+    },
+
+    async postNote(threadId, text) {
+      await postAssistantNote(await requireThread(threadId), emitter.emit, text, services.clock ?? Date.now)
     },
 
     async updateMeta(threadId, patch) {
@@ -302,6 +365,27 @@ export function createKernel(opts: KernelOptions): KernelInternal {
         thread.updateSettings({ title: patch.title })
         emitter.emit({ type: 'thread.title', threadId, title: patch.title })
       }
+    },
+
+    async forkThread(sourceId, { throughItemId, title }) {
+      if (closed) throw new Error('kernel is shut down')
+      const source = await requireThread(sourceId)
+      const picked = forkItems(source.context.all(), throughItemId, source.activeTurn?.turnId)
+      if (!picked.ok) throw Object.assign(new Error(`cannot fork ${sourceId}: ${picked.code}`), { code: picked.code })
+      const threadId = newThreadId()
+      const settings: ThreadSettings = { ...source.settings, title }
+      await services.rollout.create({ threadId, origin: source.origin, settings, title })
+      if (picked.items.length > 0) {
+        await services.rollout.append(
+          threadId,
+          picked.items.map((item): RolloutLine => ({ ts: item.createdAt, type: 'item', item })),
+        )
+      }
+      await services.rollout.flush(threadId)
+      const thread = new Thread(threadDeps(), { threadId, origin: source.origin, settings, title, items: picked.items })
+      threads.set(threadId, thread)
+      emitter.emit({ type: 'thread.created', threadId, settings, origin: source.origin })
+      return threadId
     },
 
     async removeThread(threadId) {
@@ -315,6 +399,7 @@ export function createKernel(opts: KernelOptions): KernelInternal {
 
     async shutdown() {
       closed = true
+      pendingAsks.dispose()
       const all = [...threads.values()]
       threads.clear()
       await Promise.all(all.map((t) => t.shutdown().catch((err) => logger?.('warn', 'thread shutdown failed', err))))

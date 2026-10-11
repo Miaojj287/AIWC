@@ -84,7 +84,13 @@ export function readZipEntry(buf: Buffer, entry: ZipEntry): Buffer {
   const raw = buf.subarray(start, end)
   if (entry.method === 0) return Buffer.from(raw)
   if (entry.method === 8) {
-    const out = inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES })
+    // Never inflate past the size the directory declared: a lying entry fails fast instead of expanding to the cap.
+    let out: Buffer
+    try {
+      out = inflateRawSync(raw, { maxOutputLength: Math.max(1, entry.size) })
+    } catch (e) {
+      throw new Error(invalid('main.pets.zip.sizeMismatch', { name: entry.name }).message, { cause: e })
+    }
     if (out.length !== entry.size) throw invalid('main.pets.zip.sizeMismatch', { name: entry.name })
     return out
   }

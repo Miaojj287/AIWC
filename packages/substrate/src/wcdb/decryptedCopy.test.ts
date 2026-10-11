@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   closeSync,
   existsSync,
   mkdtempSync,
@@ -6,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
   writeSync,
@@ -20,14 +22,13 @@ import {
   buildWal,
   encryptPage,
   expectedPlainPage,
+  fixtureCipher,
   fixtureIv,
-  FIXTURE_SALT,
   plaintextPage,
 } from './testing/sqlcipherFixture'
 
 const PAGE = SQLCIPHER_PAGE_SIZE
 const KEY = Buffer.alloc(32, 7)
-const SALT_HEX = FIXTURE_SALT.toString('hex')
 
 let root = ''
 let dbPath = ''
@@ -72,7 +73,7 @@ function touch(path: string): void {
 }
 
 function openCopy(): DecryptedCopy {
-  return new DecryptedCopy({ dbPath, key: KEY, saltHex: SALT_HEX, cacheDir, refreshIntervalMs: 0 })
+  return new DecryptedCopy({ dbPath, cipher: fixtureCipher(KEY), cacheDir, refreshIntervalMs: 0 })
 }
 
 function pageOf(bytes: Buffer, pageNumber: number): Buffer {
@@ -179,7 +180,12 @@ describe('DecryptedCopy', () => {
     writeDb(2)
     const first = openCopy()
     first.refresh()
-    const other = new DecryptedCopy({ dbPath, key: KEY, saltHex: 'f'.repeat(32), cacheDir, refreshIntervalMs: 0 })
+    const other = new DecryptedCopy({
+      dbPath,
+      cipher: fixtureCipher(KEY, Buffer.alloc(16, 0xff)),
+      cacheDir,
+      refreshIntervalMs: 0,
+    })
     expect(other.path).not.toBe(first.path)
     expect(existsSync(first.path)).toBe(false)
     expect(readdirSync(join(cacheDir, 'wcdb-plain'))).toEqual([])
@@ -195,6 +201,20 @@ describe('DecryptedCopy', () => {
     expect(readFileSync(copy.path).length).toBe(2 * PAGE)
   })
 
+  it('drops the plaintext when the source database is truncated away', () => {
+    writeDb(3)
+    const copy = openCopy()
+    copy.refresh()
+    expect(readFileSync(copy.path).length).toBe(3 * PAGE)
+
+    // WeChat (or the user) empties the file. A copy longer than its source keeps serving chat
+    // history that no longer exists, so the refresh has to cut it back to the committed size.
+    writeFileSync(dbPath, Buffer.alloc(0))
+    touch(dbPath)
+    expect(copy.refresh()).toBe(true)
+    expect(readFileSync(copy.path).length).toBe(0)
+  })
+
   it('ignores a torn trailing page while WeChat is extending the file', () => {
     writeDb(2)
     writeFileSync(dbPath, readFileSync(dbPath).subarray(0, PAGE + 100))
@@ -202,5 +222,32 @@ describe('DecryptedCopy', () => {
     const copy = openCopy()
     expect(copy.refresh()).toBe(true)
     expect(readFileSync(copy.path).length).toBe(PAGE)
+  })
+})
+
+// Windows has no POSIX modes; the cache inherits the user profile's ACL there.
+describe.skipIf(process.platform === 'win32')('DecryptedCopy permissions', () => {
+  const mode = (path: string): number => statSync(path).mode & 0o777
+
+  it('keeps the plaintext copy and its directory owner-only', () => {
+    writeDb(2)
+    const copy = openCopy()
+    copy.refresh()
+    expect(mode(copy.path)).toBe(0o600)
+    expect(mode(join(cacheDir, 'wcdb-plain'))).toBe(0o700)
+  })
+
+  it('tightens a world-readable copy left behind by an earlier build', () => {
+    writeDb(2)
+    const first = openCopy()
+    first.refresh()
+    const dir = join(cacheDir, 'wcdb-plain')
+    chmodSync(dir, 0o755)
+    chmodSync(first.path, 0o644)
+
+    const copy = openCopy()
+    copy.refresh()
+    expect(mode(copy.path)).toBe(0o600)
+    expect(mode(dir)).toBe(0o700)
   })
 })

@@ -2,6 +2,7 @@ import { Check, Ellipsis, Pin, PinOff, RotateCcw, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -74,15 +75,28 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
     [closeMany, store],
   )
 
-  const drag = useTabDrag()
+  const drag = useTabDrag(tabs.map((tab) => tab.id).join('|'))
   const scrollRef = useRef<HTMLDivElement>(null)
+  const manageRef = useRef<HTMLButtonElement>(null)
+  // A tab closed while it held focus would drop focus to <body>: hand it to the tab that became active.
+  const refocus = useRef(false)
 
   const { elementOf } = drag
   useEffect(() => {
-    if (!activeId) return
-    const el = elementOf(activeId)
-    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [activeId, elementOf])
+    if (activeId) {
+      const el = elementOf(activeId)
+      if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
+    if (!refocus.current) return
+    refocus.current = false
+    const next = activeId ? elementOf(activeId) : undefined
+    ;(next ?? manageRef.current)?.focus()
+  }, [activeId, elementOf, tabs.length])
+
+  const closeFromStrip = (id: string) => {
+    refocus.current = Boolean(scrollRef.current?.contains(document.activeElement))
+    void onRequestClose(id)
+  }
 
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
     const el = scrollRef.current
@@ -138,11 +152,14 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
                   pinned={tab.pinned}
                   dirty={tab.dirty}
                   activeBg="content"
+                  id={tabDomId(tab.id)}
+                  aria-controls={tabPanelDomId(tab.id)}
                   data-tab-id={tab.id}
                   data-dragging={drag.draggingId === tab.id || undefined}
-                  className={cn(drag.draggingId === tab.id && 'opacity-70')}
+                  // The dragged tab rides above its neighbours while they slide out of its way.
+                  className={cn(drag.draggingId === tab.id && 'z-10')}
                   onSelect={() => store().activate(tab.id)}
-                  onClose={() => void onRequestClose(tab.id)}
+                  onClose={() => closeFromStrip(tab.id)}
                   onPointerDown={(e) => drag.onPointerDown(e, tab.id)}
                   onPointerMove={drag.onPointerMove}
                   onPointerUp={drag.onPointerUp}
@@ -159,7 +176,7 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
       <div className="flex shrink-0 items-center pl-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <IconButton icon={Ellipsis} label={t('workspace.tabStrip.manage')} />
+            <IconButton ref={manageRef} icon={Ellipsis} label={t('workspace.tabStrip.manage')} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[220px]">
             <DropdownMenuItems items={overflow} />
@@ -169,6 +186,10 @@ export function TabStrip({ onRequestClose, mac = true }: TabStripProps) {
     </div>
   )
 }
+
+/** DOM ids that tie a tab to its panel (`aria-controls` / `aria-labelledby`). */
+export const tabDomId = (tabId: string): string => `tab-${tabId}`
+export const tabPanelDomId = (tabId: string): string => `tabpanel-${tabId}`
 
 /* ------------------------------------------------------------------ menus */
 
@@ -284,22 +305,75 @@ export function overflowMenuSpec(
 /* ------------------------------------------------------------------- drag */
 
 const DRAG_THRESHOLD = 4
+/** Reorder motion mirrors tokens.css `--dur-fast` / `--ease-out`; WAAPI needs literal values. */
+const REORDER_MS = 120
+const REORDER_EASING = 'cubic-bezier(0.23, 1, 0.32, 1)'
 
 interface DragSession {
   id: string
   pointerId: number
   startX: number
+  /** Pointer x minus the tab's left edge at grab time: the tab stays under the finger where it was grabbed. */
+  grabOffset: number
+  /** The translateX currently applied to the dragged tab. */
+  offset: number
+  lastX: number
   moved: boolean
 }
 
+const prefersReducedMotion = (): boolean =>
+  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Layout left of a tab with any slide still in flight cancelled, so the next slide starts from a clean slot. */
+function settledLeft(el: HTMLElement): number {
+  if (typeof el.getAnimations === 'function') for (const running of el.getAnimations()) running.cancel()
+  return el.getBoundingClientRect().left
+}
+
+function slide(el: HTMLElement, fromX: number): void {
+  if (typeof el.animate !== 'function' || prefersReducedMotion() || Math.abs(fromX) < 0.5) return
+  el.animate([{ transform: `translateX(${fromX}px)` }, { transform: 'translateX(0)' }], {
+    duration: REORDER_MS,
+    easing: REORDER_EASING,
+  })
+}
+
 /**
- * Pointer-event reorder (no dnd lib): press activates, moving past 4px starts a drag, the tab jumps to
- * the slot whose midpoint the pointer crossed (store.move keeps pinned tabs first).
+ * Pointer-event reorder (no dnd lib): press activates, moving past 4px starts a drag. The dragged tab follows the
+ * pointer 1:1 (a transform, never layout), the store reorders when the pointer crosses a neighbour's midpoint
+ * (store.move keeps pinned tabs first), the neighbours slide into their new slots (FLIP, 120ms) and the dragged tab
+ * settles into its slot on release. `order` is the current tab order: a change re-anchors the transform after React
+ * has moved the DOM nodes.
  */
-function useTabDrag() {
+function useTabDrag(order: string) {
   const elements = useRef(new Map<string, HTMLElement>())
   const session = useRef<DragSession | null>(null)
+  const before = useRef<Map<string, number> | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+
+  /** Keep the dragged tab under the pointer: layout left (rect minus our own offset) → the wanted left. */
+  const follow = useCallback(() => {
+    const s = session.current
+    const el = s ? elements.current.get(s.id) : undefined
+    if (!s || !el || !s.moved) return
+    const layoutLeft = el.getBoundingClientRect().left - s.offset
+    s.offset = s.lastX - s.grabOffset - layoutLeft
+    el.style.transform = `translateX(${s.offset}px)`
+  }, [])
+
+  useLayoutEffect(() => {
+    const previous = before.current
+    before.current = null
+    follow()
+    if (!previous) return
+    const draggedId = session.current?.id
+    for (const [id, el] of elements.current) {
+      if (id === draggedId) continue
+      // `was` is where the tab was drawn (mid-slide included), so a reversal continues from there instead of jumping.
+      const was = previous.get(id)
+      if (was !== undefined) slide(el, was - settledLeft(el))
+    }
+  }, [order, follow])
 
   const register = useCallback((id: string, el: HTMLElement | null) => {
     if (el) elements.current.set(id, el)
@@ -312,7 +386,15 @@ function useTabDrag() {
     if ((e.target as HTMLElement).closest('button')) return
     const store = useTabsStore.getState()
     if (store.activeId !== id) store.activate(id)
-    session.current = { id, pointerId: e.pointerId, startX: e.clientX, moved: false }
+    session.current = {
+      id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      grabOffset: e.clientX - e.currentTarget.getBoundingClientRect().left,
+      offset: 0,
+      lastX: e.clientX,
+      moved: false,
+    }
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -320,38 +402,55 @@ function useTabDrag() {
     }
   }, [])
 
-  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLElement>) => {
-    const s = session.current
-    if (!s || s.pointerId !== e.pointerId) return
-    if (!s.moved) {
-      if (Math.abs(e.clientX - s.startX) < DRAG_THRESHOLD) return
-      s.moved = true
-      setDraggingId(s.id)
-    }
-    const { tabs, move } = useTabsStore.getState()
-    const from = tabs.findIndex((t) => t.id === s.id)
-    if (from < 0) return
-    let to = from
-    for (let i = 0; i < tabs.length; i++) {
-      const tab = tabs[i]
-      if (!tab || tab.id === s.id) continue
-      const rect = elements.current.get(tab.id)?.getBoundingClientRect()
-      if (!rect) continue
-      const mid = rect.left + rect.width / 2
-      if (i < from && e.clientX < mid) {
-        to = i
-        break
+  const onPointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      const s = session.current
+      if (!s || s.pointerId !== e.pointerId) return
+      if (!s.moved) {
+        if (Math.abs(e.clientX - s.startX) < DRAG_THRESHOLD) return
+        s.moved = true
+        setDraggingId(s.id)
       }
-      if (i > from && e.clientX > mid) to = i
-    }
-    if (to !== from) move(from, to)
-  }, [])
+      s.lastX = e.clientX
+      const { tabs, move } = useTabsStore.getState()
+      const from = tabs.findIndex((t) => t.id === s.id)
+      if (from < 0) return
+      let to = from
+      for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i]
+        if (!tab || tab.id === s.id) continue
+        const rect = elements.current.get(tab.id)?.getBoundingClientRect()
+        if (!rect) continue
+        const mid = rect.left + rect.width / 2
+        if (i < from && e.clientX < mid) {
+          to = i
+          break
+        }
+        if (i > from && e.clientX > mid) to = i
+      }
+      if (to !== from) {
+        // FLIP: remember where every neighbour is before the store reorders them.
+        before.current = new Map(
+          [...elements.current].map(([tabId, el]) => [tabId, el.getBoundingClientRect().left] as const),
+        )
+        move(from, to)
+      }
+      follow()
+    },
+    [follow],
+  )
 
   const onPointerUp = useCallback((e: ReactPointerEvent<HTMLElement>) => {
     const s = session.current
     if (!s || s.pointerId !== e.pointerId) return
     session.current = null
     setDraggingId(null)
+    // Settle into the slot from wherever the pointer left the tab.
+    const el = elements.current.get(s.id)
+    if (el && s.moved) {
+      el.style.transform = ''
+      slide(el, s.offset)
+    }
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {

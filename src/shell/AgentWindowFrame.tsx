@@ -22,6 +22,8 @@ export interface AgentWindowFrameProps {
   sidebar: ReactNode
   /** h40 row above the conversation: sidebar toggle, thread title, actions, 工作台. Also the window drag region. */
   header: ReactNode
+  /** Rule under the header. Off for an empty thread, whose blank header simply continues the conversation ground. */
+  headerDivider?: boolean
   /** The conversation column. */
   children: ReactNode
   /** Workspace pane content. Stays mounted while hidden so `tab.*` commands always have a handler. */
@@ -33,8 +35,9 @@ export interface AgentWindowFrameProps {
  * AgentWindowFrame — the Agent window's layout (CLAUDE.md §12, DESIGN-SPEC「Agent 窗口」): sidebar (config width,
  * collapsible) | conversation fill | workspace pane (config width, on demand). Layout only: the content of the
  * three regions comes from the agent feature. Only the conversation absorbs width; the pane is clamped so the
- * conversation keeps AGENT_MAIN_MIN_WIDTH. Ground colours follow the four-column shell: sidebar and conversation
- * on the panel ground, the header row on the shell ground like every tab strip.
+ * conversation keeps AGENT_MAIN_MIN_WIDTH. Grounds (ZCode's frame): sidebar and conversation on the panel ground, the
+ * header is the top of the conversation column (same ground, a hairline under it once the thread has content); only
+ * the workspace pane keeps its own shell-ground tab strip.
  */
 export function AgentWindowFrame({
   platform,
@@ -43,6 +46,7 @@ export function AgentWindowFrame({
   layout,
   sidebar,
   header,
+  headerDivider = true,
   children,
   pane,
   paneVisible,
@@ -82,7 +86,12 @@ export function AgentWindowFrame({
           </>
         )}
         <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-testid="agent-window-main">
-          <div className="shell-agent-header flex h-10 shrink-0 items-center gap-1 border-b border-line-6 bg-shell px-2">
+          <div
+            className={cn(
+              'shell-agent-header flex h-10 shrink-0 items-center gap-1 border-b px-2',
+              headerDivider ? 'border-line-6' : 'border-transparent',
+            )}
+          >
             {header}
           </div>
           <div className="min-h-0 flex-1">{children}</div>

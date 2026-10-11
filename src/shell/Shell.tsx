@@ -10,7 +10,14 @@ import { useLanguage, useT } from '@/i18n'
 import { tabTitle } from '@/workspace/tabRegistry'
 import { useTabsStore } from '@/workspace/tabsStore'
 import { AgentColumn } from './AgentColumn'
-import { AGENT_PANEL_WIDTH, LIST_HANDLE_WIDTH, OBJECT_LIST_WIDTH, useColumnLayout } from './columnLayout'
+import {
+  AGENT_PANEL_WIDTH,
+  fitColumns,
+  LIST_HANDLE_WIDTH,
+  OBJECT_LIST_WIDTH,
+  useColumnLayout,
+  useViewportWidth,
+} from './columnLayout'
 import { IconRail } from './IconRail'
 import { ObjectList } from './objectList/ObjectList'
 import { Resizer } from './Resizer'
@@ -33,6 +40,14 @@ export function Shell({ platform, runtime }: ShellProps) {
   const mac = detectMac(platform)
   const ui = useConfig((c) => c.ui)
   const layout = useColumnLayout(ui)
+  // Saved widths yield to the window: the workspace keeps its minimum at 1200×720 and after a resize.
+  const fitted = fitColumns({
+    viewport: useViewportWidth(),
+    listWidth: layout.listWidth,
+    agentWidth: layout.agentWidth,
+    listCollapsed: layout.listCollapsed,
+    agentCollapsed: layout.agentCollapsed,
+  })
   const activeTab = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeId))
   useLanguage() // re-render the window title on a language switch
   const activeTitle = activeTab ? tabTitle(activeTab) : undefined
@@ -80,20 +95,20 @@ export function Shell({ platform, runtime }: ShellProps) {
                 icon={PanelLeftOpen}
                 label={t('shell.layout.expandList')}
                 size="xs"
-                iconSize={11}
+                iconSize={13}
                 onClick={() => layout.setListCollapsed(false)}
-                className="h-full w-3 items-start rounded-none pt-3 text-fg-3 hover:bg-hover-5 hover:text-fg"
+                className="h-full w-full items-start rounded-none pt-3 text-fg-3"
               />
             </Tooltip>
           </div>
         ) : (
           <>
-            <div className="h-full shrink-0 min-w-0" style={{ width: layout.listWidth }}>
+            <div className="h-full shrink-0 min-w-0" style={{ width: fitted.listWidth }}>
               <ObjectList mac={mac} />
             </div>
             <Resizer
               label={t('shell.layout.resizeList')}
-              value={layout.listWidth}
+              value={fitted.listWidth}
               min={OBJECT_LIST_WIDTH.min}
               max={OBJECT_LIST_WIDTH.max}
               onResize={layout.resizeList}
@@ -106,7 +121,7 @@ export function Shell({ platform, runtime }: ShellProps) {
         {layout.agentCollapsed ? null : (
           <Resizer
             label={t('shell.layout.resizeAgent')}
-            value={layout.agentWidth}
+            value={fitted.agentWidth}
             min={AGENT_PANEL_WIDTH.min}
             max={AGENT_PANEL_WIDTH.max}
             onResize={layout.resizeAgent}
@@ -116,7 +131,7 @@ export function Shell({ platform, runtime }: ShellProps) {
         )}
         <AgentColumn
           collapsed={layout.agentCollapsed}
-          width={layout.agentWidth}
+          width={fitted.agentWidth}
           onToggleCollapsed={layout.toggleAgent}
           mac={mac}
         />

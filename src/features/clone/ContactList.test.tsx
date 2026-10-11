@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CloneStatus } from '@aiwc/protocol'
 import { onCommand } from '@/app/commands'
@@ -7,6 +8,25 @@ import { __setBridgeForTests } from '@/platform/bridge'
 import { createMockBridge } from '@/platform/mockBridge'
 import { __resetShellStoreForTests } from '@/shell/shellStore'
 import { ContactList } from './ContactList'
+
+// jsdom has no layout, so the real virtualiser mounts no rows: render every row, as the other list tests do.
+vi.mock('virtua', () => ({
+  VList: ({
+    data,
+    children,
+    role,
+    ...rest
+  }: {
+    data: readonly unknown[]
+    children: (item: unknown) => ReactNode
+    role?: string
+    'aria-label'?: string
+  }) => (
+    <div role={role} aria-label={rest['aria-label']}>
+      {data.map((item) => children(item))}
+    </div>
+  ),
+}))
 
 class ResizeObserverStub {
   observe() {}

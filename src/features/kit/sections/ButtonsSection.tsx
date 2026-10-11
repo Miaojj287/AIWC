@@ -18,7 +18,7 @@ const VARIANTS: Array<{
     forced: { hover: 'bg-(--fill-13) border-(--line-25)', active: 'bg-(--line-16)' },
   },
   { variant: 'danger', label: '删除', icon: Trash, forced: { hover: 'brightness-[1.08]', active: 'brightness-[0.9]' } },
-  { variant: 'link', label: '查看全部', forced: { hover: 'bg-accent/8', active: 'bg-accent/14' } },
+  { variant: 'link', label: '查看全部', forced: { hover: 'bg-accent-12', active: 'bg-accent-15' } },
 ]
 
 export function ButtonsSection() {

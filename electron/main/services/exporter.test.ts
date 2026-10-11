@@ -7,7 +7,6 @@ import {
   parseSessionExportRequest,
   safeFileName,
   sessionToMarkdown,
-  threadToMarkdown,
 } from './exporter'
 
 const msg = (i: number, extra: Partial<WxMessage> = {}): WxMessage => ({
@@ -44,27 +43,7 @@ describe('exporter', () => {
     expect(JSON.parse(buildSessionExport('json', { id: 's1', title: 'x', kind: 'dm' }, [msg(0)]).content).count).toBe(1)
   })
 
-  it('renders agent threads and sanitises file names', () => {
-    const md = threadToMarkdown('会话', [
-      {
-        type: 'user_message',
-        id: 'i1' as never,
-        turnId: 't' as never,
-        createdAt: 0,
-        content: [{ type: 'text', text: '帮我' }],
-        mentions: [],
-      },
-      {
-        type: 'assistant_message',
-        id: 'i2' as never,
-        turnId: 't' as never,
-        stepId: 's' as never,
-        createdAt: 0,
-        text: '好的',
-      },
-    ])
-    expect(md).toContain('## 用户')
-    expect(md).toContain('好的')
+  it('sanitises file names', () => {
     expect(safeFileName('a/b:c*?"<>|')).toBe('a_b_c______')
     expect(safeFileName('周报 2026-09')).toBe('周报 2026-09')
     expect(safeFileName('   ')).toBe('export')

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ApprovalId, CallId, Event, HistoryItem, ItemId, StepId, ThreadId, TurnId } from '@aiwc/protocol'
 import { createThreadView } from './model'
-import { findUserInput, itemsFromHistory, reduceEvents, viewFromHistory } from './reducer'
+import { findUserInput, itemsFromHistory, viewFromHistory } from './historyItems'
+import { reduceEvents } from './reducer'
 
 const threadId = 'thr_test' as ThreadId
 const turnId = 'trn_1' as TurnId
@@ -48,10 +49,9 @@ describe('reduceEvents — text streaming', () => {
       { type: 'text.delta', ...base, itemId: 'itm_a' as ItemId, delta: '好的，' },
       { type: 'text.delta', ...base, itemId: 'itm_a' as ItemId, delta: '我先读取' },
     ]
-    let state = reduceEvents(createThreadView(threadId, { suggestions: ['a'] }), events, { now })
+    let state = reduceEvents(createThreadView(threadId), events, { now })
     expect(state.isStreaming).toBe(true)
     expect(state.currentTurnId).toBe(turnId)
-    expect(state.suggestions).toBeUndefined()
     expect(state.items).toHaveLength(2)
     const assistant = state.items[1]
     expect(assistant?.kind).toBe('assistant')
@@ -471,5 +471,56 @@ describe('itemsFromHistory', () => {
     expect(findUserInput(view.items, turnId)?.id).toBe('u1')
     expect(findUserInput(view.items)?.id).toBe('u1')
     expect(findUserInput(view.items, 'trn_none' as TurnId)).toBeUndefined()
+  })
+})
+
+describe('answer revisions after a Stop-hook check', () => {
+  it('marks the rewriting step live, and the recorded stop_hook fragment on replay', () => {
+    const live = reduceEvents(
+      createThreadView(threadId),
+      [
+        { type: 'turn.started', ...base, at: 1 },
+        { type: 'text.start', ...base, itemId: 'itm_a' as ItemId },
+        { type: 'text.end', ...base, itemId: 'itm_a' as ItemId, text: '初稿' },
+        { type: 'step.started', ...base, stepId: 'stp_2' as StepId, index: 1, revision: 'stop_hook' },
+        { type: 'step.started', ...base, stepId: 'stp_3' as StepId, index: 2 },
+      ],
+      { now },
+    )
+    expect(live.items.map((i) => i.kind)).toEqual(['assistant', 'revision'])
+
+    const replay = itemsFromHistory([
+      { type: 'assistant_message', id: 'a1' as ItemId, turnId, stepId, createdAt: 2, text: '初稿', modelId: 'm1' },
+      {
+        type: 'context_fragment',
+        id: 'f1' as ItemId,
+        turnId,
+        createdAt: 3,
+        kind: 'stop_hook',
+        marker: '<stop_hook>',
+        text: '引号里的「x」不在…',
+        tokenEstimate: 10,
+      },
+      {
+        type: 'context_fragment',
+        id: 'f2' as ItemId,
+        turnId,
+        createdAt: 3,
+        kind: 'memory',
+        marker: '<memory>',
+        text: '…',
+        tokenEstimate: 1,
+      },
+      {
+        type: 'assistant_message',
+        id: 'a2' as ItemId,
+        turnId,
+        stepId,
+        createdAt: 4,
+        text: '改好的答复',
+        modelId: 'm1',
+      },
+    ])
+    expect(replay.map((i) => i.kind)).toEqual(['assistant', 'revision', 'assistant'])
   })
 })

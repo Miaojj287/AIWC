@@ -20,6 +20,10 @@ export const account = {
     doneNotRunning: '扫描完成 · 发现 {n} 个账号 · 微信未运行',
     failed: '扫描失败',
   },
+  /** The account list under the switcher could not be read (substrate:listAccounts). */
+  listFailed: '读取账号列表失败：{detail}',
+  /** 办公平台 › 最近推送 could not be read (office:pushes). */
+  pushesFailed: '读取最近推送失败',
   pickDirFailed: '选择目录失败',
   dbRoot: {
     title: '数据库根目录',
@@ -30,7 +34,6 @@ export const account = {
   },
   cacheDir: {
     title: '缓存目录',
-    description: '留空使用默认目录',
     help: '存放解密后的数据库副本、图片与索引，建议选择空间充足的磁盘。',
     placeholder: '默认目录',
     pick: '选择目录',
@@ -43,8 +46,7 @@ export const account = {
   },
   verify: {
     title: '账号验证',
-    description: '确认 wxid 与目录匹配',
-    help: '验证通过后才会保存为当前账号配置。',
+    help: '确认 wxid 与目录匹配；验证通过后才会保存为当前账号配置。',
     wxidLabel: '待验证的 wxid',
     selectWxid: '选择 wxid',
     scanDir: '扫描目录',
@@ -79,12 +81,6 @@ export const account = {
     failed: '切换账号失败',
   },
   keyLabel: { dbKey: '数据库密钥', imageXor: '图片 XOR 密钥', imageAes: '图片 AES 密钥' },
-  steps: {
-    dbKey: '读取数据库密钥',
-    imageXor: '提取图片 XOR 密钥',
-    imageAes: '提取图片 AES 密钥',
-    verify: '验证账号并写入本地配置',
-  },
   secret: {
     invalid: '密钥无效',
     saved: '{label}已保存',
@@ -103,18 +99,6 @@ export const account = {
   },
   acquire: {
     selectFirst: '请先选择账号与数据库根目录',
-    done: '密钥已获取并写入本地配置',
-    imageDone: '图片密钥已获取',
-    running: '正在自动获取密钥…',
-    imageRunning: '正在获取图片密钥…',
-    scanning: '正在扫描微信进程内存…',
-    failed: '未能自动获取密钥',
-    imageFailed: '图片密钥获取失败',
-    stepDetail: '{label}：{detail}',
-    detailSeparator: '；',
-    verifyFailed: '密钥已获取，但账号验证未通过，请检查目录是否属于该 wxid',
     manual: '手动输入',
-    memoryScan: '内存扫描重试',
-    keepLoggedIn: '保持微信登录；若提示重新登录，请退出后重新登录',
   },
 }

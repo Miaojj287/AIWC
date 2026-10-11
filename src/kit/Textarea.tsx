@@ -80,10 +80,10 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         aria-invalid={invalid || undefined}
         className={cn(
           'block w-full resize-y rounded-control border border-line-8 bg-content px-2.5 py-2 text-caption leading-4.5 text-fg',
-          'caret-accent outline-none transition-colors duration-(--dur-fast) placeholder:text-fg-3',
-          'hover:border-(--line-16) focus:border-accent/80 focus:hover:border-accent/80',
-          'aria-invalid:border-danger/80 aria-invalid:hover:border-danger/80',
-          'disabled:cursor-not-allowed disabled:opacity-45',
+          'kit-field caret-fg outline-none transition-colors placeholder:text-fg-3',
+          'enabled:hover:border-(--line-16) focus:border-(--line-25) focus:hover:border-(--line-25)',
+          'aria-invalid:border-danger aria-invalid:hover:border-danger aria-invalid:focus:border-danger',
+          'disabled:cursor-not-allowed disabled:opacity-40',
           autosize && 'resize-none',
           mono && 'font-mono',
           className,

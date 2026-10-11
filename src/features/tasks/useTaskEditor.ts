@@ -54,6 +54,9 @@ export function useTaskEditor(tab: TabDescriptor): TaskEditor {
   const isNew = tab.objectId === NEW_TASK_ID
   const id = isNew ? undefined : tab.objectId
   const templateId = typeof tab.state?.templateId === 'string' ? tab.state.templateId : undefined
+  // 设置 › 技能 › 设为定时任务: a name and a `/skill …` prompt to start from.
+  const prefillName = typeof tab.state?.name === 'string' ? tab.state.name : undefined
+  const prefillPrompt = typeof tab.state?.prompt === 'string' ? tab.state.prompt : undefined
 
   // Existing task: the store keeps it live (toggles from the list, run status); the first read fills the store.
   const { loaded, loading: listLoading, error: listError } = useTasks()
@@ -63,9 +66,17 @@ export function useTaskEditor(tab: TabDescriptor): TaskEditor {
   const template = templateId ? templates.data?.find((tpl) => tpl.id === templateId) : undefined
 
   const saved = useMemo<TaskDraft | undefined>(() => {
-    if (isNew) return templateId && !templates.data ? undefined : emptyDraft(template)
+    if (isNew) {
+      if (templateId && !templates.data) return undefined
+      const draft = emptyDraft(template)
+      return {
+        ...draft,
+        ...(prefillName ? { name: prefillName } : {}),
+        ...(prefillPrompt ? { prompt: prefillPrompt } : {}),
+      }
+    }
     return task ? draftFromTask(task) : undefined
-  }, [isNew, templateId, templates.data, template, task])
+  }, [isNew, templateId, templates.data, template, task, prefillName, prefillPrompt])
 
   const [draft, setDraft] = useState<TaskDraft | undefined>(undefined)
   const base = useRef<TaskDraft | undefined>(undefined)
@@ -79,7 +90,9 @@ export function useTaskEditor(tab: TabDescriptor): TaskEditor {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved])
 
-  const dirty = Boolean(draft && saved && !sameDraft(draft, saved)) || Boolean(draft && isNew && !saved)
+  // A new task pre-filled from 设置 › 技能 is already something to create: it counts as unsaved from the start.
+  const prefilled = isNew && Boolean(prefillName || prefillPrompt)
+  const dirty = Boolean(draft && saved && !sameDraft(draft, saved)) || Boolean(draft && isNew && (!saved || prefilled))
   const errors = useMemo(() => (draft ? validateDraft(draft, t) : {}), [draft, t])
   const valid = Object.keys(errors).length === 0
   const [saving, setSaving] = useState(false)

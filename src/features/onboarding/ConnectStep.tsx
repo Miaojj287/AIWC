@@ -1,10 +1,14 @@
 /**
- * 连接微信 + 解锁数据 (Figma 135:415, merged page): two sections with the account and keys cards, the
- * accent local-only notice (CLAUDE.md §6), and the 上一步 / 下一步 footer with the gate tooltip.
+ * 连接微信 + 解锁数据 (Figma 135:415, merged page): two sections with the account and keys cards and the
+ * 上一步 / 下一步 footer whose disabled 下一步 explains the gate.
+ * On a later launch (`returning`) the same page opens prefilled under a 欢迎回来 header with the account's avatar and
+ * nickname, and the footer is a single 进入.
  */
-import { ArrowLeft, ArrowRight, Info } from 'lucide-react'
+import { ArrowLeft, ArrowRight } from 'lucide-react'
+import type { Ref } from 'react'
 import { useT } from '@/i18n'
-import { Button, ICON_STROKE, Tooltip } from '@/kit'
+import { Avatar, Button } from '@/kit'
+import { toMediaUrl } from '@/platform/mediaUrl'
 import { AccountCard } from './AccountCard'
 import { KeysCard } from './KeysCard'
 import { PermissionDialog } from './dialogs'
@@ -15,9 +19,36 @@ export interface ConnectStepProps {
   onBack(): void
   onNext(): void
   stepsBar: React.ReactNode
+  /** The page heading; the wizard moves focus here when this step opens. */
+  headingRef?: Ref<HTMLHeadingElement>
+  /** A later launch: identity header, no 上一步, 进入 instead of 下一步. */
+  returning?: boolean
 }
 
-export function ConnectStep({ onBack, onNext, stepsBar }: ConnectStepProps) {
+/** 欢迎回来 + the saved account, with its real avatar and nickname once the database is open. */
+function ReturningHeader({ headingRef }: { headingRef?: Ref<HTMLHeadingElement> }) {
+  const t = useT()
+  const wxid = useWizardStore((s) => s.wxid)
+  const account = useWizardStore((s) => s.accounts.find((a) => a.wxid === s.wxid))
+  const name = account?.nickname
+  return (
+    <header className="flex items-center gap-4">
+      <Avatar id={wxid || 'aiwc'} name={name || wxid || 'AIWC'} src={toMediaUrl(account?.avatarPath)} size={56} />
+      <div className="flex min-w-0 flex-col gap-1">
+        <h1 ref={headingRef} tabIndex={-1} className="truncate text-wizard font-medium leading-8 text-fg">
+          {name ? t('onboarding.connect.welcomeBackName', { name }) : t('onboarding.connect.welcomeBack')}
+        </h1>
+        {wxid ? (
+          <span className="truncate font-mono text-caption text-fg-3" title={wxid}>
+            {wxid}
+          </span>
+        ) : null}
+      </div>
+    </header>
+  )
+}
+
+export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = false }: ConnectStepProps) {
   const t = useT()
   const dbRoot = useWizardStore((s) => s.dbRoot)
   const wxid = useWizardStore((s) => s.wxid)
@@ -33,39 +64,49 @@ export function ConnectStep({ onBack, onNext, stepsBar }: ConnectStepProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-6 px-8 pb-6 pt-8">
+        <div className="mx-auto flex w-full max-w-[880px] flex-col gap-6 px-8 pb-6 pt-8">
+          {returning ? <ReturningHeader headingRef={headingRef} /> : null}
           <section className="flex flex-col gap-3">
-            <header className="flex flex-col gap-1">
-              <h2 className="text-title font-medium leading-7 text-fg">{t('onboarding.connect.pathTitle')}</h2>
-              <p className="text-caption text-fg-3">{t('onboarding.connect.pathDescription')}</p>
-            </header>
+            {returning ? (
+              <h2 className="text-body font-medium text-fg-2">{t('onboarding.connect.pathTitle')}</h2>
+            ) : (
+              <h1 ref={headingRef} tabIndex={-1} className="text-title font-medium leading-7 text-fg">
+                {t('onboarding.connect.pathTitle')}
+              </h1>
+            )}
             <AccountCard />
           </section>
           <section className="flex flex-col gap-3">
-            <header className="flex flex-col gap-1">
-              <h2 className="text-title font-medium leading-7 text-fg">{t('onboarding.connect.keysTitle')}</h2>
-              <p className="text-caption text-fg-3">{t('onboarding.connect.keysDescription')}</p>
-            </header>
+            {/* Same tracking as the h1 above, so the two section titles still read as a pair. */}
+            <h2
+              className={
+                returning
+                  ? 'text-body font-medium text-fg-2'
+                  : 'text-title font-medium leading-7 tracking-(--tracking-heading) text-fg'
+              }
+            >
+              {t('onboarding.connect.keysTitle')}
+            </h2>
             <KeysCard />
           </section>
-          <div className="flex items-center gap-2 rounded-item border border-accent/25 bg-accent-12 px-3 py-2 text-caption text-accent">
-            <Info size={13} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" />
-            <span>{t('onboarding.connect.localNotice')}</span>
-          </div>
         </div>
       </div>
       <footer className="flex h-[64px] shrink-0 items-center gap-4 border-t border-line-6 px-8">
-        <Button variant="ghost" icon={ArrowLeft} onClick={onBack} disabled={testing}>
-          {t('onboarding.connect.back')}
-        </Button>
+        {returning ? null : (
+          <Button variant="ghost" icon={ArrowLeft} onClick={onBack} disabled={testing}>
+            {t('onboarding.connect.back')}
+          </Button>
+        )}
         <div className="flex flex-1 justify-center">{stepsBar}</div>
-        <Tooltip content={gate.reason ?? ''} disabled={gate.ok}>
-          <span className="inline-flex">
-            <Button trailingIcon={ArrowRight} disabled={!gate.ok} loading={testing} onClick={onNext}>
-              {testing ? t('onboarding.connect.testing') : t('common.next')}
-            </Button>
-          </span>
-        </Tooltip>
+        <Button
+          trailingIcon={ArrowRight}
+          disabled={!gate.ok}
+          disabledReason={gate.reason}
+          loading={testing}
+          onClick={onNext}
+        >
+          {testing ? t('onboarding.connect.testing') : returning ? t('onboarding.connect.enter') : t('common.next')}
+        </Button>
       </footer>
 
       <PermissionDialog

@@ -3,20 +3,64 @@
  * window's sidebar rows and header (CLAUDE.md §12: both surfaces expose the same actions). Item order
  * follows CLAUDE.md §4.2: regular actions → separator → context actions → separator → close → danger last.
  */
-import { Download, Layers, MessageSquare, Pencil, Pin, PinOff, RotateCcw, Trash } from 'lucide-react'
+import {
+  Archive,
+  ArchiveRestore,
+  Download,
+  Layers,
+  MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  RotateCcw,
+  Trash,
+  WandSparkles,
+} from 'lucide-react'
 import type { ThreadId, ThreadSummary } from '@aiwc/protocol'
 import type { Translator } from '@/i18n'
 import type { MenuSpec } from '@/kit'
 
-export type ThreadAction = 'rename' | 'export' | 'compact' | 'clear' | 'delete'
+type MenuEntry = MenuSpec[number]
+
+export type ThreadAction = 'rename' | 'export' | 'saveSkill' | 'compact' | 'clear' | 'delete' | 'archive' | 'unarchive'
 
 export interface ThreadMenuHandlers {
   onAction: (action: ThreadAction, id: ThreadId) => void
   onPin: (id: ThreadId, pinned: boolean) => void
 }
 
+/** 归档 / 取消归档 — a local draft has nothing to archive. */
+function archiveItem(
+  t: Translator,
+  thread: ThreadSummary | undefined,
+  saved: boolean,
+  onAction: ThreadMenuHandlers['onAction'],
+): MenuEntry {
+  const archived = Boolean(thread?.archived)
+  const id = thread?.threadId
+  return {
+    id: 'archive',
+    label: archived ? t('agent.stream.archive.unarchive') : t('agent.stream.archive.archive'),
+    icon: archived ? ArchiveRestore : Archive,
+    disabled: !id || !saved,
+    onSelect: () => id && onAction(archived ? 'unarchive' : 'archive', id),
+  }
+}
+
+/** 存为技能… — fills that thread's composer with a request to distil the workflow into a skill (not sent). */
+function saveSkillItem(t: Translator, enabled: boolean, onSelect: () => void): MenuEntry {
+  return {
+    id: 'saveSkill',
+    label: t('agent.thread.saveAsSkill'),
+    description: t('agent.thread.saveAsSkillDescription'),
+    icon: WandSparkles,
+    disabled: !enabled,
+    onSelect,
+  }
+}
+
 /**
- * `···` menu of the active thread: rename / pin → export / compact / clear → delete.
+ * `···` menu of the active thread: rename / pin / archive → export / compact / clear → delete.
  * `saved` = the thread has kernel history (a local draft can only be renamed or deleted).
  */
 export function activeThreadMenu(
@@ -37,8 +81,10 @@ export function activeThreadMenu(
       disabled: off || !saved,
       onSelect: () => id && handlers.onPin(id, !active?.pinned),
     },
+    archiveItem(t, active, saved, handlers.onAction),
     { type: 'separator' },
     { id: 'export', label: t('agent.thread.export'), icon: Download, disabled: off || !saved, onSelect: run('export') },
+    saveSkillItem(t, !off && saved, run('saveSkill')),
     {
       id: 'compact',
       label: t('agent.context.compact'),
@@ -98,6 +144,7 @@ export function threadRowMenu(t: Translator, o: ThreadRowMenuOptions): MenuSpec 
       disabled: !o.saved,
       onSelect: () => o.onPin(id, !thread.pinned),
     },
+    archiveItem(t, thread, o.saved, o.onAction),
     { type: 'separator' },
     {
       id: 'export',
@@ -106,6 +153,7 @@ export function threadRowMenu(t: Translator, o: ThreadRowMenuOptions): MenuSpec 
       disabled: !o.saved,
       onSelect: () => o.onAction('export', id),
     },
+    saveSkillItem(t, o.saved, () => o.onAction('saveSkill', id)),
   )
   if (o.context) {
     items.push(

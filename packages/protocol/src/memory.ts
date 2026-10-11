@@ -2,7 +2,6 @@
  * Memory & relationship contracts.
  *  - MemoryStore: four bounded Markdown files the user can read and edit (settings › 记忆).
  *  - RelationshipStore: per-contact persona/relationship profiles (AI 克隆 data).
- *  - DiaryPipeline: nightly synthesis over the substrate.
  */
 import type { Millis } from './ids'
 
@@ -20,7 +19,10 @@ export interface MemoryEntry {
   index: number
   text: string
   addedAt?: Millis
+  /** 'diary' only appears on entries written by the retired 日记 pipeline (read back, never written). */
   source?: 'user' | 'agent' | 'diary'
+  /** The Agent thread whose turn wrote (or proposed) this entry: 设置 › 记忆 links back to it. */
+  threadId?: string
 }
 
 export interface MemoryBudget {
@@ -43,8 +45,8 @@ export interface MemoryStore {
   addEntry(
     file: MemoryFile,
     text: string,
-    opts?: { source?: MemoryEntry['source'] },
-  ): Promise<{ ok: boolean; reason?: 'over_budget' | 'duplicate' | 'blocked' }>
+    opts?: { source?: MemoryEntry['source']; threadId?: string },
+  ): Promise<{ ok: boolean; reason?: 'over_budget' | 'over_count' | 'duplicate' | 'blocked' }>
   replaceEntry(file: MemoryFile, index: number, text: string): Promise<void>
   /**
    * Remove the entry at `index`. With `expectedText` the removal is refused (rejects) unless that entry
@@ -210,29 +212,4 @@ export interface RelationshipStore {
   /** How many transcript messages of `threadId` have already been reflected on. */
   getReflected?(contactId: string, threadId: string): Promise<number>
   setReflected?(contactId: string, threadId: string, count: number): Promise<void>
-}
-
-export interface DiaryEntry {
-  date: string /** YYYY-MM-DD */
-  markdown: string
-  /** 3–8 retrieval cues written for the agent, stored in a dedicated section. */
-  cues: string[]
-  sources: { sessions: string[]; messageCount: number; agentTurns: number }
-  generatedAt: Millis
-  degraded?: boolean
-}
-
-export interface DiaryStore {
-  list(): Promise<Array<Pick<DiaryEntry, 'date' | 'generatedAt' | 'degraded'>>>
-  get(date: string): Promise<DiaryEntry | undefined>
-  put(entry: DiaryEntry): Promise<void>
-}
-
-export interface DiaryPipeline {
-  /** Build (or rebuild) the entry for a day. Emits progress via the callback. */
-  run(
-    date: string,
-    opts?: { force?: boolean; onProgress?: (step: string, fraction: number) => void; signal?: AbortSignal },
-  ): Promise<DiaryEntry>
-  nextScheduledAt(): Millis | undefined
 }

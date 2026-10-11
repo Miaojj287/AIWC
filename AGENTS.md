@@ -60,7 +60,7 @@
 ### 2.3 模块大小与形态
 
 - 一个模块只做一件事。文件超过 **400 行**就按职责拆分；**600 行**（不含空行和注释）是 lint 硬上限。函数超过约 80 行，或需要"第一步 / 第二步"式注释分段时，拆成具名函数。
-- 已经偏大的文件只减不增，新逻辑放进新模块再接入：`electron/main/composition.ts`、`src/features/agent/agentStore.ts`、`packages/gateway/src/autoreply/autoReplyService.ts`、`src/features/settings/pages/AiPage.tsx`、`src/features/chat/ChatTab.tsx`、`packages/substrate/src/mirror/search.ts`。
+- 已经偏大的文件只减不增，新逻辑放进新模块再接入（500 行以上，2026-09-20 复核）：`electron/main/composition.ts`、`electron/main/services/taskScheduler.ts`、`src/features/agent/agentStore.ts`、`src/features/chat/ChatTab.tsx`、`src/platform/mock/agent.ts`、`packages/gateway/src/autoreply/autoReplyService.ts`、`packages/office/src/service.ts`、`packages/protocol/src/ipc.ts`、`packages/substrate/src/mirror/search.ts`、`packages/substrate/src/key/windowsMemoryScanner.ts`、`packages/substrate/src/tools/shared.ts`、`packages/kernel/src/runtime/thread.ts`。
 - 服务统一写成 `createX(deps: XDeps): X`：依赖用对象注入（测试可替换），返回接口类型；持有资源的服务提供 `stop()` / `dispose()`。
 
 ### 2.4 错误、异步与资源
@@ -92,10 +92,11 @@
 | 层 | 路径 | 可以依赖 |
 |---|---|---|
 | 契约 | `packages/protocol` | 无 |
-| 内核 / 数据基座 / 通道 / 记忆 / 多语言 | `packages/{kernel,substrate,gateway,memory,i18n}` | `@aiwc/protocol` |
+| 内核 / 数据基座 / 通道 / 记忆 / 多语言 / 命令行 | `packages/{kernel,substrate,gateway,memory,i18n,shell}` | `@aiwc/protocol` |
+| 办公平台连接器 | `packages/office` | `@aiwc/protocol`、`@aiwc/shell`（跑各家 CLI） |
 | 组合根 | `electron/` | 全部 |
 | 渲染层 | `src/` | `@aiwc/protocol`、`@aiwc/i18n` |
-| 开发工具 | `dev/` | 全部（生产代码不得依赖 `dev/`） |
+| 开发工具 | `dev/` | 除 `electron/` 与 `@aiwc/shell` 外的全部（生产代码不得依赖 `dev/`） |
 
 - 跨包只从入口导入（`@aiwc/<pkg>`），不得深引 `@aiwc/<pkg>/…`（lint 报错）。入口只导出真正被其他层使用的符号；`npm run knip` 报出的无人使用的导出直接删掉，不留"以后可能用"。
 - 新增一个包：同步 `tsconfig.base.json` 的 paths、`vite.config.ts` 与 `vitest.config.ts` 的 alias、`eslint.config.js` 的 boundaries 元素与规则、`knip.json`（若有新入口）、ARCHITECTURE §2 与上表。
@@ -132,12 +133,12 @@
 - 入站的微信文本是第三方数据：进入提示词时放进有上限的片段，并中和其中的标签字符（参考 `formatObservedLine`），不能当成指令。
 - 所有出站都写审计记录。
 
-### 3.5 `packages/memory`（记忆、克隆、日记）
+### 3.5 `packages/memory`（记忆、克隆、每日待办）
 
 - 四个 Markdown 记忆文件有字数上限；写入走 store（加锁 + 漂移检测），不绕过 store 直接写文件。
 - 会变成路径片段的 id（联系人 id、记忆文件名、日期）一律视为不可信：校验，并断言解析后的路径仍在 store 根目录内（参考 `folderNameFor`、`assertMemoryFile`）。
 - JSONL 追加写；读取时跳过并记录坏行，不因一行损坏丢掉整个文件。
-- 调用模型的流程（克隆、日记）必须可取消、有超时，失败时写降级结果和原因。
+- 调用模型的流程（克隆、每日待办扫描）必须可取消、有超时，失败时写降级结果和原因（扫描失败的群不推进游标）。
 - 由第三方聊天内容提炼出的事实，没有来源标注和用户确认，不得写进主人的记忆文件。
 
 ### 3.6 `electron/`（组合根与主进程）
@@ -152,7 +153,7 @@
 
 - 分层从低到高：`kit`（唯一组件库）→ `platform`（IPC、格式化、跨功能共享逻辑）→ `workspace`（Tab 容器）→ `shell`（四列壳）→ `features/*`（页面）→ `app`（注册与命令）。只依赖同层或更低层。
 - **feature 之间不互相 import**。需要协作时走 `workspace/tabRegistry`、`shell/objectListRegistry`、`app/commands`；多个 feature 共用的逻辑下沉到 `src/platform`（非 UI）或 `src/kit`（UI）。每个命令只有一个处理者。
-- 现存的违规等待迁移，**不得新增**：`src/app/commands.ts` 与 `shortcuts.ts` 是全局命令总线，被各层引用，按 platform 层对待；`src/shell/AgentColumn.tsx` 直接挂载 agent 与 pets；feature 互相引用的有 agent→settings、agent→pets、settings→pets、settings→office、office→agent、autoreply↔replydesk、diary→file→agent。
+- 现存的违规等待迁移，**不得新增**：`src/app/commands.ts` 与 `shortcuts.ts` 是全局命令总线，被各层引用，按 platform 层对待；`src/shell/AgentColumn.tsx` 直接挂载 agent 与 pets；feature 互相引用的有 agent→pets、settings→pets、settings→office、office→agent、autoreply↔replydesk、file→agent。
 - 数据只经 `@/platform`（`invoke`、`useInvoke`、`useBridgeEvent`）；组件里不直接碰 `window.aiwc`。同一个远端资源（例如 `substrate:status`）只由一个 store 订阅。
 - 组件只从 `@/kit` 入口导入；kit 缺能力就给 kit 加导出或参数（并补进 Kit 画廊），不深引 `@/kit/...` 内部文件（ESLint `no-restricted-imports` 强制，`src/kit` 自身除外），不在页面里自造按钮、菜单、弹窗（CLAUDE.md §3）。
 - 状态：zustand 按领域一个 store；组件用 selector 订阅所需字段；能算出来的不存。渲染函数和 `setState` 的更新函数保持纯净：不发 IPC、不写 ref、不改 store。
@@ -191,21 +192,28 @@
 |---|---|---|
 | `sleep` | kernel `runtime/util/deferred.ts`、gateway `core/emitter.ts`、memory `internal/fsx.ts`、`electron/main/wechat/relaunchCapture.ts` | `@aiwc/protocol` 的 `util/` |
 | `createEmitter` | kernel `runtime/emitter.ts`、gateway `core/emitter.ts` | `@aiwc/protocol` 的 `util/` |
-| `errorMessage` | substrate `shared/errors.ts`、gateway `core/emitter.ts`、`src/features/settings/hooks.ts`、`src/features/agent/agentStore.ts` | 包与主进程用 `@aiwc/protocol` 的 `util/`；渲染层用 `src/platform` |
+| `errorMessage` | substrate `shared/errors.ts` 与 `wcdb/sqlcipherBridge.ts`、gateway `core/emitter.ts`、`src/features/settings/hooks.ts`、`src/features/agent/agentStoreSupport.ts` | 包与主进程用 `@aiwc/protocol` 的 `util/`；渲染层用 `src/platform`。合并时一并搜改了名的同义实现（`errText`、`errMsg`、局部 `message`） |
 | `formatClock` | gateway `autoreply/template.ts`、memory `internal/time.ts`、`src/platform/format.ts` | `@aiwc/protocol` 的 `util/`（渲染层继续经 `src/platform/format.ts`） |
-| `startOfDay` | `src/platform/format.ts`、`src/features/chat/filters.ts`、`src/features/autoreply/recordModel.ts` | `src/platform/format.ts` |
+| `startOfDay` | `src/platform/format.ts`（未导出）、`src/features/chat/filters.ts`、`src/features/autoreply/recordModel.ts` | `src/platform/format.ts`，需先把它导出 |
 | `debounce` | `electron/main/windows/windowState.ts`、substrate `shared/async.ts` | `@aiwc/protocol` 的 `util/` |
-| 路径包含判断 `isWithinRoot(s)` | `electron/main/security/pathAllowList.ts`、gateway `core/mediaPolicy.ts` | 一处共享实现，两边导入 |
+| 路径包含判断 `isWithinRoot(s)` | `electron/main/security/pathAllowList.ts`、gateway `core/mediaPolicy.ts`、office `service.ts` 的 `insideDir`（更弱：不拒 NUL、不做 realpath） | 一处共享实现，三处导入 |
 | 自动回复规则校验 `validateRule` | `electron/main/services/autoReplyRules.ts`、`src/features/autoreply/ruleModel.ts` | `@aiwc/protocol`（主进程强制，渲染层做行内提示） |
 | 机器人上下文判定（依据不一致：有的看 `profile`，有的看 `channel` / `origin`） | substrate `tools/botScope.ts`、gateway `tools/gatewayTools.ts`、memory `tools/relationshipTools.ts` | `@aiwc/protocol` 里的一个函数 |
-| 群聊 id 判定（gateway 两处只认 `@chatroom`，漏掉 `@im.chatroom`） | substrate `normalize/kinds.ts`、gateway `core/originGuard.ts`、gateway `adapters/ilink/adapter.ts` | `@aiwc/protocol` |
+| 群聊 id 判定（gateway 两处只认 `@chatroom`，漏掉 `@im.chatroom`，且大小写敏感） | 已有 `@aiwc/protocol` 的 `isGroupChatId`（substrate `isGroupUsername` 与 Agent 发送预览已改用）；待迁移：gateway `core/originGuard.ts`、gateway `adapters/ilink/adapter.ts` | `@aiwc/protocol` 的 `isGroupChatId` |
 | 导出格式清单 | `@aiwc/protocol` 的 `ipc.ts`、`electron/main/services/exporter.ts`、`src/features/chat/ExportDialog.tsx` | protocol 里一个 `as const` 列表 |
-| 会话分页加载 | `src/shell/objectList/SessionList.tsx`、`src/features/autoreply/sessionPaging.ts` | `src/platform` 里的一个 hook |
-| `autoreply:status` 的读取与缓存（一份资源两个 store） | `src/features/replydesk/store.ts`、`src/features/autoreply/AutoReplyControl.tsx` | `src/platform/replyDesk.ts`，两个功能都从它读 |
-| 日记线索拆分 `splitCues`（两份语义不同） | memory `diary/diaryStore.ts`、`src/features/diary/diaryModel.ts` | 主进程返回已拆好的正文与线索，删掉渲染层副本 |
-| Markdown 渲染 | `src/features/agent/markdownParser.ts`、`src/features/file/markdown/` | `src/kit` 里的一个 Markdown 模块 |
-| 密钥获取与账号激活界面逻辑 | `src/features/settings/`、`src/features/onboarding/` | `src/platform/wechatKeys.ts` 与 `src/platform/account.ts` |
-| 媒体 URL 编码 | `electron/main/security/pathAllowList.ts`、`src/platform/mediaUrl.ts`、`src/shell/objectList/sessionListModel.ts` | 一个编码器，主进程与渲染层共用 |
+| 会话分页加载 | `src/shell/objectList/SessionList.tsx`、`src/platform/sessionPaging.ts`（自动回复、每日待办已在用） | `src/platform/sessionPaging.ts`，会话列表迁过来 |
+| `autoreply:status` 的读取与缓存（一份资源两个 store） | `src/features/replydesk/store.ts`、`src/features/autoreply/AutoReplyControl.tsx` | `src/platform/replyDesk.ts`（待建），两个功能都从它读 |
+| 密钥获取与账号激活界面逻辑（`KeyKind`、`validateKeyHex`、`DEFAULT_KEY_STEPS`、`summariseKeys` / `summarizeKeySteps`、`KEY_REFS`） | `src/features/onboarding/gating.ts` 与 `wizardStore.ts`、`src/features/settings/accountModel.ts` | `src/platform/wechatKeys.ts` 与 `src/platform/account.ts`（均待建） |
+| 媒体 URL 编码（三份结果**不等价**：`sessionListModel.ts` 只做 `encodeURI`，路径里的 `#` / `?` 与主进程解码器对不上） | `electron/main/security/pathAllowList.ts`、`src/platform/mediaUrl.ts`、`src/shell/objectList/sessionListModel.ts` | 一个编码器，主进程与渲染层共用 |
+
+| 截断助手 `TRUNCATION_MARKER` / `truncateText` | kernel `runtime/util/truncate.ts` 与 `tooling/schema.ts`（同包内两个同名常量）、shell `shellTool.ts`（中间省略，另两份是尾部截断） | 一份带模式参数的实现 |
+| `MM-DD HH:mm` 时间串与补零 `pad` | `electron/main/services/{exporter,autoReplyGenerate,hooks}.ts`、office `push/table.ts`、memory `internal/time.ts`、`src/platform/format.ts`、`src/features/agent/citations.ts` | `@aiwc/protocol` 的 `util/`（渲染层继续经 `src/platform/format.ts`） |
+| 手写 emitter（没用 `createEmitter`） | office `service.ts`、`electron/main/substrate/hostClient.ts` | `@aiwc/protocol` 的 `util/` |
+| CLI「最后一行有效输出」解析与 `str(v)` | office `platforms/{dingtalk,feishu,wecom}.ts`，与 `cli/output.ts` 的通用版重叠 | `cli/output.ts` 一份，平台层只给字段名 |
+| https 主机白名单判断 | office `platforms/common.ts` 的 `hostMatches`、`electron/main/services/petService.ts` 的 `trustedCatalogUrl` | 一处共享实现（两处都是安全判断） |
+| `isAbortError` | kernel `runtime/model/errors.ts`（完整）、gateway `adapters/ilink/{media,client}.ts`（只看 `name`，更弱） | kernel 那份，经 `@aiwc/protocol` 的 `util/` 共用 |
+
+表里指向的 `@aiwc/protocol` 的 `util/` 目前**还不存在**，合并第一条时一并新建；office 的 `fieldSpec` / `cellValue` 三份语义不同，属于下一句说的改名对象。
 
 同名但语义不同、不要合并的：kernel 与 memory 的 `truncateChars`（返回值不同）、`renderTranscript`（输入不同）。改动其中之一时顺手改名，避免误用。
 
@@ -220,7 +228,7 @@
 
 ## 6. 安全与隐私红线
 
-- 微信数据只在本机处理；只有用户配置的模型服务商会收到内容，并且界面要说明数据去向（CLAUDE.md §6）。线程选的是本地模型，就不得有任何内容发往在线模型。
+- 微信数据只在本机处理；只有用户配置的模型服务商会收到内容，并且用户能在问号说明或确认弹窗里查到数据去向（CLAUDE.md §6，不放常驻提示条）。线程选的是本地模型，就不得有任何内容发往在线模型。
 - 密钥只存 `secretStore`（系统 safeStorage 加密），配置文件里只存引用；日志、错误、事件、崩溃报告里不得出现明文。
 - 访问微信进程只由用户显式发起：内存与崩溃转储扫描保持只读；需要调试器权限的登录时截获（`wechat_xkey_helper`）必须在界面上说明前提与影响，不得自动触发。
 - 删除、覆盖、清空、撤回、对外发送必须二次确认；Agent 工具里这类动作的 `risk` 必须是 `destructive` 或 `send`。
@@ -237,11 +245,17 @@
 
 ```bash
 npm run dev                    # Electron + Vite
-npm run check                  # 提交前全套：格式 · 类型 · lint · 死代码 · 测试
-npx prettier --write <文件…>   # 只格式化自己改过的文件
-npm run lint:fix               # ESLint 自动修复
-npm run knip                   # 未使用的文件 / 导出 / 依赖
+npm run dev:web                # 只跑渲染层（没有微信数据时看界面用）
+npm run check                  # 提交前全套：格式 · 类型 · lint · 死代码 · 测试（CI 跑同一套）
+npm test                       # 全部测试（= vitest run）
 npx vitest run <路径>          # 只跑相关测试
+npm run typecheck              # tsconfig.json + tsconfig.node.json
+npm run lint / lint:fix        # ESLint / 自动修复
+npm run knip                   # 未使用的文件 / 导出 / 依赖
+npm run format:check           # Prettier 检查（Markdown 与 CSS 不在范围内）
+npx prettier --write <文件…>   # 只格式化自己改过的文件
+npm run build:mac / build:win  # 打包
+npm run smoke                  # 构建后启动一次，验证主进程通路
 ```
 
 ## 多语言硬规则（摘自 CLAUDE.md §11，完整版以那里为准）

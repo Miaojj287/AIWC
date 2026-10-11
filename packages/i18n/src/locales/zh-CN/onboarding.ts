@@ -5,43 +5,33 @@ export const onboarding = {
     exit: '退出设置向导',
     connected: '已连接，正在进入主界面',
     language: '界面语言',
+    /** Visually hidden live region: read out whenever the active step changes. */
+    stepStatus: '第 {n} 步，共 {total} 步：{label}',
   },
   steps: {
     welcome: '欢迎',
     connect: '连接微信',
     unlock: '解锁数据',
+    model: '接入模型',
     done: '完成',
   },
   welcome: {
     title: '欢迎使用 AIWC',
-    subtitle: '完全本地运行的微信数据管家',
-    capabilities: {
-      local: { title: '完全本地', body: '解密、索引、转写都在本机完成，不上传任何聊天数据' },
-      agent: { title: 'AI Agent', body: '用自然语言检索、总结、生成周报，可接入任意模型' },
-      automation: { title: '自动回复 · AI 克隆', body: '为指定会话设置自动回复，克隆联系人的说话风格' },
-    },
+    subtitle: '本地运行的微信数据工作台',
     /** Checkbox label; the agreement link button follows it. */
     agreeLabel: '我已阅读并同意',
     agreementLink: '《用户协议与隐私政策》',
-    notes: {
-      local: { title: '数据完全本地', body: '只在本机读取与解密' },
-      scope: { title: '你的授权范围', body: '仅限本人或已获授权的账号' },
-      disclaimer: { title: '免责', body: '因使用本软件造成的损失，开发者不承担责任' },
-    },
-    /** One note line: bold title, then the body. */
-    note: '{title} —— {body}',
     agreeFirst: '请先阅读并勾选同意用户协议',
-    start: '开始设置',
-    footnote: '预计 2 分钟 · 需要本机已登录微信客户端',
+    start: '开始',
   },
   connect: {
     pathTitle: '设置微信数据路径',
-    pathDescription: '确认数据目录与账号，只在本机读取',
     keysTitle: '检测微信并解锁数据',
-    keysDescription: '一次获取数据库与图片密钥',
-    localNotice: '只读访问微信数据，不做任何修改；密钥仅保存在本机，不会外发',
     back: '上一步',
     testing: '正在测试连接…',
+    welcomeBack: '欢迎回来',
+    welcomeBackName: '欢迎回来，{name}',
+    enter: '进入',
   },
   /** 下一步 gate: what is still missing, joined into one tooltip sentence by `reason` (n = 1–3 items a, b, c). */
   gate: {
@@ -53,8 +43,7 @@ export const onboarding = {
   },
   account: {
     pathLabel: '微信数据库路径',
-    pathHelp: '微信 → 设置 → 账号与储存 → 储存位置，可查看该目录',
-    pathHint: '可手动修改',
+    pathHelp: '可在 微信 › 设置 › 账号与储存 › 储存位置 查看该目录',
     pathAuto: '已自动获取',
     pathCached: '已从缓存加载',
     pathManual: '手动选择',
@@ -78,7 +67,6 @@ export const onboarding = {
     accountAria: '微信账号',
     accountHelp: '同一台电脑登录过的每个微信账号在数据目录下各有一个 wxid_ 开头的文件夹',
     noAccountsHint: '没有检测到微信号？',
-    accountsFound: '该目录下检测到 {n} 个账号',
     unnamedAccount: '微信用户（昵称暂不可用）',
     unnamedAvatar: '微信用户',
     verified: '已验证',
@@ -89,7 +77,6 @@ export const onboarding = {
     rescan: '重新扫描',
     verify: '验证账号',
     verifyMismatch: '该 wxid 与所选数据库目录不匹配，请重新选择或验证',
-    accountVerified: '账号目录已验证',
     verifyToContinue: '验证账号后才能继续',
     chooseOne: '检测到 {n} 个账号，请选择一个',
     notFoundRunning: '未找到数据目录，请点击「浏览」手动选择',
@@ -117,14 +104,6 @@ export const onboarding = {
       imageXor: { label: '图片 XOR 密钥', description: '用于还原微信图片资源' },
       imageAes: { label: '图片 AES 密钥', description: '用于解密图片资源索引' },
     },
-    /** Placeholder step labels until substrate:keyStep streams the real ones. */
-    steps: {
-      dbKey: '数据库解密密钥',
-      imageXor: '图片 XOR 密钥',
-      imageAes: '图片 AES 密钥',
-      verify: '验证账号与目录',
-    },
-    acquireFailed: '获取失败',
     storedNotViewable: '密钥已保存在系统安全存储中，暂无法在此显示',
     notInStore: '系统安全存储中没有这枚密钥',
     revealFailed: '读取失败：{detail}',
@@ -138,9 +117,6 @@ export const onboarding = {
     pasteHex: '粘贴 {n} 位十六进制密钥',
     clear: '清除',
     memoryScan: '内存扫描',
-    scanningMemory: '正在扫描微信进程内存…',
-    fetchingKeys: '正在获取微信数据密钥…',
-    stayLoggedIn: '保持微信登录；若提示重新登录，请退出后重新登录',
     invalidKey: '密钥无效',
   },
   agreement: {

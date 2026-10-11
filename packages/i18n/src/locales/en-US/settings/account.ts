@@ -21,6 +21,8 @@ export const account: Messages['settings']['account'] = {
     doneNotRunning: 'Scan complete · {n, plural, one {# account} other {# accounts}} found · WeChat not running',
     failed: 'Scan failed',
   },
+  listFailed: "Couldn't load accounts: {detail}",
+  pushesFailed: "Couldn't load recent pushes",
   pickDirFailed: 'Failed to choose folder',
   dbRoot: {
     title: 'Database root folder',
@@ -31,7 +33,6 @@ export const account: Messages['settings']['account'] = {
   },
   cacheDir: {
     title: 'Cache folder',
-    description: 'Leave empty to use the default folder',
     help: 'Stores decrypted database copies, images and indexes. Choose a disk with plenty of free space.',
     placeholder: 'Default folder',
     pick: 'Choose folder',
@@ -44,8 +45,7 @@ export const account: Messages['settings']['account'] = {
   },
   verify: {
     title: 'Account verification',
-    description: 'Check that the wxid matches the folder',
-    help: 'The account is saved as current only after verification passes.',
+    help: 'Checks that the wxid matches the folder; the account is saved as current only after it passes.',
     wxidLabel: 'wxid to verify',
     selectWxid: 'Select wxid',
     scanDir: 'Scan folder',
@@ -79,12 +79,6 @@ export const account: Messages['settings']['account'] = {
     failed: 'Failed to switch account',
   },
   keyLabel: { dbKey: 'Database key', imageXor: 'Image XOR key', imageAes: 'Image AES key' },
-  steps: {
-    dbKey: 'Read database key',
-    imageXor: 'Extract image XOR key',
-    imageAes: 'Extract image AES key',
-    verify: 'Verify account and save to local settings',
-  },
   secret: {
     invalid: 'Invalid key',
     saved: '{label} saved',
@@ -103,18 +97,6 @@ export const account: Messages['settings']['account'] = {
   },
   acquire: {
     selectFirst: 'Select an account and the database root folder first',
-    done: 'Keys obtained and saved to local settings',
-    imageDone: 'Image keys obtained',
-    running: 'Getting keys automatically…',
-    imageRunning: 'Getting image keys…',
-    scanning: 'Scanning WeChat process memory…',
-    failed: "Couldn't get keys automatically",
-    imageFailed: "Couldn't get image keys",
-    stepDetail: '{label}: {detail}',
-    detailSeparator: '; ',
-    verifyFailed: 'Keys obtained, but account verification failed. Check that the folder belongs to this wxid',
     manual: 'Enter manually',
-    memoryScan: 'Retry with memory scan',
-    keepLoggedIn: 'Keep WeChat logged in; if asked to log in again, log out and log back in',
   },
 }

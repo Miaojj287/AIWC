@@ -4,10 +4,28 @@
  */
 import { createCipheriv } from 'node:crypto'
 import { SQLCIPHER_PAGE_SIZE, SQLCIPHER_RESERVED_SIZE, SQLCIPHER_SALT_SIZE } from '../../key/sqlcipherPage'
-import { PAGE_BODY_END, PAGE_IV_SIZE, SQLITE_MAGIC } from '../sqlcipherCodec'
+import {
+  deriveSqlcipherHmacKey,
+  PAGE_BODY_END,
+  PAGE_HMAC_START,
+  PAGE_IV_SIZE,
+  pageHmac,
+  SQLITE_MAGIC,
+  type PageCipher,
+} from '../sqlcipherCodec'
 import { walChecksum } from '../sqliteWal'
 
 export const FIXTURE_SALT = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex')
+
+/** The `PageCipher` a database encrypted with `key` under `salt` resolves to. */
+export function fixtureCipher(key: Buffer, salt: Buffer = FIXTURE_SALT): PageCipher {
+  return {
+    key,
+    hmacKey: deriveSqlcipherHmacKey(key, salt),
+    form: 'direct',
+    saltHex: salt.toString('hex'),
+  }
+}
 
 /**
  * A recognizable plaintext page: page 1 carries the SQLite header fields the decoder checks, every
@@ -44,18 +62,38 @@ export function expectedPlainPage(plain: Buffer, pageNumber: number, encrypted: 
 }
 
 /** Encrypt one page the way SQLCipher 4 does: salt prefix on page 1, IV + HMAC in the reserved tail. */
-export function encryptPage(plain: Buffer, key: Buffer, pageNumber: number, iv: Buffer): Buffer {
+export function encryptPage(
+  plain: Buffer,
+  key: Buffer,
+  pageNumber: number,
+  iv: Buffer,
+  salt: Buffer = FIXTURE_SALT,
+): Buffer {
   const bodyStart = pageNumber === 1 ? SQLCIPHER_SALT_SIZE : 0
   const cipher = createCipheriv('aes-256-cbc', key, iv)
   cipher.setAutoPadding(false)
   const body = Buffer.concat([cipher.update(plain.subarray(bodyStart, PAGE_BODY_END)), cipher.final()])
   const page = Buffer.alloc(SQLCIPHER_PAGE_SIZE)
-  if (pageNumber === 1) FIXTURE_SALT.copy(page, 0)
+  if (pageNumber === 1) salt.copy(page, 0)
   body.copy(page, bodyStart)
   iv.copy(page, PAGE_BODY_END)
-  // HMAC stand-in: read-only access never verifies it, but it must round-trip into the copy.
-  page.fill(0xab, PAGE_BODY_END + PAGE_IV_SIZE)
+  // The real HMAC over ciphertext || IV || page number; the decoder rejects a page without it.
+  pageHmac(deriveSqlcipherHmacKey(key, salt), page, pageNumber).copy(page, PAGE_HMAC_START)
   return page
+}
+
+/** Flip one ciphertext byte, as a read that caught WeChat mid-write would. */
+export function tamperPage(page: Buffer, offset = 0): Buffer {
+  const copy = Buffer.from(page)
+  copy[offset] = (copy[offset] ?? 0) ^ 0xff
+  return copy
+}
+
+/** An old page body carrying the IV of a newer write — the case an IV-only freshness check misses. */
+export function splicePageIv(page: Buffer, iv: Buffer): Buffer {
+  const copy = Buffer.from(page)
+  iv.copy(copy, PAGE_BODY_END)
+  return copy
 }
 
 /** Deterministic per-page IV so tests can say "this page was rewritten". */

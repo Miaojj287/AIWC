@@ -237,7 +237,12 @@ export function registerCloneIpc(ctx: AppContext, _host: HostBridge, handle: Han
     if (!transcript.trim()) return { ok: false, corrections: 0 }
     let notes: Array<Omit<PersonaNote, 'at'>>
     try {
-      notes = await reflectConversation(await models.resolveAuxiliary(), { displayName: p.displayName, transcript })
+      // the thread's own model goes along so a local clone thread's chat never reaches the online default
+      const model = await models.forFeature('clone').resolveAuxiliary(thread.record.settings.model)
+      notes = await reflectConversation(model, {
+        displayName: p.displayName,
+        transcript,
+      })
     } catch (e) {
       ctx.logger.child('clone').warn('reflection failed', e)
       return { ok: false, corrections: 0 }

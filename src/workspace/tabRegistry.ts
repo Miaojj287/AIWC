@@ -4,7 +4,19 @@
  */
 import type { ComponentType } from 'react'
 
-export type TabKind = 'chat' | 'autoreply' | 'clone' | 'task' | 'settings' | 'file' | 'diary' | 'replydesk' | 'kit'
+export type TabKind =
+  | 'chat'
+  | 'autoreply'
+  | 'clone'
+  | 'task'
+  | 'todo'
+  | 'settings'
+  | 'file'
+  | 'replydesk'
+  | 'search'
+  | 'kit'
+  /** A sub-agent's read-only log (objectId = its child id). */
+  | 'agentRun'
 
 export interface TabDescriptor {
   /** stable identity: `${kind}:${objectId}` — the container de-duplicates on this */

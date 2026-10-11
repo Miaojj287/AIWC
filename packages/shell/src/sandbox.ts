@@ -41,7 +41,10 @@ const quote = (path: string): string => `"${path.replace(/\\/g, '\\\\').replace(
 /** Later rules win in seatbelt, so the read denials come after the blanket read allow. */
 export function seatbeltProfile(spec: SandboxSpec): string {
   const writable = [...new Set(spec.writableRoots.filter(Boolean))].map((p) => `(subpath ${quote(p)})`).join(' ')
-  const denyRead = (spec.readDeny ?? []).filter(Boolean).map((p) => `(literal ${quote(p)}) (subpath ${quote(p)})`).join(' ')
+  const denyRead = (spec.readDeny ?? [])
+    .filter(Boolean)
+    .map((p) => `(literal ${quote(p)}) (subpath ${quote(p)})`)
+    .join(' ')
   const lines = [
     '(version 1)',
     '(deny default)',

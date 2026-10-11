@@ -3,7 +3,7 @@
  * (date range, senders) on the right. Figma 119:471 — h34, panel ground, 1px line below.
  */
 import { CircleAlert, RefreshCw } from 'lucide-react'
-import { Button, ProgressBar, Spinner, Tooltip, cn } from '@/kit'
+import { Button, ICON_STROKE, ProgressBar, Spinner, Tooltip, cn } from '@/kit'
 import { useT } from '@/i18n'
 import { DateRangeFilter } from './DateRangeFilter'
 import { SenderFilter, type SenderOption } from './SenderFilter'
@@ -31,12 +31,14 @@ export function SyncBar({
 }: SyncBarProps) {
   const t = useT()
   return (
-    <div className="flex h-[34px] shrink-0 items-center gap-2 border-b border-line-6 bg-panel px-4">
+    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line-6 bg-panel px-4">
       <div className="flex min-w-0 flex-1 items-center gap-2 text-caption">
         {view.phase === 'syncing' ? (
           <>
             <Spinner size={12} />
-            <span className="min-w-0 truncate text-fg-2">{view.text}</span>
+            <span className="min-w-0 truncate text-fg-2" title={view.text}>
+              {view.text}
+            </span>
             {view.progress !== undefined ? (
               <ProgressBar value={view.progress} className="w-[120px]" label={t('chat.sync.progress')} />
             ) : null}
@@ -48,8 +50,8 @@ export function SyncBar({
           </>
         ) : view.phase === 'error' ? (
           <>
-            <CircleAlert size={12} strokeWidth={1.75} aria-hidden className="shrink-0 text-danger" />
-            <span className="min-w-0 truncate text-danger" title={view.detail}>
+            <CircleAlert size={12} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-danger" />
+            <span className="min-w-0 truncate text-danger-ink" title={view.detail ?? view.text}>
               {view.text}
               {view.detail ? ` · ${view.detail}` : ''}
             </span>
@@ -62,9 +64,7 @@ export function SyncBar({
             <button
               type="button"
               onClick={onSync}
-              className={cn(
-                'flex min-w-0 items-center gap-2 rounded-control px-1 py-0.5 text-left outline-none hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-accent/70',
-              )}
+              className="flex min-w-0 items-center gap-2 rounded-control px-1 py-0.5 text-left hover:bg-hover-5 active:bg-hover-7"
             >
               <span
                 aria-hidden

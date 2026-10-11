@@ -8,6 +8,7 @@ import { findArray, findString, parseJsonOutput } from '../cli/output'
 import { OfficeError, envelopeFailed } from '../cli/runner'
 import { chunk, formatDate, type Cell, type NormalizedColumn, type NormalizedTable } from '../push/table'
 import {
+  argWords,
   commandWords,
   hasDryRun,
   hasHelpFlag,
@@ -169,7 +170,7 @@ export const dingtalk: PlatformModule = {
     if (first === 'upgrade' || first === 'event' || first === 'connect' || (first === 'skill' && second === 'setup'))
       return REFUSE_DAEMON
     if (first === 'api' && (second ?? '').toUpperCase() === 'DELETE') return REFUSE_DELETE
-    if (words.some((w) => isDeleteVerb(w))) return REFUSE_DELETE
+    if (argWords(args).some(isDeleteVerb)) return REFUSE_DELETE
     return undefined
   },
 }

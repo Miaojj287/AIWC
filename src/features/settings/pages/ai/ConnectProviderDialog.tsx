@@ -129,6 +129,8 @@ export function ConnectProviderDialog({
   }, [open, kind, baseUrl, apiKey])
 
   const local = isLocalKind(kind)
+  // 智能配置 for hand-typed model ids: the vendor dialect comes from the preset or the endpoint host.
+  const profileTarget = { kind, vendor: vendor?.id ?? provider?.vendor, baseUrl: baseUrl.trim() || undefined }
   const editingOnlyKey = mode === 'key'
   const urlRequired = kind === 'openai-compatible' || kind === 'ollama'
   const url = baseUrl.trim()
@@ -155,7 +157,7 @@ export function ConnectProviderDialog({
     models: mergeModels(
       provider?.models ?? [],
       selected.map((mid) => ({
-        ...(candidates.find((c) => c.modelId === mid) ?? modelEntryFromId(mid)),
+        ...(candidates.find((c) => c.modelId === mid) ?? modelEntryFromId(mid, undefined, profileTarget)),
         enabled: false,
       })),
     ),
@@ -167,7 +169,8 @@ export function ConnectProviderDialog({
   const addTyped = () => {
     const mid = typed.trim()
     if (!mid) return
-    if (!candidates.some((c) => c.modelId === mid)) setCandidates((c) => [...c, modelEntryFromId(mid)])
+    if (!candidates.some((c) => c.modelId === mid))
+      setCandidates((c) => [...c, modelEntryFromId(mid, undefined, profileTarget)])
     setSelected((s) => (s.includes(mid) ? s : [...s, mid]))
     setTyped('')
   }
@@ -376,9 +379,7 @@ export function ConnectProviderDialog({
                       </a>
                     ) : null
                   }
-                  hint={
-                    hasStoredKey ? t('settings.ai.connectDialog.keyStoredHint') : t('settings.ai.shared.keyLocalOnly')
-                  }
+                  hint={hasStoredKey ? t('settings.ai.connectDialog.keyStoredHint') : undefined}
                 >
                   <Input
                     id={`${id}-key`}
@@ -477,7 +478,13 @@ export function ConnectProviderDialog({
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" variant="primary" loading={saving} disabled={!valid || fetching} title={firstError}>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={saving}
+                disabled={!valid || fetching}
+                disabledReason={firstError}
+              >
                 {editingOnlyKey ? t('common.save') : t('settings.ai.connectDialog.confirm')}
               </Button>
             </div>

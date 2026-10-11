@@ -23,7 +23,9 @@ const ctx = (signal = new AbortController().signal): ToolContext => ({
 
 describe('runProcess', () => {
   it('captures output, strips ANSI and never uses a shell', async () => {
-    const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("\\u001b[32mhi $HOME\\u001b[0m")'], { env: process.env })
+    const result = await runProcess(process.execPath, ['-e', 'process.stdout.write("\\u001b[32mhi $HOME\\u001b[0m")'], {
+      env: process.env,
+    })
     expect(result.code).toBe(0)
     expect(result.stdout).toBe('hi $HOME')
     expect(stripAnsi('[1;31mred[0m')).toBe('red')
@@ -54,8 +56,22 @@ describe('runProcess', () => {
     expect(() => process.kill(grandchild, 0)).toThrow()
   })
 
+  it.skipIf(process.platform === 'win32')(
+    'the timeout kills the group even after the leader has exited',
+    async () => {
+      // A shim that forks and exits: the fork keeps the pipes open, so `close` only arrives once the whole
+      // group is killed. Signalling just the (already dead) leader would hang here forever.
+      const result = await runProcess('/bin/sh', ['-c', 'sleep 30 & exit 0'], { env: process.env, timeoutMs: 400 })
+      expect(result.timedOut).toBe(true)
+    },
+    15_000,
+  )
+
   it('times out and reports spawn failures instead of throwing', async () => {
-    expect((await runProcess(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { env: process.env, timeoutMs: 300 })).timedOut).toBe(true)
+    expect(
+      (await runProcess(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { env: process.env, timeoutMs: 300 }))
+        .timedOut,
+    ).toBe(true)
     expect((await runProcess('/definitely/not/here', [], { env: process.env })).spawnError).toBeTruthy()
   })
 })
@@ -66,7 +82,13 @@ describe('createCliEnv', () => {
     const bin = join(dir, 'fake-cli')
     await writeFile(bin, '#!/bin/sh\necho ok\n')
     await chmod(bin, 0o755)
-    const env = await createCliEnv({ env: { PATH: '/usr/bin:/bin' }, home: dir, preferredDirs: [dir], probeLoginShell: false, platform: 'darwin' })
+    const env = await createCliEnv({
+      env: { PATH: '/usr/bin:/bin' },
+      home: dir,
+      preferredDirs: [dir],
+      probeLoginShell: false,
+      platform: 'darwin',
+    })
     expect(await env.which('fake-cli')).toBe(bin)
     expect(await env.which('not-a-cli-anywhere')).toBeUndefined()
     expect(env.path.split(':')[0]).toBe(dir)
@@ -86,7 +108,10 @@ describe('seatbelt profile', () => {
 
 describe('shell tool', () => {
   const workspace = async () => mkdtemp(join(tmpdir(), 'aiwc-shell-ws-'))
-  const run = async (tool: ReturnType<typeof createShellTool>, input: Parameters<ReturnType<typeof createShellTool>['execute']>[0]) => {
+  const run = async (
+    tool: ReturnType<typeof createShellTool>,
+    input: Parameters<ReturnType<typeof createShellTool>['execute']>[0],
+  ) => {
     const r = await tool.execute(input, ctx())
     return { ...r, out: r.content as unknown as ShellOutput }
   }
@@ -94,43 +119,79 @@ describe('shell tool', () => {
   it('classifies per call and exposes the allow key', () => {
     const tool = createShellTool({ workspaceDir: '/tmp', sandbox: createSandbox('linux') })
     expect(tool.classify?.({ command: 'ls' })).toMatchObject({ risk: 'read', allowKey: 'shell:ls' })
-    expect(tool.classify?.({ command: 'git commit -m x' })).toMatchObject({ risk: 'write', allowKey: 'shell:git commit' })
-    expect(tool.classify?.({ command: 'ls', escalate: true, reason: 'install' })).toMatchObject({ risk: 'write', canAllowAlways: false })
+    expect(tool.classify?.({ command: 'git commit -m x' })).toMatchObject({
+      risk: 'write',
+      allowKey: 'shell:git commit',
+    })
+    expect(tool.classify?.({ command: 'ls', escalate: true, reason: 'install' })).toMatchObject({
+      risk: 'write',
+      canAllowAlways: false,
+    })
     expect(tool.summarize?.({ command: 'echo   hi' })).toBe('$ echo hi')
   })
 
-  it.skipIf(process.platform === 'win32')('runs in the workspace with the login-shell PATH and returns structured output', async () => {
-    const ws = await workspace()
-    const tool = createShellTool({ workspaceDir: ws, sandbox: createSandbox('linux'), cliEnv: { path: '/usr/bin:/bin', env: { PATH: '/usr/bin:/bin' }, which: async () => undefined } })
-    const ok = await run(tool, { command: 'echo hello > out.txt && cat out.txt && pwd' })
-    expect(ok.isError).toBe(false)
-    expect(ok.out).toMatchObject({ ok: true, exitCode: 0, sandboxed: false })
-    expect(ok.out.stdout).toContain('hello')
-    expect(ok.out.stdout).toContain(ws.replace('/private', ''))
-    const bad = await run(tool, { command: 'exit 3' })
-    expect(bad.isError).toBe(true)
-    expect(bad.out.exitCode).toBe(3)
-    const missing = await run(tool, { command: 'no-such-command-xyz' })
-    expect(missing.out.hint).toMatch(/命令不存在/)
-    const slow = await run(tool, { command: 'sleep 5', timeoutMs: 1000 })
-    expect(slow.out.timedOut).toBe(true)
-    expect(slow.out.hint).toMatch(/终止/)
-    const nowhere = await run(tool, { command: 'ls', cwd: '/definitely/missing' })
-    expect(nowhere.isError).toBe(true)
+  it('re-reads a protected-path list given as a function on every call', () => {
+    let protectedDirs = ['/data/cache/media/wcdb-plain']
+    const tool = createShellTool({
+      workspaceDir: '/tmp',
+      sandbox: createSandbox('linux'),
+      protectedPaths: () => protectedDirs,
+    })
+    expect(tool.classify?.({ command: 'cat /custom/wcdb-plain/a.db' })?.risk).toBe('read')
+    // The account moved its cache dir while the app runs: the next command already sees the new location.
+    protectedDirs = ['/custom/wcdb-plain']
+    expect(tool.classify?.({ command: 'cat /custom/wcdb-plain/a.db' })?.risk).toBe('destructive')
   })
 
-  it.skipIf(process.platform !== 'darwin')('the seatbelt sandbox blocks writes outside the workspace and explains how to escalate', async () => {
-    const ws = await workspace()
-    const outside = await mkdtemp(join(tmpdir(), 'aiwc-shell-outside-'))
-    const tool = createShellTool({ workspaceDir: ws, cliEnv: { path: '/usr/bin:/bin', env: { PATH: '/usr/bin:/bin' }, which: async () => undefined } })
-    // The workspace itself is writable; tmpdir is too (it is where `outside` lives), so pick a home path instead.
-    const inside = await run(tool, { command: 'echo a > a.txt && cat a.txt' })
-    expect(inside.out).toMatchObject({ ok: true, sandboxed: true })
-    const home = await run(tool, { command: 'touch "$HOME/.aiwc-sandbox-probe" && echo wrote' })
-    expect(home.out.ok).toBe(false)
-    expect(home.out.hint).toMatch(/escalate/)
-    const escalated = await run(tool, { command: `touch "${outside}/probe" && echo wrote`, escalate: true, reason: 'test' })
-    expect(escalated.out).toMatchObject({ ok: true, sandboxed: false })
-    expect(shellCommandFor('darwin', 'x').command).toBe('/bin/zsh')
-  })
+  it.skipIf(process.platform === 'win32')(
+    'runs in the workspace with the login-shell PATH and returns structured output',
+    async () => {
+      const ws = await workspace()
+      const tool = createShellTool({
+        workspaceDir: ws,
+        sandbox: createSandbox('linux'),
+        cliEnv: { path: '/usr/bin:/bin', env: { PATH: '/usr/bin:/bin' }, which: async () => undefined },
+      })
+      const ok = await run(tool, { command: 'echo hello > out.txt && cat out.txt && pwd' })
+      expect(ok.isError).toBe(false)
+      expect(ok.out).toMatchObject({ ok: true, exitCode: 0, sandboxed: false })
+      expect(ok.out.stdout).toContain('hello')
+      expect(ok.out.stdout).toContain(ws.replace('/private', ''))
+      const bad = await run(tool, { command: 'exit 3' })
+      expect(bad.isError).toBe(true)
+      expect(bad.out.exitCode).toBe(3)
+      const missing = await run(tool, { command: 'no-such-command-xyz' })
+      expect(missing.out.hint).toMatch(/命令不存在/)
+      const slow = await run(tool, { command: 'sleep 5', timeoutMs: 1000 })
+      expect(slow.out.timedOut).toBe(true)
+      expect(slow.out.hint).toMatch(/终止/)
+      const nowhere = await run(tool, { command: 'ls', cwd: '/definitely/missing' })
+      expect(nowhere.isError).toBe(true)
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    'the seatbelt sandbox blocks writes outside the workspace and explains how to escalate',
+    async () => {
+      const ws = await workspace()
+      const outside = await mkdtemp(join(tmpdir(), 'aiwc-shell-outside-'))
+      const tool = createShellTool({
+        workspaceDir: ws,
+        cliEnv: { path: '/usr/bin:/bin', env: { PATH: '/usr/bin:/bin' }, which: async () => undefined },
+      })
+      // The workspace itself is writable; tmpdir is too (it is where `outside` lives), so pick a home path instead.
+      const inside = await run(tool, { command: 'echo a > a.txt && cat a.txt' })
+      expect(inside.out).toMatchObject({ ok: true, sandboxed: true })
+      const home = await run(tool, { command: 'touch "$HOME/.aiwc-sandbox-probe" && echo wrote' })
+      expect(home.out.ok).toBe(false)
+      expect(home.out.hint).toMatch(/escalate/)
+      const escalated = await run(tool, {
+        command: `touch "${outside}/probe" && echo wrote`,
+        escalate: true,
+        reason: 'test',
+      })
+      expect(escalated.out).toMatchObject({ ok: true, sandboxed: false })
+      expect(shellCommandFor('darwin', 'x').command).toBe('/bin/zsh')
+    },
+  )
 })

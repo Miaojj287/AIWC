@@ -38,6 +38,14 @@ function FragileBody() {
 }
 registerObjectList({ fn: 'autoreply', title: '自动回复', component: FragileBody })
 
+const submitted: string[] = []
+registerObjectList({
+  fn: 'tasks',
+  title: '定时任务',
+  component: () => <div data-testid="tasks-body" />,
+  onSearchSubmit: (query) => submitted.push(query),
+})
+
 function fakeBridge(): AiwcBridge {
   return {
     runtime: 'web',
@@ -126,6 +134,19 @@ describe('ObjectList frame', () => {
     act(() => useShellStore.getState().setRail('chat'))
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByTestId('body')).toBeTruthy()
+  })
+
+  it('hands Enter in the search box to the list, never mid-composition or with a blank box', () => {
+    submitted.length = 0
+    act(() => useShellStore.getState().setRail('tasks'))
+    render(<ObjectList mac />)
+    const box = screen.getByRole('searchbox')
+    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.change(box, { target: { value: '  周会 ' } })
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true })
+    expect(submitted).toEqual([])
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(submitted).toEqual(['周会'])
   })
 
   it('falls back to a frame-level empty state when no list is registered for the function', () => {

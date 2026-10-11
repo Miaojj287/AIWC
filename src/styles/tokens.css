@@ -30,6 +30,9 @@
   --accent-15: rgb(78 130 239 / 0.15);
   --accent-30: rgb(78 130 239 / 0.30);
   --bubble-self: #132f63;   /* my outgoing bubble, white text */
+  /* Selection = accent-15 ground + accent-30 inner ring. An inactive window greys it, like native tables do. */
+  --selected-bg: var(--accent-15);
+  --selected-ring: var(--accent-30);
 
   /* semantic */
   --ok: #52c98b;
@@ -37,6 +40,21 @@
   --danger: #f0564a;
   --info: #5b8def;
   --clone: #60a5fa;
+  /* "Ink" = the hue pulled 22% toward the text colour: 11–13px text in that hue then reaches AA (≥ 4.5:1) on the
+     panel in both themes. Fills, lines, icons and badge grounds keep the pure hue. */
+  --accent-ink: color-mix(in srgb, var(--accent) 78%, var(--fg));
+  --ok-ink: color-mix(in srgb, var(--ok) 78%, var(--fg));
+  --warn-ink: color-mix(in srgb, var(--warn) 78%, var(--fg));
+  --danger-ink: color-mix(in srgb, var(--danger) 78%, var(--fg));
+  --info-ink: color-mix(in srgb, var(--info) 78%, var(--fg));
+  --clone-ink: color-mix(in srgb, var(--clone) 78%, var(--fg));
+  /* Danger button hover / press, derived like accent-hover / accent-active. */
+  --danger-hover: color-mix(in srgb, var(--danger) 88%, var(--fg));
+  --danger-active: color-mix(in srgb, var(--danger) 88%, var(--bg-content));
+  /* WeChat transfer cards keep WeChat's own colours in both themes: content, not chrome (CLAUDE.md §2.2). */
+  --wx-transfer: #f59b38;
+  --wx-transfer-settled: #ad7028;
+  --wx-transfer-settled-ink: #d5aa73;
 
   /* text */
   --fg: #ffffff;
@@ -54,9 +72,10 @@
   --lh-bubble: 22px;
   --fs-title: 20px;
   --fs-wizard: 22px;
+  --fs-wordmark: 56px;
 
-  --font-sans: "PingFang SC", "Noto Sans SC", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-latin: "Inter", "PingFang SC", system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-latin: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 
   /* radii */
@@ -82,9 +101,19 @@
 
   --dur-fast: 120ms;
   --dur-base: 180ms;
+  --dur-surface: 220ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --tracking-heading: -0.02em;
+  --lh-body: 1.5;
 }
 
 :root[data-theme='light'] {
+  --ok: #18794e;
+  --warn: #946200;
+  --danger: #c9362b;
+  --info: #245cb8;
+  --clone: #245cb8;
   /* Light theme is a settings option (DESIGN-SPEC §2 常规 → 主题). Tokens flip here only. */
   color-scheme: light;
   --bg-shell: #e9e9e9;
@@ -108,13 +137,20 @@
   --accent-30: rgb(78 130 239 / 0.30);
   --fg: #000000;
   --fg-2: #434343;
-  --fg-3: #6f6f6f;
+  --fg-3: #616161;
   --fg-on-accent: #ffffff;
+  --shadow-toast: 0 8px 24px rgb(0 0 0 / 0.12);
   --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.06);
 }
 
+/* Another window has the user's attention: selection drops to a neutral ground (platform/windowFocus.ts). */
+:root[data-window-focus='false'] {
+  --selected-bg: var(--hover-7);
+  --selected-ring: var(--line-16);
+}
+
 /* Miniature theme illustrations share the live palette tokens. */
-.appearance-preview { display: flex; height: 112px; background: var(--bg-content); }
+.appearance-preview { display: flex; aspect-ratio: 16 / 9; min-height: 72px; max-height: 112px; background: var(--bg-content); }
 .appearance-preview-sidebar { width: 28%; padding: 18px 8px; background: var(--bg-shell); border-right: 1px solid var(--line-10); }
 .appearance-preview i { display: block; height: 5px; margin-bottom: 8px; border-radius: var(--r-chip); background: var(--fg-3); opacity: .45; }
 .appearance-preview-sidebar i:first-child { background: var(--accent); opacity: 1; }

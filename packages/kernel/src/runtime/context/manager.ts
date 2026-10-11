@@ -13,6 +13,7 @@ import {
   type ToolResultItem,
 } from '@aiwc/protocol'
 import { truncateChars } from '../util/truncate'
+import { estimateAttachmentTokens } from '../model/attachmentParts'
 
 export const DEFAULT_TOOL_OUTPUT_CHARS = 16_000
 
@@ -121,7 +122,10 @@ export function renderToolOutput(output: ToolOutputContent): string {
 export function estimateItemTokens(item: HistoryItem): number {
   switch (item.type) {
     case 'user_message':
-      return item.content.reduce((n, p) => n + (p.type === 'text' ? estimateTokens(p.text) : 1200), 0)
+      return item.content.reduce(
+        (n, p) => n + (p.type === 'text' ? estimateTokens(p.text) : estimateAttachmentTokens(p)),
+        0,
+      )
     case 'assistant_message':
       return estimateTokens(item.text) + (item.reasoning ? estimateTokens(item.reasoning) : 0)
     case 'tool_call':
@@ -134,6 +138,9 @@ export function estimateItemTokens(item: HistoryItem): number {
       return item.tokenEstimate
     case 'turn_aborted':
       return 12
+    // display only (a host check's report): never part of the prompt
+    case 'turn_check':
+      return 0
   }
 }
 
@@ -260,6 +267,20 @@ export class ContextManager {
       }
     }
     if (cut < 0) cut = 0
+    const removed = this.items.splice(cut)
+    for (const r of removed) this.tokenCache.delete(r.id)
+    this._version++
+    this.onInvalidate?.()
+    return removed
+  }
+
+  /**
+   * Remove the given user message and everything recorded after it (editing / regenerating that turn). Returns the
+   * removed items, or undefined when the item is not a user message of the live history (nothing changes then).
+   */
+  dropFrom(itemId: ItemId): HistoryItem[] | undefined {
+    const cut = this.items.findIndex((it) => it.id === itemId)
+    if (cut < 0 || this.items[cut]!.type !== 'user_message') return undefined
     const removed = this.items.splice(cut)
     for (const r of removed) this.tokenCache.delete(r.id)
     this._version++

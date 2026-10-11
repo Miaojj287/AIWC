@@ -50,7 +50,8 @@ function Bar({ orientation }: { orientation: 'vertical' | 'horizontal' }) {
     <Radix.Scrollbar
       orientation={orientation}
       className={cn(
-        'flex touch-none select-none p-0.5 transition-opacity duration-(--dur-fast)',
+        // kit.css: fades in via @starting-style and out through the Radix `hidden` state, like an OS overlay bar.
+        'kit-scrollbar flex touch-none select-none p-0.5',
         orientation === 'vertical' ? 'h-full w-2' : 'h-2 flex-col',
       )}
     >

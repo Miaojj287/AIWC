@@ -34,24 +34,46 @@ export function toModelError(err: unknown): ModelError {
   let status: number | undefined
   let body = ''
   let retryable = false
+  let retryAfterMs: number | undefined
   if (APICallError.isInstance(err)) {
     status = err.statusCode
     body = err.responseBody ?? ''
     retryable = err.isRetryable
+    retryAfterMs = retryAfterFromHeaders(err.responseHeaders)
   } else if (err && typeof err === 'object' && typeof (err as { statusCode?: unknown }).statusCode === 'number') {
     status = (err as { statusCode: number }).statusCode
   }
   const haystack = `${message}\n${body}`
 
   if (status === 401 || status === 403) return { code: 'auth', message, status, retryable: false }
-  if (status === 429) return { code: 'rate_limit', message, status, retryable: true }
+  const after = retryAfterMs !== undefined ? { retryAfterMs } : {}
+  if (status === 429) return { code: 'rate_limit', message, status, retryable: true, ...after }
   if (CONTEXT_RE.test(haystack)) return { code: 'context_overflow', message, status, retryable: false }
   if (TOOLS_RE.test(haystack)) return { code: 'unsupported_tools', message, status, retryable: false }
   if (status === 400 || status === 404 || status === 422)
     return { code: 'invalid_request', message, status, retryable: false }
-  if (status !== undefined && status >= 500) return { code: 'network', message, status, retryable: true }
+  if (status !== undefined && status >= 500) return { code: 'network', message, status, retryable: true, ...after }
   if (status === undefined && NETWORK_RE.test(haystack)) return { code: 'network', message, retryable: true }
   return { code: 'unknown', message, status, retryable }
+}
+
+/**
+ * Server-requested wait (ms) from `retry-after-ms` or `retry-after` (seconds, or an HTTP date), when present and sane.
+ * Header names arrive lower-cased from the AI SDK.
+ */
+export function retryAfterFromHeaders(
+  headers: Record<string, string | undefined> | undefined,
+  now: number = Date.now(),
+): number | undefined {
+  if (!headers) return undefined
+  const ms = Number(headers['retry-after-ms'])
+  if (Number.isFinite(ms) && ms >= 0) return Math.round(ms)
+  const raw = headers['retry-after']?.trim()
+  if (!raw) return undefined
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000)
+  const at = Date.parse(raw)
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined
 }
 
 export function isModelError(v: unknown): v is ModelError {
@@ -78,6 +100,12 @@ export function errorActions(error: { code: string }): ErrorAction[] {
       return [
         { label: '压缩上下文', action: 'compact' },
         { label: '重试', action: 'retry' },
+      ]
+    case 'content_filter':
+    case 'empty_response':
+      return [
+        { label: '重试', action: 'retry' },
+        { label: '更换模型', action: 'open_settings_ai' },
       ]
     default:
       return [

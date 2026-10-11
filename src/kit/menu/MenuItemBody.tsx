@@ -36,8 +36,17 @@ export function MenuItemContent({
         />
       ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-px">
-        <span className="truncate leading-4">{label}</span>
-        {description ? <span className="truncate text-micro leading-4 text-fg-3">{description}</span> : null}
+        <span className="truncate leading-4" title={typeof label === 'string' ? label : undefined}>
+          {label}
+        </span>
+        {description ? (
+          <span
+            className="truncate text-micro leading-4 text-fg-3"
+            title={typeof description === 'string' ? description : undefined}
+          >
+            {description}
+          </span>
+        ) : null}
       </span>
       {badge ? <span className="ml-auto shrink-0 pl-2">{badge}</span> : null}
       {shortcut ? <span className={menuShortcutClass}>{shortcut}</span> : null}

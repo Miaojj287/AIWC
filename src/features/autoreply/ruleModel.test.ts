@@ -90,8 +90,56 @@ describe('helpers', () => {
     expect(copy).toMatchObject({ id: '', sessionId: 's2', prompt: 'p', todayCount: undefined, pausedReason: undefined })
   })
 
-  it('labels the two sources', () => {
+  it('labels the three sources', () => {
     expect(sourceLabel('fixed')).toBe('固定文案')
     expect(sourceLabel('ai')).toBe('AI 生成')
+    expect(sourceLabel('jev')).toBe('Jev（beta）')
+  })
+})
+
+describe('Jev rules (回复方式 = Jev（beta）)', () => {
+  const jev = (over: Partial<AutoReplyRule> = {}): AutoReplyRule => ({
+    ...newRule('s1'),
+    id: 'r1',
+    source: 'jev',
+    jev: { candidates: [], allowSilence: true, minConfidence: 0.6 },
+    ...over,
+  })
+
+  it('validates the candidates only for the jev source', () => {
+    expect(validateRule(jev()).candidates).toMatch(/至少/)
+    expect(
+      validateRule(jev({ jev: { candidates: ['好的', ''], allowSilence: true, minConfidence: 0.6 } })).candidates,
+    ).toBeUndefined()
+    expect(
+      validateRule(
+        jev({ jev: { candidates: Array.from({ length: 9 }, () => 'x'), allowSilence: true, minConfidence: 0.6 } }),
+      ).candidates,
+    ).toMatch(/最多 8/)
+    expect(
+      validateRule(jev({ jev: { candidates: ['x'.repeat(501)], allowSilence: true, minConfidence: 0.6 } })).candidates,
+    ).toMatch(/500/)
+    expect(validateRule(jev({ historyCount: 0 })).historyCount).toBeDefined()
+    expect(validateRule(rule()).candidates).toBeUndefined()
+  })
+
+  it('compares the Jev fields when checking for unsaved edits', () => {
+    const base = jev({ jev: { candidates: ['a'], allowSilence: true, minConfidence: 0.6 } })
+    expect(rulesEqual(base, { ...base, updatedAt: 9 })).toBe(true)
+    expect(rulesEqual(base, { ...base, jev: { candidates: ['b'], allowSilence: true, minConfidence: 0.6 } })).toBe(
+      false,
+    )
+    expect(rulesEqual(base, { ...base, jev: { candidates: ['a'], allowSilence: false, minConfidence: 0.6 } })).toBe(
+      false,
+    )
+    expect(rulesEqual(base, { ...base, jev: { candidates: ['a'], allowSilence: true, minConfidence: 0.8 } })).toBe(
+      false,
+    )
+  })
+
+  it('describes a Jev rule on the list row', () => {
+    expect(ruleStatusLine(jev({ jev: { candidates: ['a', 'b'], allowSilence: true, minConfidence: 0.6 } })).text).toBe(
+      '确认后发送 · Jev（beta） · 2 个候选 · 参考 30 条',
+    )
   })
 })

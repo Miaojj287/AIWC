@@ -20,10 +20,12 @@ npm run check      # 格式 · 类型 · lint · 死代码 · 测试，CI 跑同
 
 - 行为改动带测试；修 bug 先写一个能复现问题的失败测试。
 - 新增或修改界面文案时，同时补齐 `zh-CN` 与 `en-US`（CLAUDE.md §11）。
-- 只格式化自己改过的文件：`npx prettier --write <文件…>`。
+- 只格式化自己改过的文件：`npx prettier --write <文件…>`。Markdown 与 CSS 不走 Prettier（见 `.prettierignore`），手工保持整洁。
+- 跑测试：全部用 `npm test`，只跑相关的用 `npx vitest run <路径>`。
 
 ## 提交与 PR
 
+- 分支用 `feat/…`、`fix/…`、`refactor/…`、`docs/…`、`chore/…`（AGENTS.md §7）。
 - 提交信息用 [Conventional Commits](https://www.conventionalcommits.org/)：`<type>(<scope>): <祈使句>`，例如 `fix(substrate): keep numeric text messages intact`。
 - 一个 PR 只做一件事；格式化、重命名这类机械改动单独提交。
 - PR 描述写清楚：做了什么、为什么、怎么验证（命令、截图），以及是否影响 ARCHITECTURE、DESIGN-SPEC 或 CLAUDE.md。

@@ -39,7 +39,6 @@ export const office = {
     manual: '也可以在终端里安装后再试：',
     copyCommand: '复制命令',
     commandWhat: '安装命令',
-    privacy: '授权凭证由官方 CLI 保存在本机，AIWC 不读取、不上传。',
   },
   push: {
     created: '已推送 {rows} 行到{platform}{noun}',
@@ -82,11 +81,10 @@ export const office = {
     noLogout: '企业微信 CLI 不支持退出登录；如需解绑，请在企业微信里删除该智能机器人',
     loadFailed: '读取办公平台状态失败',
     actionFailed: '操作失败',
-    dataNote: '只有你让 Agent 推送时，表格内容才会发送到对应平台；聊天记录本身不会上传。',
     cliVersion: 'CLI {version}',
     dialogTitle: '连接{platform}',
     recent: '最近推送',
-    recentEmpty: '还没有推送过表格。在 Agent 里说「把……整理成表格推到飞书」试试。',
+    recentEmpty: '还没有推送过表格',
     rows: '{rows} 行',
   },
   errors: {

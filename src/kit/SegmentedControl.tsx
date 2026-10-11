@@ -13,7 +13,7 @@ export interface SegmentedControlProps<T extends string = string> {
   options: ReadonlyArray<SegmentedOption<T>>
   value: T
   onValueChange: (value: T) => void
-  /** default = 26px segments; sm = 22px (list headers). */
+  /** default = 26px segments (30 with the track, the button height); sm = 22px (list headers, the wizard bar). */
   size?: 'default' | 'sm'
   /** Stretch segments to fill the container. */
   fullWidth?: boolean
@@ -106,17 +106,19 @@ export function SegmentedControl<T extends string = string>({
             onKeyDown={(e) => handleKeyDown(e, i)}
             className={cn(
               'inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm px-2.5 text-caption leading-none',
-              'transition-colors duration-(--dur-fast) outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
-              'disabled:pointer-events-none disabled:opacity-40',
-              size === 'sm' ? 'h-[22px] px-2' : 'h-[22px]',
+              'transition-colors outline-none',
+              'disabled:cursor-not-allowed disabled:opacity-40',
+              size === 'sm' ? 'h-[22px] px-2' : 'h-[26px]',
               fullWidth && 'flex-1',
               checked
                 ? 'border border-line-8 bg-raised font-medium text-fg'
-                : 'border border-transparent text-fg-3 hover:bg-line-6 hover:text-fg',
+                : 'border border-transparent text-fg-3 enabled:hover:bg-hover-7 enabled:hover:text-fg enabled:active:bg-(--fill-13)',
             )}
           >
             {opt.icon ? <opt.icon size={iconSize} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0" /> : null}
-            <span className="min-w-0 truncate">{opt.label}</span>
+            <span className="min-w-0 truncate" title={opt.label}>
+              {opt.label}
+            </span>
           </button>
         )
       })}

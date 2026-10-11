@@ -29,6 +29,9 @@ export function register(): void {
     get title() {
       return t('clone.list.title')
     },
+    get searchPlaceholder() {
+      return t('clone.list.search')
+    },
     component: ContactList,
     segments: CLONE_SEGMENTS.map((s) => ({
       id: s.id,

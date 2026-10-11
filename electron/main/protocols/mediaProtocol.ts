@@ -1,7 +1,8 @@
 /**
  * `aiwc-media://` — serves decrypted media / cached files to the renderer WITHOUT enabling
  * file:// access. Only paths under the allow-list (cache/media, the data root, and directories the
- * user picked this session) are served; symlinks are resolved before the check.
+ * user picked this session) are served, plus — read-only, through `readOnly` — chat videos in WeChat's own
+ * video folder (security/wechatVideoAccess.ts); symlinks are resolved before the check.
  */
 import { realpath, stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
@@ -24,12 +25,19 @@ export function registerMediaScheme(): void {
 const deny = (status: number, text: string) =>
   new Response(text, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } })
 
-export function registerMediaProtocol(deps: { allowList: AllowList; logger: Logger }): void {
+export function registerMediaProtocol(deps: {
+  protocol?: Pick<Electron.Protocol, 'handle'>
+  allowList: AllowList
+  logger: Logger
+  /** Extra paths this protocol may read (never `file:*`): WeChat's chat video folder. */
+  readOnly?: (filePath: string) => boolean
+}): void {
   const log = deps.logger.child('media')
-  protocol.handle(MEDIA_SCHEME, async (request) => {
+  const allowed = (path: string): boolean => deps.allowList.isAllowed(path) || deps.readOnly?.(path) === true
+  ;(deps.protocol ?? protocol).handle(MEDIA_SCHEME, async (request) => {
     const requested = parseMediaUrl(request.url)
     if (!requested) return deny(400, 'Bad Request')
-    if (!deps.allowList.isAllowed(requested)) {
+    if (!allowed(requested)) {
       log.warn('blocked media path (allow-list)', { path: requested })
       return deny(403, 'Forbidden')
     }
@@ -39,7 +47,7 @@ export function registerMediaProtocol(deps: { allowList: AllowList; logger: Logg
     } catch {
       return deny(404, 'Not Found')
     }
-    if (!deps.allowList.isAllowed(real)) {
+    if (!allowed(real)) {
       log.warn('blocked media path (symlink escaped allow-list)', { path: requested, real })
       return deny(403, 'Forbidden')
     }

@@ -1,0 +1,56 @@
+/* Outlines survive Windows forced colours, unlike box-shadow focus rings.
+ * Until the first key press (<html data-pristine>, inputModality.ts) nothing is outlined: a page that just opened and
+ * moved focus into itself (a wizard heading, a dialog's default button) must not greet the user with an accent ring. */
+:root:not([data-pristine]) :where(button, a, select, [tabindex], [role='button']):not(input):not(textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  --tw-ring-shadow: 0 0 transparent;
+}
+:root[data-pristine] :focus-visible { outline: none; }
+/* Headings and regions only take focus so screen readers announce a new step; they are never a control. */
+:where(h1, h2, h3, h4, h5, h6, section, main, article, p)[tabindex='-1']:focus { outline: none; }
+[role='tab']:focus-visible, [role='separator']:focus-visible { outline-offset: -2px; }
+/* Text fields: a pointer focus only strengthens the neutral border (no stray accent glow on click or autofocus);
+ * Tab navigation still gets the accent edge so the focused field is findable (inputModality.ts). */
+:root[data-focus-nav='keyboard'] .kit-field:is(:focus, :focus-within):not([data-invalid], [aria-invalid='true']) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* Rows, options and menu items live inside clipped scrollers: their ring draws inside the box. */
+:where(.kit-row, [role='option'], [role='listbox'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio']):focus-visible {
+  outline-offset: -2px;
+}
+
+/* System preferences override even a saved custom palette. */
+@media (prefers-contrast: more) {
+  :root {
+    --fg-2: var(--fg) !important;
+    --fg-3: var(--fg) !important;
+    --line-6: var(--fg) !important;
+    --line-10: var(--fg) !important;
+    --line-16: var(--fg) !important;
+    /* Selection is no longer a tint the eye has to find: a solid accent ring on a stronger ground. */
+    --selected-ring: var(--accent) !important;
+    --selected-bg: color-mix(in srgb, var(--accent) 35%, transparent) !important;
+  }
+}
+
+@media (forced-colors: active) {
+  input:focus-visible, textarea:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  :root {
+    --bg-shell: Canvas !important;
+    --bg-panel: Canvas !important;
+    --bg-content: Canvas !important;
+    --bg-raised: Canvas !important;
+    --bg-overlay: Canvas !important;
+    --fg: CanvasText !important;
+    --fg-2: CanvasText !important;
+    --fg-3: CanvasText !important;
+    --accent: Highlight !important;
+    --fg-on-accent: HighlightText !important;
+  }
+  :where(button, input, textarea, select, [role='combobox'], [role='switch']) { border: 1px solid ButtonText; }
+  [role='tab'][aria-selected='true'], [data-selected='true'], [data-active='true'], [aria-checked='true'], [aria-current='true'] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .kit-progress-fill, .kit-indeterminate { background: Highlight; forced-color-adjust: none; }
+  [role='switch'] > * { background: ButtonText; forced-color-adjust: none; }
+}

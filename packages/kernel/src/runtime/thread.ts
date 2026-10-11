@@ -12,6 +12,7 @@ import {
   newItemId,
   newTurnId,
   type HistoryItem,
+  type ItemId,
   type Op,
   type ThreadId,
   type ThreadOrigin,
@@ -40,6 +41,8 @@ export interface ThreadDeps {
   depth?: number
   /** Per-thread step cap override (child runs use 12). */
   maxSteps?: number
+  /** 总是允许 with scope 'global': the host persists the key into KernelConfig.allowAlways. */
+  onGlobalGrant?: (key: string) => void
 }
 
 export interface ThreadInit {
@@ -123,7 +126,8 @@ export class Thread {
     return this.deps.services.clock ?? Date.now
   }
 
-  private serialize<T>(op: () => Promise<T>): Promise<T> {
+  /** Runs `op` after every op queued before it (turn starts, rollback, compaction, notes) and before later ones. */
+  serialize<T>(op: () => Promise<T>): Promise<T> {
     const run = this.opQueue.then(op)
     this.opQueue = run.then(
       () => undefined,
@@ -245,16 +249,18 @@ export class Thread {
     this.assertOpen()
     switch (op.type) {
       case 'thread.create':
-        throw new Error('thread.create is handled by the kernel')
+      case 'question.answer':
+        throw new Error(`${op.type} is handled by the kernel`)
       case 'turn.start':
-        await this.startTurn(op.input, op.mode ?? 'start')
+        await this.startTurn(op.input, op.mode ?? 'start', op.clientInputId)
         return
       case 'turn.interrupt':
         this.active?.interrupt('interrupted')
         return
       case 'approval.resolve': {
         // The router persists "总是允许" through onAllowAlways (it knows the tool name); here only the event.
-        const ok = this.deps.services.approvals.resolve(op.approvalId, op.decision, this.id)
+        const extra = { reason: op.reason, scope: op.scope }
+        const ok = this.deps.services.approvals.resolve(op.approvalId, op.decision, this.id, extra)
         if (ok)
           this.deps.emit({
             type: 'approval.resolved',
@@ -268,10 +274,10 @@ export class Thread {
         this.updateSettings(op.patch)
         return
       case 'thread.compact':
-        await this.compact()
+        await this.compact(op.instructions)
         return
       case 'thread.rollback':
-        await this.rollback(op.turns)
+        await this.rollback(op.turns, op.fromItemId)
         return
       case 'thread.clear':
         await this.clear()
@@ -294,16 +300,20 @@ export class Thread {
   }
 
   /** Starts (or steers) a turn. Resolves once the turn is running, not when it ends. */
-  startTurn(input: UserInput, mode: 'start' | 'steer'): Promise<TurnHandle> {
-    return this.serialize(() => this.startTurnLocked(input, mode))
+  startTurn(input: UserInput, mode: 'start' | 'steer', clientInputId?: string): Promise<TurnHandle> {
+    return this.serialize(() => this.startTurnLocked(input, mode, clientInputId))
   }
 
-  private async startTurnLocked(input: UserInput, mode: 'start' | 'steer'): Promise<TurnHandle> {
+  private async startTurnLocked(
+    input: UserInput,
+    mode: 'start' | 'steer',
+    clientInputId: string | undefined,
+  ): Promise<TurnHandle> {
     this.assertOpen()
     const previous = this.active
     if (previous) {
       // A steer is accepted only while the step loop can still consume it; a late steer becomes its own turn.
-      if (mode === 'steer' && previous.steer(input)) return previous
+      if (mode === 'steer' && previous.steer(input, clientInputId)) return previous
       if (mode !== 'steer') previous.interrupt('replaced')
       await previous.promise
       if (this.active === previous) this.active = undefined
@@ -341,10 +351,16 @@ export class Thread {
         worldState: this.worldState,
         lock: this.lock,
         clock: this.clock,
-        onAllowAlways: (toolName) => this.allowAlways(toolName),
+        // global grants only ever apply to desktop threads (effectiveAllowAlways): elsewhere 总是允许 stays on this thread
+        onAllowAlways: (key, scope) =>
+          scope === 'global' && this.origin.channel === 'desktop'
+            ? this.deps.onGlobalGrant?.(key)
+            : this.allowAlways(key),
+        globalAllowAlways: () => this.deps.config().allowAlways,
         logger: this.deps.logger,
       },
       input,
+      clientInputId,
     )
     this.active = handle
     void handle.promise.then((result) => {
@@ -403,6 +419,8 @@ export class Thread {
         toolChoice: 'none',
         signal,
         maxOutputTokens: 40,
+        reasoningEffort: 'lowest',
+        purpose: { feature: 'title', threadId: this.id },
       })) {
         if (part.type === 'text.delta') title += part.delta
         if (part.type === 'error') return
@@ -426,7 +444,7 @@ export class Thread {
    * Manual compaction. Refused (with an 'error' event, code 'compaction_refused') while a turn is active: the
    * turn loop already compacts on its own and two writers on one context are never allowed.
    */
-  compact(): Promise<void> {
+  compact(instructions?: string): Promise<void> {
     return this.serialize(async () => {
       this.assertOpen()
       if (this.active) {
@@ -449,6 +467,7 @@ export class Thread {
             persist: this.persist,
             emit: this.deps.emit,
             primaryModel: this._settings.model,
+            instructions,
           },
           {
             models: this.deps.services.models,
@@ -480,12 +499,21 @@ export class Thread {
     if (this.active === previous) this.active = undefined
   }
 
-  rollback(turns: number): Promise<void> {
+  /**
+   * Drops the last `turns` user turns, or — with `fromItemId` — that user message and everything after it. A target
+   * that is no longer in the live history (compacted away) is refused with `rollback_target_missing`, untouched.
+   */
+  rollback(turns: number, fromItemId?: ItemId): Promise<void> {
     return this.serialize(async () => {
       this.assertOpen()
       await this.settleActive()
       this.assertOpen()
-      this.context.dropLastNUserTurns(turns)
+      if (fromItemId !== undefined) {
+        if (!this.context.dropFrom(fromItemId))
+          throw Object.assign(new Error(`rollback target not in history: ${fromItemId}`), {
+            code: 'rollback_target_missing',
+          })
+      } else this.context.dropLastNUserTurns(turns)
       await this.rewritePersisted()
     })
   }

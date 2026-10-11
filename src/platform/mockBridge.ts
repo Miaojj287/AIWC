@@ -14,11 +14,21 @@ import type { DemoFixture } from './mock/types'
 import { substrateHandlers } from './mock/substrate'
 import { agentHandlers } from './mock/agent'
 import { memoryHandlers } from './mock/memory'
+import { memoryReviewHandlers } from './mock/memoryReview'
+import { skillsHandlers } from './mock/skills'
 import { cloneHandlers } from './mock/clone'
 import { autoreplyHandlers } from './mock/autoreply'
 import { miscHandlers } from './mock/misc'
 import { petHandlers } from './mock/pets'
 import { taskHandlers } from './mock/tasks'
+import { automationHandlers } from './mock/automation'
+import { todoHandlers } from './mock/todo'
+import { extensionsHandlers } from './mock/extensions'
+import { mobileHandlers } from './mock/mobile'
+import { composerHandlers } from './mock/composer'
+import { dataHandlers } from './mock/data'
+import { modelsHandlers } from './mock/models'
+import { privacyHandlers } from './mock/privacy'
 
 const allowedChannels = new Set<string>(INVOKE_CHANNELS)
 
@@ -38,22 +48,40 @@ export function createMockBridge(options: MockBridgeOptions = {}): MockBridge {
   const substrate = substrateHandlers(ctx)
   const agent = agentHandlers(ctx)
   const memory = memoryHandlers(ctx)
+  const memoryReview = memoryReviewHandlers(ctx, { memory })
   const autoreply = autoreplyHandlers(ctx)
   const clone = cloneHandlers(ctx, { agent, rules: autoreply.rules })
   const misc = miscHandlers(ctx)
   const pets = petHandlers(ctx)
   const tasks = taskHandlers(ctx)
+  const todo = todoHandlers(ctx)
+  const extensions = extensionsHandlers(ctx)
+  const mobile = mobileHandlers(ctx)
+  const composer = composerHandlers(ctx)
+  const data = dataHandlers(ctx)
+  const models = modelsHandlers(ctx)
 
   // Spreading module objects also copies their helper methods (state, rules, …); pick handlers only.
   const handlers: Handlers = {
     ...pickChannels(substrate),
     ...pickChannels(agent),
     ...pickChannels(memory),
+    ...pickChannels(memoryReview),
+    ...pickChannels(skillsHandlers(ctx)),
     ...pickChannels(autoreply),
     ...pickChannels(clone),
     ...pickChannels(misc),
     ...pickChannels(pets),
     ...pickChannels(tasks),
+    ...pickChannels(automationHandlers()),
+    ...pickChannels(todo),
+    ...pickChannels(extensions),
+    ...pickChannels(mobile),
+    ...pickChannels(composer),
+    ...pickChannels(models),
+    ...pickChannels(privacyHandlers(ctx, { agent })),
+    // After misc: replaces its app:checkUpdate (the web preview cannot update).
+    ...pickChannels(data),
   } as Handlers
 
   return {

@@ -66,4 +66,4 @@ export function RowLabel({ children }: { children: ReactNode }) {
 }
 
 /** Forced pseudo-states for static previews. Same tokens as the components' own hover / active rules. */
-export const FOCUS_RING = 'ring-2 ring-accent/70'
+export const FOCUS_RING = 'outline-2 outline-accent outline-offset-2'

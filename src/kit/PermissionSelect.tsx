@@ -51,9 +51,9 @@ export function permissionModeName(mode: PermissionMode): string {
   return PERMISSION_MODES.find((m) => m.value === mode)?.short ?? mode
 }
 
-/** Compact trigger look shared by the toolbar selects: borderless chip, h24. */
+/** Compact trigger look shared by the composer toolbar selects: borderless, h28 like the toolbar's icon buttons. */
 export const TOOLBAR_SELECT_CLASS =
-  'h-6 max-w-[150px] border-transparent bg-transparent pl-1.5 pr-1 text-caption hover:bg-line-8 data-[state=open]:border-transparent data-[state=open]:bg-line-8'
+  'h-7 max-w-[150px] border-transparent bg-transparent pl-2 pr-1.5 text-caption hover:bg-hover-7 data-[state=open]:border-transparent data-[state=open]:bg-hover-7'
 
 export interface PermissionSelectProps {
   value: PermissionMode

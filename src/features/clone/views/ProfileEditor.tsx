@@ -7,20 +7,7 @@ import { Check, MessageSquareWarning, Pencil, Plus, Quote, RefreshCw, Trash, X }
 import { useState, type ReactNode } from 'react'
 import type { PersonaCard, PersonaNote, PersonaSample, RelationshipProfile } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import {
-  Button,
-  Chip,
-  EmptyState,
-  ICON_STROKE,
-  IconButton,
-  InlineHint,
-  Input,
-  ScrollArea,
-  Textarea,
-  cn,
-  toast,
-} from '@/kit'
-import { formatNumber } from '@/platform/format'
+import { Button, Chip, EmptyState, ICON_STROKE, IconButton, InlineHint, Input, ScrollArea, Textarea, cn } from '@/kit'
 import {
   MANUAL_SAMPLE_PROMPT,
   addTag,
@@ -34,7 +21,6 @@ import {
 
 export interface ProfileEditorProps {
   profile: RelationshipProfile
-  messageCount: number | undefined
   /** Persist a patch (clone:updateProfile); the owner reports failures, so the result is not used here. */
   onPatch: (patch: Partial<Pick<RelationshipProfile, 'card' | 'deep' | 'samples'>>) => Promise<unknown>
   onRefine: () => Promise<void>
@@ -44,31 +30,16 @@ export interface ProfileEditorProps {
   onDeleteNote: (at: number) => Promise<void>
 }
 
-export function ProfileEditor({
-  profile,
-  messageCount,
-  onPatch,
-  onRefine,
-  refining,
-  notes,
-  onDeleteNote,
-}: ProfileEditorProps) {
+export function ProfileEditor({ profile, onPatch, onRefine, refining, notes, onDeleteNote }: ProfileEditorProps) {
   const t = useT()
   const card = profile.card
   const saveCard = (next: PersonaCard) => onPatch({ card: next })
 
   return (
-    <aside className="flex h-full min-h-0 w-[260px] shrink-0 flex-col border-l border-line-6 bg-panel/40">
+    <aside className="flex h-full min-h-0 w-[260px] shrink-0 flex-col border-l border-line-6 bg-panel @max-[720px]:h-auto @max-[720px]:max-h-[45%] @max-[720px]:w-full @max-[720px]:border-l-0 @max-[720px]:border-t">
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 px-4 py-4">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-body font-medium text-fg">{t('clone.profile.title')}</h2>
-            <p className="text-micro text-fg-3">
-              {messageCount !== undefined
-                ? t('clone.profile.subtitle', { n: messageCount, count: formatNumber(messageCount) })
-                : t('clone.profile.editable')}
-            </p>
-          </div>
+          <h2 className="text-body font-medium text-fg">{t('clone.profile.title')}</h2>
           <TagSection
             title={t('clone.profile.tone')}
             field="tone"
@@ -158,13 +129,7 @@ function TagSection({
     >
       <div className="flex flex-wrap items-center gap-1.5">
         {values.length === 0 && !adding ? (
-          <EmptyState
-            compact
-            variant="empty"
-            title={t('clone.profile.noTags', { field })}
-            description={t('clone.profile.addHint')}
-            className="w-full py-3"
-          />
+          <EmptyState compact variant="empty" title={t('clone.profile.noTags', { field })} className="w-full py-3" />
         ) : null}
         {values.map((t, i) => (
           <Chip
@@ -232,13 +197,7 @@ function HabitsSection({
     >
       <div className="flex flex-col">
         {entries.length === 0 && addingKey === null ? (
-          <EmptyState
-            compact
-            variant="empty"
-            title={t('clone.profile.noHabits')}
-            description={t('clone.profile.addHint')}
-            className="py-3"
-          />
+          <EmptyState compact variant="empty" title={t('clone.profile.noHabits')} className="py-3" />
         ) : null}
         {entries.map(([k, v]) => (
           <div key={k} className="group flex min-h-7 items-center gap-2 text-caption">
@@ -264,7 +223,7 @@ function HabitsSection({
                 <span className="ml-auto min-w-0 truncate text-right text-fg" title={v}>
                   {v}
                 </span>
-                <span className="hidden shrink-0 items-center group-hover:flex">
+                <span className="hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
                   <IconButton
                     size="xs"
                     icon={Pencil}
@@ -369,7 +328,7 @@ function NotesSection({ notes, onDelete }: { notes: PersonaNote[]; onDelete: (at
               className="mt-1 shrink-0 text-accent"
             />
             <span className="min-w-0 flex-1 text-caption leading-4 text-fg">{n.text}</span>
-            <span className="hidden shrink-0 items-center group-hover:flex">
+            <span className="hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
               <IconButton
                 size="xs"
                 icon={Trash}
@@ -391,10 +350,13 @@ function SamplesSection({ samples, onChange }: { samples: PersonaSample[]; onCha
   const t = useT()
   const [editing, setEditing] = useState<number | null>(null)
   const [value, setValue] = useState('')
-  const commit = () => {
+  const [empty, setEmpty] = useState(false)
+  /** Enter on an empty sample says so under the field; leaving the field empty just drops the edit. */
+  const commit = (from: 'enter' | 'blur') => {
     if (editing === null) return
     if (!value.trim()) {
-      toast.warning(t('clone.profile.sampleRequired'))
+      if (from === 'enter') setEmpty(true)
+      else setEditing(null)
       return
     }
     onChange(replaceSample(samples, editing, value, Date.now()))
@@ -430,15 +392,19 @@ function SamplesSection({ samples, onChange }: { samples: PersonaSample[]; onCha
                 autoFocus
                 aria-label={t('clone.profile.replaceSample')}
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                error={empty ? t('clone.profile.sampleRequired') : undefined}
+                onChange={(e) => {
+                  setValue(e.target.value)
+                  setEmpty(false)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    commit()
+                    commit('enter')
                   }
                   if (e.key === 'Escape') setEditing(null)
                 }}
-                onBlur={commit}
+                onBlur={() => commit('blur')}
                 wrapperClassName="flex-1"
               />
             ) : (
@@ -459,7 +425,7 @@ function SamplesSection({ samples, onChange }: { samples: PersonaSample[]; onCha
                   </span>
                   {s.corrected ? <span className="text-micro text-accent">{t('clone.profile.corrected')}</span> : null}
                 </div>
-                <span className="hidden shrink-0 items-center group-hover:flex">
+                <span className="hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
                   <IconButton
                     size="xs"
                     icon={RefreshCw}
@@ -467,6 +433,7 @@ function SamplesSection({ samples, onChange }: { samples: PersonaSample[]; onCha
                     onClick={() => {
                       setEditing(i)
                       setValue(s.reply)
+                      setEmpty(false)
                     }}
                   />
                   <IconButton

@@ -6,6 +6,7 @@
  * After init the transferred port carries the substrate JSON-RPC (see packages/substrate/src/host).
  */
 import type { MessagePortMain } from 'electron'
+import { createHostLogger, type HostLogLine } from './hostLog'
 import {
   createMirror,
   createSubstrateFacade,
@@ -25,10 +26,7 @@ export interface SubstrateHostInit {
   cacheDir: string
 }
 
-export type SubstrateHostMessage =
-  | { type: 'ready' }
-  | { type: 'fatal'; message: string }
-  | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+export type SubstrateHostMessage = { type: 'ready' } | { type: 'fatal'; message: string } | HostLogLine
 
 const parentPort = process.parentPort
 
@@ -58,10 +56,13 @@ function isInit(v: unknown): v is SubstrateHostInit {
   )
 }
 
+/** Engine choice, key resolution and decrypted-copy problems are only visible through this sink. */
+const hostLogger = createHostLogger(post)
+
 function buildSource(init: SubstrateHostInit): SourceReader {
   if (init.mode !== 'wcdb') throw new Error('substrate host only supports the wcdb (real WeChat database) mode')
   if (!init.nativeDir) throw new Error('wcdb mode requires nativeDir')
-  return createWcdbSourceReader({ nativeDir: init.nativeDir })
+  return createWcdbSourceReader({ nativeDir: init.nativeDir, logger: hostLogger })
 }
 
 let started = false

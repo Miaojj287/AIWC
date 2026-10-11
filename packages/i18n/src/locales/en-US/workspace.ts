@@ -5,16 +5,11 @@ export const workspace: Messages['workspace'] = {
   tabError: "Can't display this tab",
   closeTab: 'Close tab',
   empty: {
-    chat: { title: 'Select a chat on the left', description: 'Browse, search, export or add it to the Agent' },
-    autoreply: {
-      title: 'Select a chat to set up auto reply',
-      description: 'One rule per chat; once on, it replies as configured',
-    },
-    clone: {
-      title: 'Select a contact to start cloning',
-      description: 'Learns their speaking style from your chat history',
-    },
-    tasks: { title: 'Pick a scheduled task', description: 'or create one and let the Agent work on a timer' },
+    chat: { title: 'Select a chat on the left' },
+    autoreply: { title: 'Select a chat to set up auto reply' },
+    clone: { title: 'Select a contact to start cloning' },
+    tasks: { title: 'Pick a scheduled task' },
+    todo: { title: 'Turn on the group chats to scan on the left' },
     search: '{kbd} to search',
   },
   discard: {

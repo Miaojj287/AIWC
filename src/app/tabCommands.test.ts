@@ -57,10 +57,14 @@ describe('descriptorFor', () => {
       state: undefined,
     })
     expect(descriptorFor('tab.openReplyDesk', undefined)).toMatchObject({ kind: 'replydesk' })
-    expect(descriptorFor('tab.openDiary', { date: '2026-09-05' })).toMatchObject({
-      kind: 'diary',
-      state: { date: '2026-09-05' },
+    expect(descriptorFor('tab.openTodo', { sourceId: 'g1@chatroom' })).toMatchObject({
+      kind: 'todo',
+      objectId: 'todo',
+      title: '每日待办',
+      state: { sourceId: 'g1@chatroom' },
     })
+    // From the rail / a toast: the dashboard opens unfiltered even when a chat filter was set before.
+    expect(descriptorFor('tab.openTodo', undefined)).toMatchObject({ kind: 'todo', state: { sourceId: undefined } })
     expect(descriptorFor('tab.openKit', undefined)).toMatchObject({ kind: 'kit', objectId: 'gallery' })
     expect(descriptorFor('tab.openChat', undefined)).toBeUndefined()
   })

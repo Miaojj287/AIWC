@@ -1,24 +1,23 @@
 /**
  * Key widgets for the 账号 page: masked secret field with reveal / copy, manual hex entry, and the
- * 自动获取密钥 progress dialog driven by substrate:acquireKeys + substrate:keyStep (board 151:415 ③).
+ * inline 自动获取密钥 progress driven by substrate:acquireKeys + substrate:keyStep (board 151:415 ③).
  */
-import { Check, Circle, CircleAlert, Copy, Eye, EyeOff } from 'lucide-react'
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { Copy, Eye, EyeOff, RefreshCw, Settings, type LucideIcon } from 'lucide-react'
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
 import type { KeyAcquireStep } from '@aiwc/protocol'
-import { Button, ICON_STROKE, IconButton, InlineHint, Input, Spinner, cn, toast } from '@/kit'
+import { Button, IconButton, Input, TaskProgress, toast } from '@/kit'
 import { useT } from '@/i18n'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
+import { openUrl } from '@/platform/openExternal'
 import {
-  DEFAULT_KEY_STEPS,
-  KEY_LABEL,
-  keyStepsToProgress,
-  maskSecret,
+  DEVELOPER_TOOLS_SETTINGS_URL,
+  closeKeySteps,
+  initialKeySteps,
+  keyAcquireView,
   mergeKeyStep,
-  missingKeyKinds,
-  summarizeKeySteps,
-  validateKeyHex,
-  type KeyKind,
-} from '../accountModel'
+  useClock,
+} from '@/platform/wechatKeys'
+import { KEY_LABEL, maskSecret, missingKeyKinds, validateKeyHex, type KeyKind } from '../accountModel'
 import { copyText, errorMessage, useSecretPresence } from '../hooks'
 
 /* ------------------------------------------------------------- SecretField */
@@ -179,10 +178,35 @@ export function SecretField({ kind, secretRef, version = 0, label, className, on
 
 /* --------------------------------------------------------- InlineKeyAcquire */
 
+/**
+ * 自动获取 trigger. Accent only while its key is still missing; once present, re-acquiring is a
+ * secondary action (no stray accent on a page the user revisits).
+ */
+export function AcquireKeysButton({
+  secretRef,
+  version,
+  icon,
+  onClick,
+  children,
+}: {
+  secretRef: string
+  version: number
+  icon: LucideIcon
+  onClick: () => void
+  children: ReactNode
+}) {
+  const { has } = useSecretPresence(secretRef, version)
+  return (
+    <Button variant={has ? 'outline' : 'primary'} icon={icon} onClick={onClick}>
+      {children}
+    </Button>
+  )
+}
+
 export interface InlineKeyAcquireProps {
   wxid: string | undefined
   dbRoot: string | undefined
-  /** 'all' = 数据库 + 图片密钥 (账号页); 'image' = only the image keys are of interest (copy differs). */
+  /** 'all' = 数据库 + 图片密钥 (账号页); 'image' = only the image keys — never touches WeChat's process. */
   scope: 'all' | 'image'
   /** Called after a run that acquired at least one key (config may have changed). */
   onFinished: (steps: KeyAcquireStep[]) => void
@@ -192,62 +216,65 @@ export interface InlineKeyAcquireProps {
   onClose: () => void
 }
 
-const STEP_ICON: Record<KeyAcquireStep['status'], React.ReactNode> = {
-  done: <Check size={13} strokeWidth={2} aria-hidden className="text-ok" />,
-  doing: <Spinner size={13} />,
-  todo: <Circle size={11} strokeWidth={ICON_STROKE} aria-hidden className="text-fg-3" />,
-  failed: <CircleAlert size={13} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" />,
-}
-
-type Phase =
-  { kind: 'running'; strategy: 'auto' | 'memory_scan' } | { kind: 'failed'; error?: string } | { kind: 'done' }
-
 /**
- * Inline key-acquire progress (CLAUDE.md §4.5) — rendered below the key row instead of a modal, the
- * way the reference app does. Live steps ✓/⟳/○/! stream in via substrate:keyStep; a failure keeps the
- * 手动输入 / 内存扫描重试 actions inline. 取消 hides the panel while the main process finishes.
+ * Inline key-acquire progress (CLAUDE.md §4.5) below the key row — the same kit `TaskProgress` and
+ * stage copy as the onboarding keys card (src/platform/wechatKeys.ts). 取消 aborts the main-process
+ * run; a failure stays with its reason and 重试 / 手动输入. Success closes the panel (main toasts).
  */
 export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, onClose }: InlineKeyAcquireProps) {
   const t = useT()
-  const [steps, setSteps] = useState<KeyAcquireStep[]>(() =>
-    DEFAULT_KEY_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'todo', detail: undefined })),
-  )
-  const [phase, setPhase] = useState<Phase>({ kind: 'running', strategy: 'auto' })
+  const [steps, setSteps] = useState<KeyAcquireStep[]>(() => initialKeySteps(scope))
+  const [running, setRunning] = useState(true)
+  const [startedAt, setStartedAt] = useState(() => Date.now())
   const runRef = useRef(0)
+  const runningRef = useRef(true)
+  const now = useClock(running)
 
-  useBridgeEvent('substrate:keyStep', (step) => setSteps((s) => mergeKeyStep(s, step)))
+  useBridgeEvent('substrate:keyStep', (step) => {
+    if (runningRef.current) setSteps((s) => mergeKeyStep(s, step))
+  })
 
-  const run = async (strategy: 'auto' | 'memory_scan') => {
+  const settle = (next: KeyAcquireStep[]) => {
+    runningRef.current = false
+    setRunning(false)
+    setSteps(next)
+  }
+
+  const run = async () => {
     const runId = ++runRef.current
-    setSteps(DEFAULT_KEY_STEPS.map((s, i) => ({ ...s, status: i === 0 ? 'doing' : 'todo', detail: undefined })))
-    setPhase({ kind: 'running', strategy })
+    runningRef.current = true
+    setRunning(true)
+    setStartedAt(Date.now())
+    setSteps(initialKeySteps(scope))
     if (!wxid || !dbRoot) {
-      setPhase({ kind: 'failed', error: t('settings.account.acquire.selectFirst') })
+      settle(closeKeySteps(initialKeySteps(scope), 'unexpected', t('settings.account.acquire.selectFirst'), scope))
       return
     }
     try {
-      const result = await invoke('substrate:acquireKeys', { wxid, dbRoot, strategy })
+      const result = await invoke('substrate:acquireKeys', { wxid, dbRoot, strategy: 'auto', scope })
       if (runRef.current !== runId) return
-      setSteps(result)
-      const summary = summarizeKeySteps(result)
-      if (summary.failed.length > 0) {
-        setPhase({ kind: 'failed' })
-      } else {
-        setPhase({ kind: 'done' })
-        toast.success(scope === 'image' ? t('settings.account.acquire.imageDone') : t('settings.account.acquire.done'))
-        onFinished(result)
-        onClose()
-      }
-      if (summary.done > 0) onFinished(result)
+      settle(result)
+      if (result.some((s) => s.status === 'done')) onFinished(result)
+      if (keyAcquireView(result, { running: false, now: Date.now() }).state === 'done') onClose()
     } catch (e) {
       if (runRef.current !== runId) return
-      setPhase({ kind: 'failed', error: errorMessage(e) })
+      setSteps((prev) => closeKeySteps(prev, 'unexpected', errorMessage(e), scope))
+      runningRef.current = false
+      setRunning(false)
     }
+  }
+
+  const cancel = () => {
+    runRef.current++
+    runningRef.current = false
+    // Best effort: the panel closes either way; main brings WeChat back if it had closed it.
+    void invoke('substrate:cancelAcquireKeys', undefined).catch(() => undefined)
+    onClose()
   }
 
   // Kick off once on mount; the ref guards stale completions after 取消 / re-run.
   const startOnMount = useEffectEvent(() => {
-    void run('auto')
+    void run()
   })
   useEffect(() => {
     startOnMount()
@@ -258,110 +285,48 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
     }
   }, [])
 
-  const summary = summarizeKeySteps(steps)
-  const running = phase.kind === 'running'
-  const failed = phase.kind === 'failed'
-  const missing = failed ? missingKeyKinds(steps) : []
-  const active = steps.find((s) => s.status === 'doing')
-  const header = failed
-    ? scope === 'image'
-      ? t('settings.account.acquire.imageFailed')
-      : t('settings.account.acquire.failed')
-    : scope === 'image'
-      ? t('settings.account.acquire.imageRunning')
-      : running && phase.strategy === 'memory_scan'
-        ? t('settings.account.acquire.scanning')
-        : t('settings.account.acquire.running')
-  const failDetail = failed
-    ? (phase.error ??
-      summary.failed
-        .map((f) =>
-          f.detail ? t('settings.account.acquire.stepDetail', { label: f.label, detail: f.detail }) : f.label,
-        )
-        .join(t('settings.account.acquire.detailSeparator')))
-    : undefined
+  const view = keyAcquireView(steps, { running, startedAt, now })
+  const missing = view.state === 'failed' ? missingKeyKinds(steps) : []
+  const manualKind = missing[0]
 
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-2 rounded-item border p-3',
-        failed ? 'border-danger/40 bg-danger/5' : 'border-line-8 bg-content/60',
-      )}
-    >
-      <div className="flex items-center gap-2">
-        {running ? (
-          <Spinner size={13} />
-        ) : failed ? (
-          <CircleAlert size={14} strokeWidth={ICON_STROKE} aria-hidden className="text-danger" />
-        ) : (
-          <Check size={14} strokeWidth={2} aria-hidden className="text-ok" />
-        )}
-        <span className={cn('min-w-0 flex-1 truncate text-caption', failed ? 'text-danger' : 'text-fg-2')}>
-          {header}
-          {running && active?.detail ? ` · ${active.detail}` : ''}
-        </span>
-        {running ? (
-          <Button variant="ghost" size="sm" className="h-7" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-        ) : null}
-      </div>
-      <ol className="flex flex-col gap-1.5 text-tab">
-        {keyStepsToProgress(steps).map((s) => (
-          <li key={s.id} className="flex items-center gap-2">
-            <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
-            <span
-              className={cn(
-                'min-w-0 flex-1 truncate',
-                s.status === 'todo' ? 'text-fg-3' : s.status === 'failed' ? 'text-danger' : 'text-fg-2',
-              )}
-            >
-              {s.label}
-            </span>
-            {s.detail ? (
-              <span
-                className={cn(
-                  'shrink-0 truncate text-micro max-w-[55%] text-right',
-                  s.status === 'failed' ? 'text-danger' : 'text-fg-3',
-                )}
+    <TaskProgress
+      {...view}
+      onCancel={cancel}
+      actions={
+        view.state === 'failed' ? (
+          <>
+            <Button variant="outline" size="sm" icon={RefreshCw} onClick={() => void run()}>
+              {t('common.retry')}
+            </Button>
+            {view.needsSettings ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={Settings}
+                onClick={() => void openUrl(DEVELOPER_TOOLS_SETTINGS_URL)}
               >
-                {s.detail}
-              </span>
+                {t('app.keyAcquire.openSettings')}
+              </Button>
             ) : null}
-          </li>
-        ))}
-      </ol>
-      {failed ? (
-        <>
-          {failDetail ? <InlineHint kind="error">{failDetail}</InlineHint> : null}
-          {summary.failed.length > 0 && missing.length === 0 ? (
-            <InlineHint kind="warning">{t('settings.account.acquire.verifyFailed')}</InlineHint>
-          ) : null}
-          <div className="flex items-center gap-2">
-            {missing[0] ? (
+            {manualKind ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  onManual(missing[0] as KeyKind)
+                  onManual(manualKind)
                   onClose()
                 }}
               >
                 {t('settings.account.acquire.manual')}
               </Button>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={onClose}>
-                {t('common.close')}
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => void run('memory_scan')}>
-              {t('settings.account.acquire.memoryScan')}
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              {t('common.close')}
             </Button>
-          </div>
-        </>
-      ) : (
-        <span className="text-note text-fg-3">{t('settings.account.acquire.keepLoggedIn')}</span>
-      )}
-    </div>
+          </>
+        ) : undefined
+      }
+    />
   )
 }

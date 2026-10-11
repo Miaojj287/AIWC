@@ -171,7 +171,7 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
       <SRow
         id={rowIds.kind}
         title={t('settings.ai.modelForm.kind')}
-        description={t('settings.ai.shared.kindHint')}
+        help={t('settings.ai.shared.kindHint')}
         htmlFor={`${provider.id}-kind`}
       >
         <Select
@@ -187,7 +187,7 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
       <SRow
         id={rowIds.baseUrl}
         title={t('settings.ai.modelForm.baseUrl')}
-        description={t('settings.ai.shared.baseUrlHint')}
+        help={t('settings.ai.shared.baseUrlHint')}
         htmlFor={`${provider.id}-url`}
       >
         <Input
@@ -205,11 +205,7 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
         id={rowIds.apiKey}
         title="API Key"
         description={
-          local
-            ? t('settings.ai.shared.localNoKey')
-            : hasKey
-              ? t('settings.ai.modelForm.keyStored')
-              : t('settings.ai.shared.keyLocalOnly')
+          local ? t('settings.ai.shared.localNoKey') : hasKey ? t('settings.ai.modelForm.keyStored') : undefined
         }
         htmlFor={`${provider.id}-key`}
         disabled={local}
@@ -229,9 +225,7 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
       <SRow
         id={rowIds.modelId}
         title={t('settings.ai.shared.modelId')}
-        description={
-          purpose === 'agent' ? t('settings.ai.modelForm.modelIdAgent') : t('settings.ai.modelForm.modelIdStt')
-        }
+        help={purpose === 'agent' ? t('settings.ai.modelForm.modelIdAgent') : t('settings.ai.modelForm.modelIdStt')}
         htmlFor={`${provider.id}-model`}
       >
         <Popover open={suggestOpen} onOpenChange={setSuggestOpen}>
@@ -337,7 +331,7 @@ export function ModelForm({ provider, onSave, purpose, rowIds, primaryTone = 'pr
           onClick={() => void save()}
           loading={saving}
           disabled={!valid || !dirty}
-          title={saveReason}
+          disabledReason={saveReason}
         >
           {t('common.save')}
         </Button>

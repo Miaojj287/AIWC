@@ -49,6 +49,11 @@ export const known: Messages['known'] = {
       'Automation permission not granted. In System Settings → Privacy & Security → Automation, allow AIWC to control WeChat and System Events.',
     injectNoPermission:
       'Accessibility permission not granted. If AIWC is already in the list and this still appears, remove it with "−", then add it back and turn it on.',
+    originUnknown: 'The source chat is unknown, so nothing was sent',
+    recipientRequired: 'Specify the recipient chat as "to" (a WeChat chat ID)',
+    mediaRootsMissing: 'No local folders are allowed for sending, so the file was refused',
+    mediaPathNotAbsolute: 'The media path must be absolute',
+    mediaOutsideRoots: 'The file is outside the folders allowed for sending: {name}',
   },
   ilink: {
     expired: 'The WeChat connection expired. Scan the QR code again.',
@@ -97,6 +102,10 @@ export const known: Messages['known'] = {
     listHttp: 'Failed to fetch the model list (HTTP {status})',
     listInvalid: 'The API did not return a valid model list',
     listCursorMissing: 'The model list is missing its paging cursor',
+    contentFiltered: "The provider's content filter blocked this answer",
+    emptyResponse: 'The model returned nothing',
+    outputTruncated: 'The answer exceeded the model output limit and was still unfinished after {n} continuations',
+    streamStalled: 'No output from the model for {seconds} seconds; still not back after {n} reconnects',
   },
   substrate: {
     notConnected: 'WeChat data is not connected yet',
@@ -142,12 +151,10 @@ export const known: Messages['known'] = {
     imageAesMissing: 'The image AES key is missing. Get it in Settings first.',
   },
   keys: {
-    readingMemory: 'Reading the key from WeChat process memory',
     fromMemory: 'Got the key from WeChat process memory',
     fromDump: 'Got the key from a WeChat crash dump',
     sipEnabled: "System Integrity Protection (SIP) is on, so the key can't be read. Turn off SIP and try again.",
     atLogin: 'Captured the key at login',
-    restarting: 'Restarting WeChat to capture the startup key…',
     atRestart: 'Captured the key when WeChat restarted',
     needAuthorization:
       'Authorization needed: allow AIWC in System Settings › Privacy & Security › Developer Tools, or turn off SIP and try again',
@@ -157,8 +164,6 @@ export const known: Messages['known'] = {
     notInMemory: 'No matching database key in memory. Try again after logging in.',
     memoryUnreadable: "Can't read WeChat process memory (administrator rights may be required)",
     unsupportedPlatform: 'Unsupported platform: {platform}',
-    computingXor: 'Computing the XOR key from template files',
-    scanningAes: 'Scanning WeChat process memory for the image AES key',
     xorKey: 'XOR key 0x{hex}',
     xorFailed: "Couldn't get the XOR key",
     aesDone: 'Image AES key retrieved',
@@ -183,8 +188,6 @@ export const known: Messages['known'] = {
       'Found the target but timed out waiting ({detail}). Log in to WeChat when prompted, or log out and back in.',
     hookTargetOnly: 'Found the target address but not the final key yet ({detail})',
     acquireFailed: 'Key retrieval failed',
-    hookInstalling: 'Found WeChat process PID={pid}; installing hook…',
-    hookReady: 'Ready. Log in to WeChat now, or log out and log back in.',
     xorTemplateMissing:
       "Image template files not found, so the XOR key can't be computed (open a few images in WeChat, then try again)",
   },
@@ -194,14 +197,5 @@ export const known: Messages['known'] = {
     aesFormat: 'The AES key must be 16 characters or 32 hex digits',
     hexOnly: 'The key can only contain 0-9 and a-f',
     hexLength: 'The key must be {length} hex characters (currently {current})',
-  },
-  diary: {
-    stepSelect: 'Selecting material',
-    stepSummarize: 'Summarizing each chat',
-    stepCombine: 'Combining',
-    stepWrite: 'Writing',
-    modelUnavailable: 'Model unavailable',
-    modelCallFailed: 'Model call failed ({error})',
-    dateFormat: 'Dates must be YYYY-MM-DD: {date}',
   },
 }

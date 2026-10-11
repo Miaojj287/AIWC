@@ -8,6 +8,7 @@ import type { AssistantModelMessage, ModelMessage, ToolModelMessage, UserModelMe
 import { COMPACTION_SUMMARY_NOTICE } from '../compaction'
 import { turnAbortedFragment } from '../context/fragments/turnAborted'
 import { isImagePlaceholder, renderToolOutput } from '../context/manager'
+import { attachmentToModelPart, type AttachmentPartOptions } from './attachmentParts'
 
 type UserPart = Exclude<UserModelMessage['content'], string>[number]
 type AssistantPart = Exclude<AssistantModelMessage['content'], string>[number]
@@ -33,7 +34,10 @@ export function toolResultOutput(item: ToolResultItem): ToolResultOutput {
   }
 }
 
-export function historyToModelMessages(items: readonly HistoryItem[]): ModelMessage[] {
+export function historyToModelMessages(
+  items: readonly HistoryItem[],
+  opts: AttachmentPartOptions = {},
+): ModelMessage[] {
   const messages: ModelMessage[] = []
   let userParts: UserPart[] = []
   let assistant: { message: AssistantModelMessage; parts: AssistantPart[]; stepId: string } | undefined
@@ -76,8 +80,7 @@ export function historyToModelMessages(items: readonly HistoryItem[]): ModelMess
         closeTool()
         for (const p of item.content) {
           if (p.type === 'text') userParts.push({ type: 'text', text: p.text })
-          else if (p.type === 'image') userParts.push({ type: 'image', image: p.data, mediaType: p.mediaType })
-          else userParts.push({ type: 'file', data: p.data, mediaType: p.mediaType, filename: p.name })
+          else userParts.push(attachmentToModelPart(p, opts))
         }
         break
       }
@@ -86,6 +89,9 @@ export function historyToModelMessages(items: readonly HistoryItem[]): ModelMess
         break
       case 'compaction_summary':
         pushUserText(`<compaction_summary>\n${COMPACTION_SUMMARY_NOTICE}\n${item.summary}`)
+        break
+      // A host check's report is for the transcript only; what the model must act on arrives as a stop_hook fragment.
+      case 'turn_check':
         break
       case 'turn_aborted': {
         const f = turnAbortedFragment(item.reason)

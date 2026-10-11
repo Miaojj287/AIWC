@@ -1,6 +1,7 @@
 /**
  * 宠物 — the Codex-style companion that perches on the Agent composer (DESIGN-SPEC §2 宠物).
- * 当前宠物 (preview + instant toggles) → 我的宠物 (select / import / delete) → 宠物图库 (codex-pets.net).
+ * 当前宠物 (preview + instant toggles) → 状态读数 (which counts sit beside the pet) → 我的宠物 (select / import /
+ * delete) → 宠物图库 (codex-pets.net).
  * Pets live in <dataRoot>/pets; the only network traffic is the gallery and 领养 downloads.
  */
 import { FolderInput, RefreshCw } from 'lucide-react'
@@ -21,6 +22,33 @@ const SIZE_OPTIONS: ReadonlyArray<{ value: PetConfig['size']; label: MessageKey 
   { value: 'sm', label: 'settings.pets.size.sm' },
   { value: 'md', label: 'settings.pets.size.md' },
   { value: 'lg', label: 'settings.pets.size.lg' },
+]
+
+/** 状态读数 toggles: which counts the readout beside the pet shows (features/pets/petStatus.ts). */
+const STATUS_ROWS: ReadonlyArray<{
+  key: 'showRunning' | 'showDone' | 'showUnread'
+  id: string
+  title: MessageKey
+  description: MessageKey
+}> = [
+  {
+    key: 'showRunning',
+    id: 'pets.statusRunning',
+    title: 'settings.pets.status.running.title',
+    description: 'settings.pets.status.running.description',
+  },
+  {
+    key: 'showDone',
+    id: 'pets.statusDone',
+    title: 'settings.pets.status.done.title',
+    description: 'settings.pets.status.done.description',
+  },
+  {
+    key: 'showUnread',
+    id: 'pets.statusUnread',
+    title: 'settings.pets.status.unread.title',
+    description: 'settings.pets.status.unread.description',
+  },
 ]
 
 export function PetsPage() {
@@ -86,7 +114,7 @@ export function PetsPage() {
             stacked
           >
             {current ? (
-              <CurrentPetPreview pet={current} motion={config.motion} />
+              <CurrentPetPreview pet={current} motion={config.motion} status={config} />
             ) : !loaded ? (
               <SkeletonListRows rows={1} />
             ) : (
@@ -119,8 +147,10 @@ export function PetsPage() {
             htmlFor="pets-bubbles"
             disabled={!config.enabled}
           >
+            {/* A dimmed row only blocks the pointer; the control is disabled too, so the keyboard cannot reach it. */}
             <Toggle
               id="pets-bubbles"
+              disabled={!config.enabled}
               checked={config.bubbles}
               onCheckedChange={(bubbles) => void saveConfig({ pet: { bubbles } })}
             />
@@ -134,6 +164,7 @@ export function PetsPage() {
           >
             <Toggle
               id="pets-motion"
+              disabled={!config.enabled}
               checked={config.motion}
               onCheckedChange={(value) => void saveConfig({ pet: { motion: value } })}
             />
@@ -147,6 +178,7 @@ export function PetsPage() {
           >
             <Toggle
               id="pets-flair"
+              disabled={!config.enabled || !motion}
               checked={config.idleFlair}
               onCheckedChange={(idleFlair) => void saveConfig({ pet: { idleFlair } })}
             />
@@ -159,6 +191,7 @@ export function PetsPage() {
           >
             <SegmentedControl
               aria-label={t('settings.pets.size.title')}
+              disabled={!config.enabled}
               options={SIZE_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
               value={config.size}
               onValueChange={(size) => void saveConfig({ pet: { size } })}
@@ -167,60 +200,81 @@ export function PetsPage() {
         </Card>
       </Section>
 
-      <Section
-        title={t('settings.pets.sections.installed')}
-        aside={loaded && pets.length ? t('settings.pets.installed.count', { n: pets.length }) : undefined}
-      >
+      <Section title={t('settings.pets.sections.status')} help={t('settings.pets.status.help')}>
         <Card variant="rows">
-          <SRow
-            id="pets.installed"
-            title={t('settings.pets.sections.installed')}
-            description={t('settings.pets.installed.description')}
-          >
-            <Button variant="outline" icon={FolderInput} loading={importing} onClick={() => void importZip()}>
-              {t('settings.pets.installed.import')}
-            </Button>
-          </SRow>
-          <div className="p-4">
-            {!loaded ? (
-              <SkeletonListRows rows={2} />
-            ) : error && pets.length === 0 ? (
-              <EmptyState
-                compact
-                variant="error"
-                title={t('settings.pets.installed.loadFailed')}
-                description={error}
-                action={{ label: t('common.retry'), icon: RefreshCw, onClick: reloadPets }}
+          {STATUS_ROWS.map((row) => (
+            <SRow
+              key={row.key}
+              id={row.id}
+              title={t(row.title)}
+              description={t(row.description)}
+              htmlFor={`pets-${row.key}`}
+              disabled={!config.enabled}
+            >
+              <Toggle
+                id={`pets-${row.key}`}
+                disabled={!config.enabled}
+                checked={config[row.key]}
+                onCheckedChange={(on) => {
+                  const pet: Partial<PetConfig> = {}
+                  pet[row.key] = on
+                  void saveConfig({ pet })
+                }}
               />
-            ) : pets.length === 0 ? (
-              <EmptyState
-                compact
-                title={t('settings.pets.installed.empty')}
-                description={t('settings.pets.installed.emptyDescription')}
-              />
-            ) : (
-              <InstalledPetGrid
-                pets={pets}
-                currentId={current?.id}
-                motion={motion}
-                onSelect={(pet) => void select(pet)}
-                onRemove={setRemoving}
-              />
-            )}
-          </div>
+            </SRow>
+          ))}
         </Card>
       </Section>
 
-      <Section title={t('settings.pets.sections.catalog')} aside={t('settings.pets.catalog.aside')}>
-        <Card variant="rows">
-          <SRow
-            id="pets.catalog"
-            title={t('settings.pets.sections.catalog')}
-            description={t('settings.pets.catalog.description')}
-          />
-          <div className="p-4">
-            <PetCatalog currentId={current?.id} motion={motion} onUse={useFromCatalog} />
-          </div>
+      {/* The section title is the only title: no row repeats it. Import sits beside it, the explanation behind `?`. */}
+      <Section
+        id="pets.installed"
+        title={t('settings.pets.sections.installed')}
+        help={t('settings.pets.installed.description')}
+        aside={loaded && pets.length ? t('settings.pets.installed.count', { n: pets.length }) : undefined}
+        actions={
+          <Button variant="outline" size="sm" icon={FolderInput} loading={importing} onClick={() => void importZip()}>
+            {t('settings.pets.installed.import')}
+          </Button>
+        }
+      >
+        <Card>
+          {!loaded ? (
+            <SkeletonListRows rows={2} />
+          ) : error && pets.length === 0 ? (
+            <EmptyState
+              compact
+              variant="error"
+              title={t('settings.pets.installed.loadFailed')}
+              description={error}
+              action={{ label: t('common.retry'), icon: RefreshCw, onClick: reloadPets }}
+            />
+          ) : pets.length === 0 ? (
+            <EmptyState
+              compact
+              title={t('settings.pets.installed.empty')}
+              description={t('settings.pets.installed.emptyDescription')}
+            />
+          ) : (
+            <InstalledPetGrid
+              pets={pets}
+              currentId={current?.id}
+              motion={motion}
+              onSelect={(pet) => void select(pet)}
+              onRemove={setRemoving}
+            />
+          )}
+        </Card>
+      </Section>
+
+      <Section
+        id="pets.catalog"
+        title={t('settings.pets.sections.catalog')}
+        help={t('settings.pets.catalog.description')}
+        aside={t('settings.pets.catalog.aside')}
+      >
+        <Card>
+          <PetCatalog currentId={current?.id} motion={motion} onUse={useFromCatalog} />
         </Card>
       </Section>
 

@@ -28,31 +28,65 @@ export const rowDomId = (id: string): string => `setting-row-${id.replace(/[^a-z
 
 export function PageHeader({ title, description }: { title: ReactNode; description?: ReactNode }) {
   return (
-    <header className="flex flex-col gap-1">
-      <h1 className="text-title font-medium leading-7 text-fg">{title}</h1>
-      {description ? <p className="text-caption text-fg-3">{description}</p> : null}
+    <header className="flex flex-col gap-2 border-b border-line-6 pb-5">
+      <h1 className="text-title font-semibold leading-7 text-fg">{title}</h1>
+      {description ? <p className="max-w-[480px] text-body leading-5 text-fg-3">{description}</p> : null}
     </header>
   )
 }
 
+/** What the settings search highlights for ~2 s: a fill only, eased in and out — no ring, nothing moves. */
+const HIGHLIGHT_CLASS = 'transition-colors duration-(--dur-surface)'
+
+/** Scrolls `id`'s element into view while the search highlights it, and says whether it is highlighted. */
+function useSearchTarget(id: string | undefined, block: ScrollLogicalPosition): boolean {
+  const highlight = useContext(HighlightContext)
+  const on = id !== undefined && highlight === id
+  useEffect(() => {
+    if (!on || id === undefined) return
+    document.getElementById(rowDomId(id))?.scrollIntoView({ block, behavior: 'instant' })
+  }, [on, id, block])
+  return on
+}
+
 export interface SectionProps {
   title: ReactNode
+  /** Search-index id when the section itself is a search result (it has no row that repeats its title). */
+  id?: string
   /** Explanation behind a ? glyph after the label (data-flow / privacy notes live here, not as standing hints). */
   help?: ReactNode
-  /** Right-aligned helper (path, actions). */
+  /** Right-aligned helper text (a path, a count); one line, truncated. */
   aside?: ReactNode
+  /** Right-aligned controls (a Button, an IconButton). Not clipped, so their focus ring stays whole. */
+  actions?: ReactNode
   children: ReactNode
   className?: string
 }
 
-/** Section label (12 weak) above one or more cards. */
-export function Section({ title, help, aside, children, className }: SectionProps) {
+/** Section title (13 Semibold) above one or more cards. */
+export function Section({ title, id, help, aside, actions, children, className }: SectionProps) {
+  const on = useSearchTarget(id, 'start')
   return (
-    <section className={cn('flex flex-col gap-2', className)}>
-      <div className="flex items-center gap-1.5">
-        <h2 className="shrink-0 text-caption text-fg-3">{title}</h2>
+    <section
+      id={id === undefined ? undefined : rowDomId(id)}
+      data-setting-row={id}
+      data-highlighted={on || undefined}
+      className={cn('flex scroll-mt-4 flex-col gap-3', className)}
+    >
+      <div className={cn('flex items-center gap-1.5 rounded-control px-1', HIGHLIGHT_CLASS, on && 'bg-accent-12')}>
+        <h2 className="shrink-0 whitespace-nowrap text-body font-semibold text-fg">{title}</h2>
         {help ? <HelpTip content={help} size={12} subject={typeof title === 'string' ? title : undefined} /> : null}
-        {aside ? <div className="ml-auto min-w-0 truncate pl-3 text-micro text-fg-3">{aside}</div> : null}
+        {aside ? (
+          <div
+            className="ml-auto min-w-0 truncate pl-3 text-micro text-fg-3"
+            title={typeof aside === 'string' ? aside : undefined}
+          >
+            {aside}
+          </div>
+        ) : null}
+        {actions ? (
+          <div className={cn('flex shrink-0 items-center gap-2', aside ? 'pl-1' : 'ml-auto pl-3')}>{actions}</div>
+        ) : null}
       </div>
       {children}
     </section>
@@ -66,22 +100,13 @@ export interface SRowProps extends SettingRowProps {
 
 /** SettingRow that can be jumped to and highlighted from the settings search. */
 export function SRow({ id, className, ...rest }: SRowProps) {
-  const highlight = useContext(HighlightContext)
-  const on = highlight === id
-  useEffect(() => {
-    if (!on) return
-    document.getElementById(rowDomId(id))?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [on, id])
+  const on = useSearchTarget(id, 'center')
   return (
     <SettingRow
       id={rowDomId(id)}
       data-setting-row={id}
       data-highlighted={on || undefined}
-      className={cn(
-        'transition-colors duration-(--dur-base)',
-        on && 'bg-accent-12 ring-1 ring-inset ring-accent/50',
-        className,
-      )}
+      className={cn(HIGHLIGHT_CLASS, on && 'bg-accent-12', className)}
       {...rest}
     />
   )

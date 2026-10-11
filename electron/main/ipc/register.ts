@@ -11,20 +11,33 @@ import { registerConfigIpc } from './config'
 import { registerAiIpc } from './ai'
 import { registerSubstrateIpc } from './substrate'
 import { registerAgentIpc } from './agent'
+import { registerConversationIpc } from './conversation'
+import { registerComposerIpc } from './composer'
 import { registerMemoryIpc } from './memory'
+import { registerMemoryReviewIpc } from './memoryReview'
+import { registerSkillsIpc } from './skills'
 import { registerCloneIpc } from './clone'
 import { registerAutoReplyIpc } from './autoreply'
 import { registerGatewayIpc } from './gateway'
-import { registerDiaryIpc } from './diary'
+import { registerJevIpc } from './jev'
 import { registerFileIpc } from './file'
 import { registerPetIpc } from './pet'
 import { registerOfficeIpc } from './office'
 import { registerTaskIpc } from './task'
+import { registerAutomationIpc } from './automation'
+import { registerTodoIpc } from './todo'
+import { registerExtensionsIpc } from './extensions'
+import { registerMobileIpc } from './mobile'
+import { registerDataIpc } from './data'
+import { registerModelsIpc } from './models'
+import { registerPrivacyIpc } from './privacy'
 import { t } from '../i18n'
+import type { AccountSession } from '../services/accountSession'
 import { localizeInvokeResult, localizeText } from '../localizePayloads'
 
 /** What the IPC layer needs from the Electron host (index.ts) beyond the composed AppContext. */
 export interface HostBridge {
+  accountSession?: AccountSession
   appVersion: string
   isPackaged: boolean
   getMainWindow(): BrowserWindow | undefined
@@ -59,6 +72,7 @@ export function createHandle(ctx: AppContext, host: HostBridge, registered: Set<
         log.warn(`rejected ${channel} from untrusted sender`, { id: event.sender.id })
         throw new Error(t('main.ipc.untrustedSender'))
       }
+      if (host.accountSession?.isSwitching()) throw new Error(t('main.substrate.switchingAccount'))
       const started = Date.now()
       try {
         return localizeInvokeResult(channel, await fn(req as InvokeReq<K>, event))
@@ -86,15 +100,26 @@ export function registerIpc(ctx: AppContext, host: HostBridge): void {
   registerAiIpc(ctx, host, handle)
   registerSubstrateIpc(ctx, host, handle)
   registerAgentIpc(ctx, host, handle)
+  registerConversationIpc(ctx, host, handle)
+  registerComposerIpc(ctx, host, handle)
   registerMemoryIpc(ctx, host, handle)
+  registerMemoryReviewIpc(ctx, host, handle)
+  registerSkillsIpc(ctx, host, handle)
   registerCloneIpc(ctx, host, handle)
   registerAutoReplyIpc(ctx, host, handle)
   registerGatewayIpc(ctx, host, handle)
-  registerDiaryIpc(ctx, host, handle)
+  registerJevIpc(ctx, host, handle)
   registerFileIpc(ctx, host, handle)
   registerPetIpc(ctx, host, handle)
   registerOfficeIpc(ctx, host, handle)
   registerTaskIpc(ctx, host, handle)
+  registerAutomationIpc(ctx, host, handle)
+  registerTodoIpc(ctx, host, handle)
+  registerExtensionsIpc(ctx, host, handle)
+  registerMobileIpc(ctx, host, handle)
+  registerDataIpc(ctx, host, handle)
+  registerModelsIpc(ctx, host, handle)
+  registerPrivacyIpc(ctx, host, handle)
 
   const missing = INVOKE_CHANNELS.filter((c) => !registered.has(c))
   if (missing.length) ctx.logger.child('ipc').error('InvokeMap channels without handler', missing)

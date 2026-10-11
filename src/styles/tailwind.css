@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import './tokens.css';
+@import './accessibility.css';
 
 /* Map tokens into Tailwind v4 theme so utilities like bg-panel / text-fg-2 / rounded-card exist. */
 @theme inline {
@@ -20,6 +21,19 @@
   --color-danger: var(--danger);
   --color-info: var(--info);
   --color-clone: var(--clone);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok-ink: var(--ok-ink);
+  --color-warn-ink: var(--warn-ink);
+  --color-danger-ink: var(--danger-ink);
+  --color-info-ink: var(--info-ink);
+  --color-clone-ink: var(--clone-ink);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-active: var(--danger-active);
+  --color-selected: var(--selected-bg);
+  --color-selected-ring: var(--selected-ring);
+  --color-wx-transfer: var(--wx-transfer);
+  --color-wx-transfer-settled: var(--wx-transfer-settled);
+  --color-wx-transfer-settled-ink: var(--wx-transfer-settled-ink);
   --color-fg: var(--fg);
   --color-fg-2: var(--fg-2);
   --color-fg-3: var(--fg-3);
@@ -42,6 +56,8 @@
   --text-bubble: var(--fs-bubble);
   --text-title: var(--fs-title);
   --text-wizard: var(--fs-wizard);
+  --text-wordmark: var(--fs-wordmark);
+  --leading-bubble: var(--lh-bubble);
 
   --radius-window: var(--r-window);
   --radius-card: var(--r-card);
@@ -51,6 +67,11 @@
 
   --shadow-overlay: var(--shadow-overlay);
   --shadow-toast: var(--shadow-toast);
+
+  /* Every `transition-*` utility inherits the motion tokens: 120ms on the strong ease-out curve, never Tailwind's
+     150ms ease-in-out. Slower moves opt in with duration-(--dur-base) / duration-(--dur-surface). */
+  --default-transition-duration: var(--dur-fast);
+  --default-transition-timing-function: var(--ease-out);
 }
 
 @layer base {
@@ -61,18 +82,29 @@
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: var(--fs-body);
-    line-height: 1.5;
+    line-height: var(--lh-body);
+    font-optical-sizing: auto;
     -webkit-font-smoothing: antialiased;
     user-select: none;
     overflow: hidden;
   }
+  h1 { letter-spacing: var(--tracking-heading); text-wrap: balance; }
+  kbd, time { font-variant-numeric: tabular-nums; }
   ::selection { background: var(--accent-30); }
   * { box-sizing: border-box; }
   button, input, textarea, select { font: inherit; color: inherit; }
   code, kbd, .mono { font-family: var(--font-mono); }
-  /* thin scrollbars, panel-coloured track */
-  *::-webkit-scrollbar { width: 8px; height: 8px; }
-  *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.12); border-radius: 8px; }
-  *::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.2); }
-  *::-webkit-scrollbar-track { background: transparent; }
+  /* Scrollbars follow the OS (html[data-platform], stamped in main.tsx). macOS keeps its native overlay bars: they
+     honour the system "Show scroll bars" setting and fade out after scrolling, and any ::-webkit-scrollbar rule would
+     replace them with always-visible classic bars. Windows / Linux get thin 8px bars on a transparent track; shell.css
+     paints the thumb from theme tokens. */
+  :root:not([data-platform='darwin']) *::-webkit-scrollbar { width: 8px; height: 8px; }
+  :root:not([data-platform='darwin']) *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 0.12); border-radius: 8px; }
+  :root:not([data-platform='darwin']) *::-webkit-scrollbar-thumb:hover { background: rgb(255 255 255 / 0.2); }
+  :root:not([data-platform='darwin']) *::-webkit-scrollbar-track { background: transparent; }
 }
+
+/* Agent conversation find bar (features/agent/findMatches.ts): CSS Custom Highlight API, so the transcript's DOM is
+   never rewritten. Every match gets a light warn wash, the current one a stronger one. */
+::highlight(agent-find) { background-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+::highlight(agent-find-current) { background-color: color-mix(in srgb, var(--warn) 65%, transparent); color: var(--fg); }

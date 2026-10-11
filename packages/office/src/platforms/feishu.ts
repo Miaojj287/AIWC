@@ -8,6 +8,7 @@ import { findArray, findString, parseJsonOutput } from '../cli/output'
 import { OfficeError, envelopeFailed, type CliRunner } from '../cli/runner'
 import { chunk, formatDate, type Cell, type NormalizedColumn, type NormalizedTable } from '../push/table'
 import {
+  argWords,
   commandWords,
   hasDryRun,
   hasHelpFlag,
@@ -207,6 +208,7 @@ export const feishu: PlatformModule = {
     if (first === 'api' && (second ?? '').toUpperCase() === 'DELETE') return REFUSE_DELETE
     const verb = second?.startsWith('+') ? second : third
     if (isDeleteVerb(verb) || isDeleteVerb(second)) return REFUSE_DELETE
+    if (argWords(args).some(isDeleteVerb)) return REFUSE_DELETE
     return undefined
   },
 }

@@ -7,9 +7,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { WxMedia, WxMessage } from '@aiwc/protocol'
 import { Button, ICON_STROKE, IconButton, Skeleton, Spinner, cn, toast } from '@/kit'
 import { useT } from '@/i18n'
+import { runCommand } from '@/app/commands'
+import { previewKind } from '@/platform/filePreview'
 import { invoke } from '@/platform/hooks'
 import { formatBytes, formatVoiceDuration } from '@/platform/format'
 import { openLocalPath } from '@/platform/openExternal'
+import type { LightboxItem } from './Lightbox'
 import { toMediaUrl } from './mediaUrl'
 
 type MediaState =
@@ -56,7 +59,7 @@ function MediaPlaceholder({ label, className }: { label: string; className?: str
 
 export interface ImageBodyProps {
   message: WxMessage
-  onOpen(src: string, alt: string): void
+  onOpen(item: LightboxItem): void
   /** Sticker: smaller, no lightbox chrome. */
   sticker?: boolean
 }
@@ -90,10 +93,10 @@ export function ImageBody({ message, onOpen, sticker = false }: ImageBodyProps) 
   return (
     <button
       type="button"
-      onClick={() => full && onOpen(full, label)}
+      onClick={() => full && onOpen({ src: full, alt: label, kind: 'image' })}
       aria-label={t('chat.media.view', { kind })}
       className={cn(
-        'block overflow-hidden rounded-item outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'block overflow-hidden rounded-item outline-none',
         sticker ? 'size-[96px]' : 'max-h-[260px] max-w-[280px]',
       )}
     >
@@ -108,7 +111,7 @@ export function ImageBody({ message, onOpen, sticker = false }: ImageBodyProps) 
   )
 }
 
-export function VideoBody({ message, onOpen }: { message: WxMessage; onOpen(src: string, alt: string): void }) {
+export function VideoBody({ message, onOpen }: { message: WxMessage; onOpen(item: LightboxItem): void }) {
   const t = useT()
   const state = useResolvedMedia(message)
   if (state.status === 'loading') return <Skeleton className="h-[140px] w-[240px] rounded-item" />
@@ -118,9 +121,13 @@ export function VideoBody({ message, onOpen }: { message: WxMessage; onOpen(src:
   return (
     <button
       type="button"
-      onClick={() => (src ?? poster) && onOpen((src ?? poster) as string, t('chat.media.video'))}
+      onClick={() => {
+        // Without the video file only the poster frame is available: show it as a still image.
+        if (src) onOpen({ src, alt: t('chat.media.video'), kind: 'video' })
+        else if (poster) onOpen({ src: poster, alt: t('chat.media.video'), kind: 'image' })
+      }}
       aria-label={t('chat.media.viewVideo')}
-      className="relative block max-h-[240px] max-w-[280px] overflow-hidden rounded-item outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+      className="relative block max-h-[240px] max-w-[280px] overflow-hidden rounded-item outline-none"
     >
       {poster ? (
         <img
@@ -239,7 +246,7 @@ export function VoiceBody({ message, self, onTranscript }: VoiceBodyProps) {
       {transcript ? (
         <div
           className={cn(
-            'flex flex-col gap-0.5 rounded-item px-2.5 py-2 text-caption leading-[18px]',
+            'flex flex-col gap-0.5 rounded-item px-2.5 py-2 text-caption leading-4.5',
             self ? 'bg-white/10 text-white/90' : 'bg-hover-5 text-fg-2',
           )}
         >
@@ -268,14 +275,17 @@ export function FileBody({ message, self }: { message: WxMessage; self: boolean 
   const Icon = FILE_ICON[ext] ?? FileIcon
   const size = message.media?.sizeBytes
   const [opening, setOpening] = useState(false)
+  // Previewable files open in the 文件 Tab; anything else goes to the system's default app.
+  const previewable = previewKind(name) !== 'unsupported'
   const open = async () => {
     const what = t('chat.openTarget.mediaFile')
     setOpening(true)
     try {
-      const media = await invoke('substrate:resolveMedia', { sessionId: message.sessionId, messageId: message.id })
-      // openLocalPath reports its own failures; a file that never reached this machine must not fail silently.
-      if (media?.path) await openLocalPath(media.path, what)
-      else toast.error(t('app.open.pathFailed', { what }))
+      // WeChat's own folders are outside the file allow-list: main copies this one attachment into the
+      // preview cache first (file:stageChatFile), and both the Tab and the default app open that copy.
+      const staged = await invoke('file:stageChatFile', { sessionId: message.sessionId, messageId: message.id })
+      if (previewable) runCommand('tab.openFile', { path: staged.path, title: staged.fileName })
+      else await openLocalPath(staged.path, what) // reports its own failures
     } catch (e) {
       toast.error(t('app.open.pathFailed', { what }), { detail: e instanceof Error ? e.message : String(e) })
     } finally {
@@ -285,9 +295,10 @@ export function FileBody({ message, self }: { message: WxMessage; self: boolean 
   return (
     <button
       type="button"
+      title={previewable ? t('chat.media.previewFile', { name }) : t('chat.media.openFile', { name })}
       onClick={() => void open()}
       className={cn(
-        'flex min-w-[200px] max-w-[280px] items-center gap-2.5 rounded-item text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+        'flex min-w-[200px] max-w-[280px] items-center gap-2.5 rounded-item text-left outline-none',
         self ? 'hover:bg-white/8' : 'hover:bg-hover-5',
       )}
     >

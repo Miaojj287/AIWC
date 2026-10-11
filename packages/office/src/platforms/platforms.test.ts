@@ -219,6 +219,15 @@ describe('command policies', () => {
     expect(wecom.refusal(['auth', 'init'])).toMatch(/office_connect/)
     expect(wecom.refusal(['smartsheet', 'records', 'delete', '--json', '{}'])).toMatch(/删除/)
   })
+
+  it('sees a delete that sits behind an earlier flag, but not one inside a flag value', () => {
+    expect(feishu.refusal(['base', '--as', 'user', '+record-delete', '--record-id', 'r'])).toMatch(/删除/)
+    expect(dingtalk.refusal(['aitable', '--base-id', 'b', 'record', 'delete', '--record-id', 'r'])).toMatch(/删除/)
+    expect(wecom.refusal(['smartsheet', '--docid', 'd', 'records', 'delete'])).toMatch(/删除/)
+    expect(feishu.refusal(['base', '+record-create', '--json', '{"name":"remove-old"}'])).toBeUndefined()
+    expect(dingtalk.refusal(['todo', 'task', 'create', '--title', 'remove-old-bg'])).toBeUndefined()
+    expect(wecom.refusal(['doc', 'create', '--title', 'remove-old'])).toBeUndefined()
+  })
 })
 
 describe('飞书 table push', () => {
@@ -392,6 +401,29 @@ describe('钉钉 and 企业微信 table push', () => {
       链接: [{ text: 'https://example.com', link: 'https://example.com' }],
     })
     expect(outcome.warnings.join('\n')).toMatch(/按文本写入/)
+  })
+
+  it('企业微信: splits a batch again when the inline --json payload would outgrow the argv limit', async () => {
+    const big = normalizeTable({
+      title: '长文',
+      columns: [{ name: '事项' }, { name: '正文' }],
+      rows: Array.from({ length: 30 }, (_, i) => ({ 事项: `r${i}`, 正文: 'x'.repeat(10_000) })),
+    })
+    const { cli, calls } = fakeCli('wecom-cli', (args) =>
+      args[1] === 'create'
+        ? ok(JSON.stringify({ errcode: 0, docid: 's3_x' }))
+        : ok(JSON.stringify({ errcode: 0, records: [] })),
+    )
+    const { ctx } = pushContext(cli)
+    const outcome = await wecom.createTable(ctx, big)
+    expect(outcome.rowsWritten).toBe(30)
+    const adds = calls.filter((c) => c.args[1] === 'records')
+    expect(adds.length).toBeGreaterThan(1)
+    for (const call of adds) expect(String(call.args[call.args.indexOf('--json') + 1]).length).toBeLessThan(130_000)
+    const written = adds.flatMap(
+      (c) => JSON.parse(String(c.args[c.args.indexOf('--json') + 1])).records as Array<{ values: { 事项: string } }>,
+    )
+    expect(written.map((r) => r.values.事项)).toEqual(big.rows.map((r) => (r.事项 as { value: string }).value))
   })
 
   it('企业微信: 851003 becomes an explanation instead of a raw code', async () => {

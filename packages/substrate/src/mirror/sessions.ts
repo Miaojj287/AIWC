@@ -3,6 +3,7 @@ import { type Db, type SqlParam, num } from './db'
 import { type ContactRow, type SessionRow, rowToContact, rowToSession } from './rows'
 import type { GroupMemberInput, ListContactsQuery, SessionFlags } from './types'
 import { nowMs } from '../shared/time'
+import { pinyinQuery, pinyinSearchKey } from './pinyin'
 
 const SESSION_ORDER = 'ORDER BY COALESCE(pinned_local, pinned) DESC, COALESCE(last_message_at, 0) DESC, id ASC'
 
@@ -26,11 +27,12 @@ export interface SessionOps {
 
 export function createSessionOps(db: Db): SessionOps {
   const upsertSessionSql = `
-    INSERT INTO sessions (id, kind, title, avatar_path, last_message_at, last_preview, last_sender, unread, member_count, pinned, muted, collapsed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, kind, title, avatar_path, last_message_at, last_preview, last_sender, unread, member_count, pinned, muted, collapsed, title_py)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       kind = excluded.kind,
       title = excluded.title,
+      title_py = excluded.title_py,
       avatar_path = COALESCE(excluded.avatar_path, sessions.avatar_path),
       last_message_at = CASE WHEN COALESCE(excluded.last_message_at, 0) >= COALESCE(sessions.last_message_at, 0) THEN excluded.last_message_at ELSE sessions.last_message_at END,
       last_preview = CASE WHEN COALESCE(excluded.last_message_at, 0) >= COALESCE(sessions.last_message_at, 0) AND excluded.last_preview IS NOT NULL THEN excluded.last_preview ELSE sessions.last_preview END,
@@ -42,11 +44,12 @@ export function createSessionOps(db: Db): SessionOps {
       collapsed = excluded.collapsed`
 
   const upsertContactSql = `
-    INSERT INTO contacts (username, nickname, remark, alias, avatar_path, kind, last_contact_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO contacts (username, nickname, remark, alias, avatar_path, kind, last_contact_at, name_py)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(username) DO UPDATE SET
       nickname = excluded.nickname,
       remark = excluded.remark,
+      name_py = excluded.name_py,
       alias = excluded.alias,
       avatar_path = COALESCE(excluded.avatar_path, contacts.avatar_path),
       kind = excluded.kind,
@@ -63,9 +66,14 @@ export function createSessionOps(db: Db): SessionOps {
     if (q.unreadOnly) clauses.push('unread > 0')
     const query = q.query?.trim()
     if (query) {
-      clauses.push("(title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR last_preview LIKE ? ESCAPE '\\')")
       const p = likePattern(query)
+      const py = pinyinQuery(query)
+      // `zs` / `cpq`: also match the title's pinyin key (full reading or initials, see ./pinyin).
+      clauses.push(
+        `(title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR last_preview LIKE ? ESCAPE '\\'${py ? " OR title_py LIKE ? ESCAPE '\\'" : ''})`,
+      )
       params.push(p, p, p)
+      if (py) params.push(likePattern(py))
     }
     return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params }
   }
@@ -79,11 +87,13 @@ export function createSessionOps(db: Db): SessionOps {
     }
     const query = q.query?.trim()
     if (query) {
+      const py = pinyinQuery(query)
       clauses.push(
-        "(nickname LIKE ? ESCAPE '\\' OR remark LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')",
+        `(nickname LIKE ? ESCAPE '\\' OR remark LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\'${py ? " OR name_py LIKE ? ESCAPE '\\'" : ''})`,
       )
       const p = likePattern(query)
       params.push(p, p, p, p)
+      if (py) params.push(likePattern(py))
     }
     return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params }
   }
@@ -107,13 +117,20 @@ export function createSessionOps(db: Db): SessionOps {
             s.pinned ? 1 : 0,
             s.muted ? 1 : 0,
             s.collapsed ? 1 : 0,
+            pinyinSearchKey(s.title),
           )
         }
       })
     },
 
     ensureSessionRow(id, kind, title) {
-      db.run('INSERT OR IGNORE INTO sessions (id, kind, title) VALUES (?, ?, ?)', id, kind, title ?? id)
+      db.run(
+        'INSERT OR IGNORE INTO sessions (id, kind, title, title_py) VALUES (?, ?, ?, ?)',
+        id,
+        kind,
+        title ?? id,
+        pinyinSearchKey(title),
+      )
     },
 
     getSession(id) {
@@ -169,6 +186,7 @@ export function createSessionOps(db: Db): SessionOps {
             c.avatarPath ?? null,
             c.kind,
             c.lastContactAt ?? null,
+            pinyinSearchKey(c.remark, c.nickname),
           )
         }
       })

@@ -2,8 +2,7 @@
 export const replydesk = {
   tab: {
     title: '回复台',
-    pendingSubtitle: '{n} 条 AI 起草的回复等待你确认',
-    idleSubtitle: '确认后才会发送',
+    pendingSubtitle: '{n} 条待确认',
     halted: '自动发送已熔断：{reason}',
     resume: '恢复',
     resumeFailed: '恢复失败',
@@ -31,6 +30,7 @@ export const replydesk = {
     retrySend: '重试发送',
     regenerate: '重新生成',
     regenerateFailed: '重新生成失败',
+    holdFailed: '暂停自动发送失败',
     reject: '拒绝',
     sendEdited: '修改后发送',
     editToEnable: '修改草稿后可用',

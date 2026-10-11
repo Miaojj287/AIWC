@@ -11,7 +11,7 @@
  * single AES block per candidate — walking the process again for every message shard would cost
  * seconds each.
  */
-import { classifyKeyAgainstPage, readFirstPage } from './sqlcipherPage'
+import { classifyKeyAgainstPage, readFirstPage, SQLCIPHER_SALT_SIZE } from './sqlcipherPage'
 
 /** How long a database no candidate could open stays "unknown" before it is tried again. */
 const RETRY_AFTER_MS = 30_000
@@ -32,10 +32,20 @@ export interface DbKeyResolver {
   keyFor(dbPath: string): string | undefined
 }
 
+/** Both caches are keyed by the file's KDF salt, which is what a rebuilt database changes. */
+interface KeyForSalt {
+  salt: string
+  keyHex: string
+}
+interface MissForSalt {
+  salt: string
+  at: number
+}
+
 export function createDbKeyResolver(deps: DbKeyResolverDeps): DbKeyResolver {
   const now = deps.now ?? Date.now
-  const resolved = new Map<string, string>()
-  const missedAt = new Map<string, number>()
+  const resolved = new Map<string, KeyForSalt>()
+  const missedAt = new Map<string, MissForSalt>()
   let candidates: readonly string[] = []
   let collectedAt = 0
 
@@ -47,15 +57,19 @@ export function createDbKeyResolver(deps: DbKeyResolverDeps): DbKeyResolver {
 
   return {
     keyFor(dbPath: string): string | undefined {
-      const cached = resolved.get(dbPath)
-      if (cached) return cached
-      const missed = missedAt.get(dbPath)
-      if (missed !== undefined && now() - missed < RETRY_AFTER_MS) return undefined
-
       const page = readFirstPage(dbPath)
       if (!page) return undefined
+      // Cheap identity for "still the same database": WeChat re-creating a shard gives it a fresh
+      // random salt, and the key that opened the old file would otherwise be handed out forever.
+      const salt = page.subarray(0, SQLCIPHER_SALT_SIZE).toString('hex')
+      const cached = resolved.get(dbPath)
+      if (cached?.salt === salt) return cached.keyHex
+      const missed = missedAt.get(dbPath)
+      if (missed?.salt === salt && now() - missed.at < RETRY_AFTER_MS) return undefined
+
       if (fits(page, deps.sessionKeyHex)) {
-        resolved.set(dbPath, deps.sessionKeyHex)
+        resolved.set(dbPath, { salt, keyHex: deps.sessionKeyHex })
+        missedAt.delete(dbPath)
         return deps.sessionKeyHex
       }
 
@@ -69,10 +83,11 @@ export function createDbKeyResolver(deps: DbKeyResolverDeps): DbKeyResolver {
       }
       if (!match) {
         deps.logger?.('warn', '[key] no key matches this database', { dbPath, candidates: candidates.length })
-        missedAt.set(dbPath, now())
+        resolved.delete(dbPath)
+        missedAt.set(dbPath, { salt, at: now() })
         return undefined
       }
-      resolved.set(dbPath, match)
+      resolved.set(dbPath, { salt, keyHex: match })
       missedAt.delete(dbPath)
       return match
     },

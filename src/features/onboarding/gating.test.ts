@@ -109,6 +109,28 @@ describe('key steps', () => {
     expect(keys.image_aes.status).toBe('manual')
     expect(keys.db_key).toMatchObject({ status: 'failed', needsPermission: true })
   })
+  it('does not show a db key as acquired when it failed verification (main did not store it)', () => {
+    const keys = applyKeySteps(EMPTY_KEYS, [
+      { id: 'db_key', label: 'db', status: 'done' },
+      { id: 'verify', label: 'verify', status: 'failed', detail: '密钥校验失败' },
+    ])
+    expect(keys.db_key).toMatchObject({ status: 'failed' })
+  })
+  it('keeps the previous key state for steps a cancel or an earlier failure left unrun', () => {
+    const prev = { ...EMPTY_KEYS, image_xor: { status: 'acquired' as const, source: 'cached' as const } }
+    const keys = applyKeySteps(prev, [
+      { id: 'db_key', label: 'db', status: 'failed', failure: 'cancelled' },
+      { id: 'image_xor', label: 'xor', status: 'failed', failure: 'skipped' },
+    ])
+    expect(keys.db_key).toEqual({ status: 'missing' })
+    expect(keys.image_xor).toEqual({ status: 'acquired', source: 'cached' })
+  })
+  it('does not send a Developer Tools failure to the Full Disk Access guide', () => {
+    const steps: KeyAcquireStep[] = [
+      { id: 'db_key', label: 'db', status: 'failed', failure: 'needs_authorization', detail: 'permission denied' },
+    ]
+    expect(needsPermission(steps)).toBe(false)
+  })
 })
 
 describe('activeStepIndex', () => {
@@ -117,6 +139,7 @@ describe('activeStepIndex', () => {
     expect(activeStepIndex('connect', false, false)).toBe(1)
     expect(activeStepIndex('connect', true, false)).toBe(2)
     expect(activeStepIndex('connect', true, true)).toBe(3)
+    expect(activeStepIndex('model', true, false)).toBe(3)
   })
 })
 

@@ -59,7 +59,7 @@ describe('model draft', () => {
     expect(validateModelDraft({ ...d, baseUrl: 'api.openai.com' }, true).baseUrl).toMatch(/http/)
     expect(validateModelDraft({ ...d, modelId: '' }, true).modelId).toBe('请填写模型 ID')
     expect(validateModelDraft({ kind: 'ollama', baseUrl: '', modelId: 'qwen3:8b', apiKey: '' }, false).baseUrl).toBe(
-      '请填写接口 URL',
+      '请填写接口地址',
     )
     expect(
       isDraftValid(

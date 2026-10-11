@@ -1,5 +1,5 @@
 /**
- * Settings page model: the five pages, their nav grouping and header copy (DESIGN-SPEC §2).
+ * Settings page model: the pages, their nav grouping and header copy (DESIGN-SPEC §2).
  * Pure data — the search index and the Tab both derive from it.
  */
 import type { CommandMap } from '@/app/commands'
@@ -7,37 +7,67 @@ import { t, type MessageKey } from '@/i18n'
 
 export type SettingsPage = NonNullable<CommandMap['tab.openSettings']['page']>
 
-export const SETTINGS_PAGES: readonly SettingsPage[] = ['general', 'account', 'pets', 'ai', 'memory', 'about']
+export const SETTINGS_PAGES: readonly SettingsPage[] = [
+  'general',
+  'account',
+  'data',
+  'pets',
+  'ai',
+  'usage',
+  'memory',
+  'skills',
+  'todo',
+  'extensions',
+  'about',
+]
 
 export interface SettingsPageMeta {
   /** Nav label. */
   label: MessageKey
   /** Page title (20px). */
   title: MessageKey
-  /** One-line description under the title (weak). */
-  description: MessageKey
+  /** One-line description under the title (weak) — only where the title alone does not say what the page is for. */
+  description?: MessageKey
   /** lucide icon name used by the nav. */
-  icon: 'sliders-horizontal' | 'user-round' | 'paw-print' | 'cpu' | 'book-open' | 'info'
+  icon:
+    | 'sliders-horizontal'
+    | 'user-round'
+    | 'hard-drive'
+    | 'paw-print'
+    | 'cpu'
+    | 'chart-column'
+    | 'book-open'
+    | 'wand-sparkles'
+    | 'list-todo'
+    | 'blocks'
+    | 'info'
 }
 
 export const PAGE_META: Record<SettingsPage, SettingsPageMeta> = {
   general: {
     label: 'settings.nav.pages.general.label',
     title: 'settings.nav.pages.general.title',
-    description: 'settings.nav.pages.general.description',
     icon: 'sliders-horizontal',
   },
   account: {
     label: 'settings.nav.pages.account.label',
     title: 'settings.nav.pages.account.title',
-    description: 'settings.nav.pages.account.description',
     icon: 'user-round',
+  },
+  data: {
+    label: 'settings.nav.pages.data.label',
+    title: 'settings.nav.pages.data.title',
+    icon: 'hard-drive',
   },
   ai: {
     label: 'settings.nav.pages.ai.label',
     title: 'settings.nav.pages.ai.title',
-    description: 'settings.nav.pages.ai.description',
     icon: 'cpu',
+  },
+  usage: {
+    label: 'settings.nav.pages.usage.label',
+    title: 'settings.nav.pages.usage.title',
+    icon: 'chart-column',
   },
   pets: {
     label: 'settings.nav.pages.pets.label',
@@ -51,10 +81,27 @@ export const PAGE_META: Record<SettingsPage, SettingsPageMeta> = {
     description: 'settings.nav.pages.memory.description',
     icon: 'book-open',
   },
+  skills: {
+    label: 'settings.nav.pages.skills.label',
+    title: 'settings.nav.pages.skills.title',
+    description: 'settings.nav.pages.skills.description',
+    icon: 'wand-sparkles',
+  },
+  todo: {
+    label: 'settings.nav.pages.todo.label',
+    title: 'settings.nav.pages.todo.title',
+    description: 'settings.nav.pages.todo.description',
+    icon: 'list-todo',
+  },
+  extensions: {
+    label: 'settings.nav.pages.extensions.label',
+    title: 'settings.nav.pages.extensions.title',
+    description: 'settings.nav.pages.extensions.description',
+    icon: 'blocks',
+  },
   about: {
     label: 'settings.nav.pages.about.label',
     title: 'settings.nav.pages.about.title',
-    description: 'settings.nav.pages.about.description',
     icon: 'info',
   },
 }
@@ -66,8 +113,8 @@ export interface NavGroup {
 }
 
 export const NAV_GROUPS: readonly NavGroup[] = [
-  { id: 'common', label: 'settings.nav.groups.common', pages: ['general', 'account', 'pets'] },
-  { id: 'ai', label: 'settings.nav.groups.ai', pages: ['ai', 'memory'] },
+  { id: 'common', label: 'settings.nav.groups.common', pages: ['general', 'account', 'data', 'pets'] },
+  { id: 'ai', label: 'settings.nav.groups.ai', pages: ['ai', 'usage', 'memory', 'skills', 'todo', 'extensions'] },
   { id: 'about', label: 'settings.nav.groups.about', pages: ['about'] },
 ]
 

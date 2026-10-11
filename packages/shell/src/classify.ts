@@ -9,6 +9,22 @@
  * The parser is deliberately conservative: anything it cannot understand is a write, never a read.
  */
 import type { ToolRisk } from '@aiwc/protocol'
+import {
+  DESTRUCTIVE_COMMANDS,
+  FORCE_FLAG,
+  GLUED_REDIRECT_RE,
+  HEREDOC_RE,
+  INTERPRETERS,
+  NETWORK,
+  READ_ONLY,
+  RECURSIVE_FLAG,
+  REDIRECT_RE,
+  SECRET_PATH_RE,
+  SH_FAMILY,
+  SUBCOMMAND_TOOLS,
+  TRANSPARENT_WRAPPERS,
+} from './vocabulary'
+import { guardedPathNote, type PathContext } from './pathGuard'
 
 export interface CommandSegment {
   argv: string[]
@@ -30,7 +46,11 @@ export interface ClassifyOptions {
   classifiers?: readonly SegmentClassifier[]
   /** Paths whose mention makes a command destructive (the app's own secret store, decrypted mirror…). */
   protectedPaths?: readonly string[]
+  /** The directory the line would run in; judged like a path named in the command itself. */
+  cwd?: string
   platform?: NodeJS.Platform
+  /** How the line's paths resolve (cwd, known variables, sandbox): protected paths are matched after resolving. */
+  pathContext?: PathContext
 }
 
 const ORDER: Record<ToolRisk, number> = { read: 0, write: 1, send: 2, destructive: 3 }
@@ -152,41 +172,6 @@ function matchParen(text: string, open: number): number {
   return text.length
 }
 
-// ---- vocabulary ----------------------------------------------------------------------------------
-
-const READ_ONLY = new Set([
-  'ls', 'cat', 'head', 'tail', 'less', 'more', 'wc', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'find', 'fd', 'pwd', 'echo', 'printf',
-  'which', 'whereis', 'type', 'command', 'file', 'stat', 'du', 'df', 'date', 'cal', 'uname', 'whoami', 'id', 'printenv', 'env',
-  'basename', 'dirname', 'realpath', 'readlink', 'tree', 'sort', 'uniq', 'cut', 'awk', 'tr', 'jq', 'yq', 'diff', 'cmp', 'md5',
-  'md5sum', 'shasum', 'sha256sum', 'base64', 'xxd', 'hexdump', 'od', 'strings', 'column', 'paste', 'comm', 'nl', 'tac', 'rev',
-  'fold', 'true', 'false', 'test', '[', 'sleep', 'ps', 'lsof', 'netstat', 'ifconfig', 'sw_vers', 'mdfind', 'mdls', 'otool', 'nm',
-  'seq', 'expr', 'bc', 'dc', 'tput', 'locale', 'hostname', 'uptime', 'w', 'last', 'groups', 'arch', 'nproc', 'sysctl', 'plutil',
-  'xcode-select', 'xcrun', 'iconv', 'zcat', 'gunzip', 'gzip', 'tar', 'unzip', 'zip', 'pandoc', 'wc', 'look', 'man', 'help', 'ls',
-  'pbpaste', 'Get-ChildItem', 'Get-Content', 'Get-Item', 'Get-Location', 'Get-Date', 'Get-Process', 'Select-String', 'dir', 'type',
-  'findstr', 'where', 'ver', 'systeminfo', 'tasklist', 'ipconfig', 'Write-Output', 'Write-Host',
-])
-// `tar`, `zip`, `gzip`, `pandoc`, `iconv` write files — but only where they are told; the sandbox keeps
-// that inside the workspace, so they are treated as reads for approval purposes like `sort > file` is.
-
-const NETWORK = new Set([
-  'curl', 'wget', 'http', 'https', 'xh', 'httpie', 'aria2c', 'nc', 'ncat', 'netcat', 'telnet', 'ssh', 'scp', 'sftp', 'ftp',
-  'rsync', 'mail', 'mailx', 'sendmail', 'msmtp', 'mutt', 'openssl', 'dig', 'nslookup', 'ping', 'traceroute', 'gh', 'glab',
-  'Invoke-WebRequest', 'Invoke-RestMethod', 'iwr', 'irm', 'Send-MailMessage',
-])
-
-const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'fish', 'ksh', 'dash', 'python', 'python3', 'node', 'perl', 'ruby', 'php', 'deno', 'bun', 'osascript', 'pwsh', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe'])
-
-const DESTRUCTIVE_COMMANDS = new Set([
-  'sudo', 'su', 'doas', 'dd', 'mkfs', 'newfs', 'fdisk', 'gdisk', 'parted', 'shutdown', 'reboot', 'halt', 'poweroff', 'nvram',
-  'csrutil', 'spctl', 'tccutil', 'killall', 'pkill', 'crontab', 'at', 'launchctl', 'systemctl', 'service', 'chroot', 'mount',
-  'umount', 'diskpart', 'format', 'bcdedit', 'reg', 'Remove-Item', 'rd', 'rmdir', 'del', 'erase',
-])
-
-/** Credentials and the app's own decrypted data: any command that names them cannot be pre-approved. */
-const SECRET_PATH_RE = /(?:^|[\s/"'=])(?:\.ssh\/|\.aws\/|\.gnupg\/|\.netrc\b|\.npmrc\b|\.pypirc\b|\.docker\/config\.json|credentials\.enc\b|secrets\.bin\b|Library\/Keychains\/|\.env(?:\.[\w-]+)?\b|id_rsa\b|id_ed25519\b)/
-
-const TRANSPARENT_WRAPPERS = new Set(['env', 'nohup', 'time', 'nice', 'ionice', 'command', 'exec', 'builtin', 'caffeinate', 'timeout', 'gtimeout', 'xargs', 'watch'])
-
 // ---- per-segment rules -----------------------------------------------------------------------------
 
 interface Verdict {
@@ -224,39 +209,119 @@ function unwrap(argv: string[]): string[] {
   return a
 }
 
-const RECURSIVE_FLAG = /^-[a-zA-Z]*[rR]/
-const FORCE_FLAG = /^-[a-zA-Z]*f/
+/**
+ * The command line(s) a `sh`-family invocation would execute. `-c` can be combined with other short
+ * flags (`-lc`, `-ic`) and glued to its argument (`-c'rm -rf ~'` reaches the tokenizer as one word), so
+ * both readings are returned and the caller takes the highest risk of the two — missing either one lets
+ * `zsh -ic 'rm -rf ~'` through as a plain `write`.
+ */
+function shellCommandArgs(args: readonly string[]): string[] {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string
+    if (!a.startsWith('-') || a.startsWith('--')) continue
+    const c = a.indexOf('c', 1)
+    if (c < 0) continue
+    const glued = a.slice(c + 1)
+    const next = args[i + 1]
+    return [...(glued ? [glued] : []), ...(next !== undefined ? [next] : [])]
+  }
+  return []
+}
+
+/** The package `npx` / `bun x` would fetch and run: the first word that is not a flag. */
+const packageArg = (args: readonly string[]): string => args.find((a) => !a.startsWith('-')) ?? ''
 
 function classifyGit(args: string[]): Verdict {
   const sub = args[0] ?? ''
   const rest = args.slice(1)
   const prefix = ['git', sub]
   switch (sub) {
-    case 'status': case 'log': case 'diff': case 'show': case 'rev-parse': case 'blame': case 'ls-files': case 'ls-tree':
-    case 'cat-file': case 'describe': case 'grep': case 'shortlog': case 'reflog': case 'ls-remote': case 'var': case 'help':
-    case 'version': case '--version': case 'check-ignore': case 'rev-list': case 'name-rev':
+    case 'status':
+    case 'log':
+    case 'diff':
+    case 'show':
+    case 'rev-parse':
+    case 'blame':
+    case 'ls-files':
+    case 'ls-tree':
+    case 'cat-file':
+    case 'describe':
+    case 'grep':
+    case 'shortlog':
+    case 'reflog':
+    case 'ls-remote':
+    case 'var':
+    case 'help':
+    case 'version':
+    case '--version':
+    case 'check-ignore':
+    case 'rev-list':
+    case 'name-rev':
       return { risk: 'read', prefix }
     case 'branch':
-      return rest.some((a) => /^-[a-zA-Z]*[dDmM]/.test(a) || a === '--delete' || a === '--move') ? { risk: 'destructive', prefix, note: '删除或重命名分支' } : rest.length === 0 || rest.every((a) => a.startsWith('-')) ? { risk: 'read', prefix } : { risk: 'write', prefix }
+      return rest.some((a) => /^-[a-zA-Z]*[dDmM]/.test(a) || a === '--delete' || a === '--move')
+        ? { risk: 'destructive', prefix, note: '删除或重命名分支' }
+        : rest.length === 0 || rest.every((a) => a.startsWith('-'))
+          ? { risk: 'read', prefix }
+          : { risk: 'write', prefix }
     case 'tag':
-      return rest.length === 0 || rest.every((a) => a === '-l' || a === '--list' || a === '-n') ? { risk: 'read', prefix } : rest.includes('-d') || rest.includes('--delete') ? { risk: 'destructive', prefix } : { risk: 'write', prefix }
+      return rest.length === 0 || rest.every((a) => a === '-l' || a === '--list' || a === '-n')
+        ? { risk: 'read', prefix }
+        : rest.includes('-d') || rest.includes('--delete')
+          ? { risk: 'destructive', prefix }
+          : { risk: 'write', prefix }
     case 'remote':
-      return rest.length === 0 || rest[0] === '-v' || rest[0] === 'show' || rest[0] === 'get-url' ? { risk: 'read', prefix } : { risk: 'write', prefix }
+      return rest.length === 0 || rest[0] === '-v' || rest[0] === 'show' || rest[0] === 'get-url'
+        ? { risk: 'read', prefix }
+        : { risk: 'write', prefix }
     case 'stash':
-      return rest[0] === 'list' || rest[0] === 'show' ? { risk: 'read', prefix } : rest[0] === 'drop' || rest[0] === 'clear' ? { risk: 'destructive', prefix } : { risk: 'write', prefix }
+      return rest[0] === 'list' || rest[0] === 'show'
+        ? { risk: 'read', prefix }
+        : rest[0] === 'drop' || rest[0] === 'clear'
+          ? { risk: 'destructive', prefix }
+          : { risk: 'write', prefix }
     case 'config':
-      return rest.some((a) => a === '--get' || a === '-l' || a === '--list' || a === '--get-all' || a === '--get-regexp') ? { risk: 'read', prefix } : { risk: 'write', prefix }
+      return rest.some(
+        (a) => a === '--get' || a === '-l' || a === '--list' || a === '--get-all' || a === '--get-regexp',
+      )
+        ? { risk: 'read', prefix }
+        : { risk: 'write', prefix }
     case 'worktree':
-      return rest[0] === 'list' ? { risk: 'read', prefix } : rest[0] === 'remove' || rest[0] === 'prune' ? { risk: 'destructive', prefix } : { risk: 'write', prefix }
+      return rest[0] === 'list'
+        ? { risk: 'read', prefix }
+        : rest[0] === 'remove' || rest[0] === 'prune'
+          ? { risk: 'destructive', prefix }
+          : { risk: 'write', prefix }
     case 'push':
-      return rest.some((a) => a === '-f' || a === '--force' || a.startsWith('+') || a === '--delete' || a === '-d' || a === '--force-with-lease') ? { risk: 'destructive', prefix, note: '强制推送或删除远端分支' } : { risk: 'send', prefix, note: '推送到远端仓库' }
+      return rest.some(
+        (a) =>
+          a === '-f' ||
+          a === '--force' ||
+          a.startsWith('+') ||
+          a === '--delete' ||
+          a === '-d' ||
+          a === '--force-with-lease',
+      )
+        ? { risk: 'destructive', prefix, note: '强制推送或删除远端分支' }
+        : { risk: 'send', prefix, note: '推送到远端仓库' }
     case 'reset':
-      return rest.includes('--hard') || rest.includes('--merge') ? { risk: 'destructive', prefix, note: '丢弃工作区改动' } : { risk: 'write', prefix }
+      return rest.includes('--hard') || rest.includes('--merge')
+        ? { risk: 'destructive', prefix, note: '丢弃工作区改动' }
+        : { risk: 'write', prefix }
     case 'clean':
-      return rest.some((a) => FORCE_FLAG.test(a) || a === '--force') ? { risk: 'destructive', prefix, note: '删除未跟踪文件' } : { risk: 'read', prefix }
-    case 'checkout': case 'restore': case 'switch':
-      return rest.includes('--') || rest.includes('.') || rest.some((a) => a === '-f' || a === '--force') ? { risk: 'destructive', prefix, note: '覆盖工作区文件' } : { risk: 'write', prefix }
-    case 'filter-branch': case 'filter-repo': case 'gc': case 'prune':
+      return rest.some((a) => FORCE_FLAG.test(a) || a === '--force')
+        ? { risk: 'destructive', prefix, note: '删除未跟踪文件' }
+        : { risk: 'read', prefix }
+    case 'checkout':
+    case 'restore':
+    case 'switch':
+      return rest.includes('--') || rest.includes('.') || rest.some((a) => a === '-f' || a === '--force')
+        ? { risk: 'destructive', prefix, note: '覆盖工作区文件' }
+        : { risk: 'write', prefix }
+    case 'filter-branch':
+    case 'filter-repo':
+    case 'gc':
+    case 'prune':
       return { risk: 'destructive', prefix }
     default:
       return { risk: 'write', prefix }
@@ -266,13 +331,51 @@ function classifyGit(args: string[]): Verdict {
 function classifyPackageManager(tool: string, args: string[]): Verdict {
   const sub = args[0] ?? ''
   const prefix = [tool, sub]
-  if (['ls', 'list', 'view', 'info', 'show', 'outdated', 'why', 'explain', 'search', 'help', 'ping', 'root', 'prefix', 'bin', '-v', '--version', 'version', 'audit', 'doctor', 'leaves', 'deps', 'freeze', 'check', 'config', 'cache'].includes(sub)) {
-    if (sub === 'config' && !(args[1] === 'get' || args[1] === 'list' || args[1] === 'ls')) return { risk: 'write', prefix }
+  if (
+    [
+      'ls',
+      'list',
+      'view',
+      'info',
+      'show',
+      'outdated',
+      'why',
+      'explain',
+      'search',
+      'help',
+      'ping',
+      'root',
+      'prefix',
+      'bin',
+      '-v',
+      '--version',
+      'version',
+      'audit',
+      'doctor',
+      'leaves',
+      'deps',
+      'freeze',
+      'check',
+      'config',
+      'cache',
+    ].includes(sub)
+  ) {
+    if (sub === 'config' && !(args[1] === 'get' || args[1] === 'list' || args[1] === 'ls'))
+      return { risk: 'write', prefix }
     if (sub === 'cache' && args[1] !== 'ls' && args[1] !== 'verify') return { risk: 'write', prefix }
     return { risk: 'read', prefix }
   }
-  if (sub === 'publish' || sub === 'deprecate' || sub === 'unpublish' || sub === 'login' || sub === 'adduser' || sub === 'token') return { risk: sub === 'unpublish' ? 'destructive' : 'send', prefix, note: '会把内容发布到公共仓库' }
-  if (sub === 'uninstall' || sub === 'remove' || sub === 'rm' || sub === 'un' || sub === 'prune') return { risk: args.includes('-g') || args.includes('--global') ? 'destructive' : 'write', prefix }
+  if (
+    sub === 'publish' ||
+    sub === 'deprecate' ||
+    sub === 'unpublish' ||
+    sub === 'login' ||
+    sub === 'adduser' ||
+    sub === 'token'
+  )
+    return { risk: sub === 'unpublish' ? 'destructive' : 'send', prefix, note: '会把内容发布到公共仓库' }
+  if (sub === 'uninstall' || sub === 'remove' || sub === 'rm' || sub === 'un' || sub === 'prune')
+    return { risk: args.includes('-g') || args.includes('--global') ? 'destructive' : 'write', prefix }
   return { risk: 'write', prefix }
 }
 
@@ -283,52 +386,111 @@ function classifySegment(argvIn: string[], opts: ClassifyOptions): Verdict {
   const args = argv.slice(1)
   const joined = argvIn.join(' ')
 
+  // A segment naming credentials is destructive whoever grades it: a vendor classifier knows its own
+  // verbs, not that `lark-cli base +record-batch-create --json @~/.ssh/id_rsa` uploads a private key.
+  const secret = opts.protectedPaths?.some((p) => p && joined.includes(p))
+    ? '涉及 AIWC 自己的密钥或解密数据'
+    : SECRET_PATH_RE.test(joined)
+      ? '涉及凭证文件（SSH / 云服务 / 环境变量密钥）'
+      : undefined
+
   for (const classify of opts.classifiers ?? []) {
     const hit = classify(argv)
-    if (hit) return { risk: hit.risk, note: hit.note, prefix: hit.allowKey ? hit.allowKey.split(' ') : undefined }
+    if (!hit) continue
+    const prefix = hit.allowKey ? hit.allowKey.split(' ') : undefined
+    if (!secret) return { risk: hit.risk, note: hit.note, prefix }
+    return { risk: 'destructive', note: [hit.note, secret].filter(Boolean).join('；'), prefix }
   }
 
-  if (opts.protectedPaths?.some((p) => p && joined.includes(p))) return { risk: 'destructive', note: '涉及 AIWC 自己的密钥或解密数据' }
-  if (SECRET_PATH_RE.test(joined)) return { risk: 'destructive', note: '涉及凭证文件（SSH / 云服务 / 环境变量密钥）' }
+  if (secret) return { risk: 'destructive', note: secret }
 
   if (DESTRUCTIVE_COMMANDS.has(head)) {
     if (head === 'crontab' && args.includes('-l')) return { risk: 'read' }
     if (head === 'launchctl' && (args[0] === 'list' || args[0] === 'print')) return { risk: 'read' }
-    if (head === 'systemctl' && (args[0] === 'status' || args[0] === 'list-units' || args[0] === 'is-active')) return { risk: 'read' }
+    if (head === 'systemctl' && (args[0] === 'status' || args[0] === 'list-units' || args[0] === 'is-active'))
+      return { risk: 'read' }
     if (head === 'reg' && args[0] === 'query') return { risk: 'read' }
-    if ((head === 'rmdir' || head === 'rd') && !args.some((a) => RECURSIVE_FLAG.test(a) || /^\/s$/i.test(a))) return { risk: 'write' }
-    return { risk: 'destructive', note: head === 'sudo' || head === 'su' || head === 'doas' ? '需要管理员权限' : `${head} 会改变系统或不可恢复` }
+    if ((head === 'rmdir' || head === 'rd') && !args.some((a) => RECURSIVE_FLAG.test(a) || /^\/s$/i.test(a)))
+      return { risk: 'write' }
+    return {
+      risk: 'destructive',
+      note: head === 'sudo' || head === 'su' || head === 'doas' ? '需要管理员权限' : `${head} 会改变系统或不可恢复`,
+    }
   }
   if (head === 'rm') {
     const recursive = args.some((a) => RECURSIVE_FLAG.test(a) || a === '--recursive')
-    const dangerousTarget = args.some((a) => !a.startsWith('-') && (/^(\/|~|\$HOME|\*|\.\.?)\/?$/.test(a) || /^\/(Users|home|Library|System|Applications|usr|etc|var|private)\b/.test(a)))
+    const dangerousTarget = args.some(
+      (a) =>
+        !a.startsWith('-') &&
+        (/^(\/|~|\$HOME|\*|\.\.?)\/?$/.test(a) ||
+          /^\/(Users|home|Library|System|Applications|usr|etc|var|private)\b/.test(a)),
+    )
     return recursive || dangerousTarget ? { risk: 'destructive', note: '递归删除或删除系统目录' } : { risk: 'write' }
   }
-  if (head === 'chmod' || head === 'chown' || head === 'chgrp' || head === 'chflags') return args.some((a) => RECURSIVE_FLAG.test(a)) ? { risk: 'destructive', note: '递归修改权限' } : { risk: 'write' }
-  if (head === 'kill') return args.some((a) => /^-?(9|KILL|-1)$/.test(a)) && args.includes('-1') ? { risk: 'destructive' } : { risk: 'write' }
-  if (head === 'defaults') return args[0] === 'read' || args[0] === 'domains' || args[0] === 'find' ? { risk: 'read', prefix: ['defaults', 'read'] } : { risk: 'destructive', note: '修改系统偏好设置' }
-  if (head === 'diskutil') return args[0] === 'list' || args[0] === 'info' || args[0] === 'apfs' && args[1] === 'list' ? { risk: 'read' } : { risk: 'destructive', note: '磁盘操作' }
+  if (head === 'chmod' || head === 'chown' || head === 'chgrp' || head === 'chflags')
+    return args.some((a) => RECURSIVE_FLAG.test(a)) ? { risk: 'destructive', note: '递归修改权限' } : { risk: 'write' }
+  if (head === 'kill')
+    return args.some((a) => /^-?(9|KILL|-1)$/.test(a)) && args.includes('-1')
+      ? { risk: 'destructive' }
+      : { risk: 'write' }
+  if (head === 'defaults')
+    return args[0] === 'read' || args[0] === 'domains' || args[0] === 'find'
+      ? { risk: 'read', prefix: ['defaults', 'read'] }
+      : { risk: 'destructive', note: '修改系统偏好设置' }
+  if (head === 'diskutil')
+    return args[0] === 'list' || args[0] === 'info' || (args[0] === 'apfs' && args[1] === 'list')
+      ? { risk: 'read' }
+      : { risk: 'destructive', note: '磁盘操作' }
   if (head === 'security') return { risk: 'destructive', note: '访问钥匙串' }
-  if (head === 'sysctl') return args.some((a) => a === '-w' || a.includes('=')) ? { risk: 'destructive' } : { risk: 'read' }
+  if (head === 'sysctl')
+    return args.some((a) => a === '-w' || a.includes('=')) ? { risk: 'destructive' } : { risk: 'read' }
   if (head === 'git') return classifyGit(args)
-  if (['npm', 'pnpm', 'yarn', 'bun', 'npx', 'pip', 'pip3', 'brew', 'gem', 'cargo', 'go', 'uv', 'poetry', 'conda'].includes(head)) {
-    if (head === 'npx' || (head === 'bun' && args[0] === 'x')) return { risk: 'write', prefix: [head, args[head === 'bun' ? 1 : 0] ?? ''] }
+  if (
+    [
+      'npm',
+      'pnpm',
+      'yarn',
+      'bun',
+      'npx',
+      'pip',
+      'pip3',
+      'brew',
+      'gem',
+      'cargo',
+      'go',
+      'uv',
+      'poetry',
+      'conda',
+    ].includes(head)
+  ) {
+    // The allow key must name the package, not the flag in front of it: `npx -y a` and `npx -y b` fetch
+    // and run different code and must not share one 「总是允许」 grant.
+    if (head === 'npx' || (head === 'bun' && args[0] === 'x'))
+      return { risk: 'write', prefix: [head, packageArg(head === 'bun' ? args.slice(1) : args)] }
     return classifyPackageManager(head, args)
   }
   if (NETWORK.has(head)) {
     if (head === 'openssl' && !args.includes('s_client')) return { risk: 'write' }
-    if ((head === 'gh' || head === 'glab') && ['repo', 'pr', 'issue', 'run', 'api', 'release', 'gist'].includes(args[0] ?? '') && ['view', 'list', 'status', 'diff', 'checks'].includes(args[1] ?? '')) return { risk: 'read', prefix: [head, args[0] as string, args[1] as string] }
+    if (
+      (head === 'gh' || head === 'glab') &&
+      ['repo', 'pr', 'issue', 'run', 'api', 'release', 'gist'].includes(args[0] ?? '') &&
+      ['view', 'list', 'status', 'diff', 'checks'].includes(args[1] ?? '')
+    )
+      return { risk: 'read', prefix: [head, args[0] as string, args[1] as string] }
     return { risk: 'send', note: '会访问网络', prefix: [head] }
   }
   if (INTERPRETERS.has(head)) {
     // `sh -c '…'`: judge the inner command line, not the interpreter.
-    const cIndex = args.findIndex((a) => a === '-c' || a === '-lc' || a === '-e' || a === '-Command' || a === '-C')
-    if (cIndex >= 0 && (head === 'sh' || head === 'bash' || head === 'zsh' || head === 'dash' || head === 'ksh' || head === 'fish')) {
-      const inner = args[cIndex + 1]
-      if (inner) {
-        const innerPolicy = classifyCommand(inner, opts)
-        return { risk: maxRisk('write', innerPolicy.risk), note: innerPolicy.note, prefix: [head, '-c'] }
+    const inner = SH_FAMILY.has(head) ? shellCommandArgs(args) : []
+    if (inner.length > 0) {
+      let risk: ToolRisk = 'write'
+      const notes: string[] = []
+      for (const candidate of inner) {
+        const innerPolicy = classifyCommand(candidate, opts)
+        risk = maxRisk(risk, innerPolicy.risk)
+        if (innerPolicy.note) notes.push(innerPolicy.note)
       }
+      return { risk, note: notes.length > 0 ? [...new Set(notes)].join('；') : undefined, prefix: [head, '-c'] }
     }
     if (head === 'osascript') return { risk: 'send', note: '可以控制其他应用（包括发送消息）' }
     return { risk: 'write', prefix: [head, args.find((a) => !a.startsWith('-')) ?? ''] }
@@ -337,9 +499,12 @@ function classifySegment(argvIn: string[], opts: ClassifyOptions): Verdict {
   if (READ_ONLY.has(head)) {
     if (head === 'sed' && args.some((a) => /^-[a-zA-Z]*i/.test(a))) return { risk: 'write' }
     if (head === 'find' && args.some((a) => a === '-delete' || a === '-exec' || a === '-execdir' || a === '-ok')) {
-      const exec = args.indexOf('-exec') >= 0 ? args.slice(args.indexOf('-exec') + 1) : args.slice(args.indexOf('-execdir') + 1)
+      const exec =
+        args.indexOf('-exec') >= 0 ? args.slice(args.indexOf('-exec') + 1) : args.slice(args.indexOf('-execdir') + 1)
       const inner = exec.length > 0 ? classifySegment(exec, opts) : { risk: 'write' as ToolRisk }
-      return args.includes('-delete') ? { risk: 'destructive', note: 'find -delete' } : { risk: maxRisk('write', inner.risk), note: inner.note }
+      return args.includes('-delete')
+        ? { risk: 'destructive', note: 'find -delete' }
+        : { risk: maxRisk('write', inner.risk), note: inner.note }
     }
     if (head === 'tar' && args.some((a) => /^-?[a-zA-Z]*x/.test(a))) return { risk: 'write' }
     if (head === 'unzip' || head === 'gunzip') return { risk: 'write' }
@@ -351,8 +516,38 @@ function classifySegment(argvIn: string[], opts: ClassifyOptions): Verdict {
 
 // ---- line-level rules -------------------------------------------------------------------------------
 
-const REDIRECT_RE = /(?:^|\s)(?:\d?>>?|&>|>\|)\s*(\S+)/g
-const HEREDOC_RE = /<<-?\s*['"]?\w+/
+/** Replace the contents of quoted spans with spaces, keeping offsets, so only shell syntax is left. */
+function blankQuoted(command: string): string {
+  let out = ''
+  let quote: "'" | '"' | undefined
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] as string
+    if (quote === undefined && ch === '\\' && i + 1 < command.length) {
+      out += '  '
+      i++
+      continue
+    }
+    if (quote === undefined && (ch === "'" || ch === '"')) {
+      quote = ch
+      out += ch
+      continue
+    }
+    if (quote === undefined) {
+      out += ch
+      continue
+    }
+    if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+      out += '  '
+      i++
+      continue
+    }
+    if (ch === quote) {
+      quote = undefined
+      out += ch
+    } else out += ' '
+  }
+  return out
+}
 
 /** Classify a whole command line; the line's risk is the highest of its parts. */
 export function classifyCommand(command: string, opts: ClassifyOptions = {}): CommandPolicy {
@@ -385,8 +580,17 @@ export function classifyCommand(command: string, opts: ClassifyOptions = {}): Co
     if (prefix && !prefixes.includes(prefix)) prefixes.push(prefix)
   }
 
+  // `cat ../mirror.db`, `type ..\mirror.db`, `cat "$AIWC_WORKSPACE/../extensions.json"`: judged by where the
+  // words point once resolved, not by how they are spelled.
+  const guarded = guardedPathNote(command, segments, opts)
+  if (guarded) {
+    sawSecrets = true
+    risk = 'destructive'
+    notes.push(guarded)
+  }
+
   // Redirections write files; into a device they can wipe a disk.
-  for (const m of command.matchAll(REDIRECT_RE)) {
+  for (const m of [...command.matchAll(REDIRECT_RE), ...blankQuoted(command).matchAll(GLUED_REDIRECT_RE)]) {
     const target = m[1] as string
     if (/^\/dev\/(r?disk|sd|nvme|null|stdout|stderr|tty)/.test(target)) {
       if (!/^\/dev\/(null|stdout|stderr|tty)/.test(target)) {
@@ -398,18 +602,27 @@ export function classifyCommand(command: string, opts: ClassifyOptions = {}): Co
     risk = maxRisk(risk, 'write')
   }
   if (HEREDOC_RE.test(command)) risk = maxRisk(risk, 'write')
+  // The working directory names files just as the command line does: `cat config` run in ~/.ssh reads a
+  // credential file without ever spelling one out.
+  const cwd = opts.cwd
+  if (cwd && (SECRET_PATH_RE.test(`${cwd}/`) || opts.protectedPaths?.some((p) => p && cwd.includes(p)))) {
+    sawSecrets = true
+    risk = 'destructive'
+    notes.push('工作目录是凭证或 AIWC 自己的数据')
+  }
   if (sawNetwork && sawSecrets) {
     risk = 'destructive'
     notes.push('凭证文件与网络命令出现在同一条命令里')
   }
   if (/\bfork\s*bomb|:\(\)\s*\{/.test(command)) risk = 'destructive'
 
-  const allowKey = `shell:${prefixes.length > 0 ? prefixes.join(' | ') : command.trim().split(/\s+/).slice(0, 2).join(' ')}`.slice(0, 120)
+  const allowKey =
+    `shell:${prefixes.length > 0 ? prefixes.join(' | ') : command.trim().split(/\s+/).slice(0, 2).join(' ')}`.slice(
+      0,
+      120,
+    )
   return { risk, allowKey, note: notes.length > 0 ? [...new Set(notes)].join('；') : undefined, segments }
 }
-
-/** Tools whose first words are a subcommand path worth keeping in the allow key (`docker compose up`). */
-const SUBCOMMAND_TOOLS = new Set(['git', 'npm', 'pnpm', 'yarn', 'bun', 'pip', 'pip3', 'brew', 'docker', 'kubectl', 'gh', 'glab', 'cargo', 'go', 'uv', 'poetry', 'conda', 'gem', 'lark-cli', 'dws', 'wecom-cli', 'aws', 'gcloud', 'az', 'vercel', 'wrangler', 'supabase', 'firebase', 'flutter', 'xcodebuild', 'swift', 'dotnet', 'mvn', 'gradle', 'make', 'just', 'rake', 'bundle', 'composer', 'php', 'ruby'])
 
 /**
  * argv0, plus up to two subcommand words for tools that have them — `lark-cli base +record-list`,

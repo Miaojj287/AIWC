@@ -1,8 +1,19 @@
-import { ChevronRight, FileText, Image } from 'lucide-react'
+import { ChevronRight, Copy, ExternalLink, FileText, FolderOpen, Image } from 'lucide-react'
 import { runCommand } from '@/app/commands'
 import { useT } from '@/i18n'
-import { cn, ICON_STROKE } from '@/kit'
+import {
+  cn,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItems,
+  ContextMenuTrigger,
+  ICON_STROKE,
+  toast,
+  type MenuSpec,
+} from '@/kit'
+import { invoke } from '@/platform/hooks'
 import type { ThreadItem } from '../model'
+import { copyText } from './CopyAction'
 
 export type ArtifactItem = Extract<ThreadItem, { kind: 'artifact' }>
 
@@ -18,8 +29,8 @@ export function openArtifact(item: ArtifactItem): void {
 }
 
 /**
- * ResultCard — a generated file: accent icon box 28, title 12 Medium, subtitle 11 weak, chevron.
- * Click opens the workspace tab (Figma 120:483 / 150:1005 ResultCard).
+ * ResultCard — a generated file: accent icon box 28, title 12 Medium, subtitle 11 weak, chevron. Click opens the
+ * workspace tab (Figma 120:483 / 150:1005 ResultCard); right click offers open / show in folder / copy path.
  */
 export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
   const t = useT()
@@ -27,12 +38,28 @@ export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
   const openable = Boolean(artifact.path) || Boolean(onOpen)
   const Icon = artifact.kind === 'image' ? Image : FileText
   const subtitle = artifact.path
-    ? t('agent.artifact.openedInTab')
+    ? t('agent.artifact.clickToOpen')
     : artifact.kind === 'markdown'
       ? t('agent.artifact.notSaved')
       : t('agent.artifact.generated')
   const open = () => (onOpen ? onOpen(item) : openArtifact(item))
-  return (
+  const path = artifact.path
+  const menu: MenuSpec = path
+    ? [
+        { id: 'open', label: t('agent.artifact.open'), icon: ExternalLink, onSelect: open },
+        {
+          id: 'reveal',
+          label: t('agent.artifact.reveal'),
+          icon: FolderOpen,
+          onSelect: () =>
+            void invoke('file:reveal', { path }).catch((e: unknown) =>
+              toast.error(t('common.operationFailedDetail', { detail: e instanceof Error ? e.message : String(e) })),
+            ),
+        },
+        { id: 'copyPath', label: t('agent.artifact.copyPath'), icon: Copy, onSelect: () => void copyText(path) },
+      ]
+    : []
+  const card = (
     <div
       role={openable ? 'button' : undefined}
       tabIndex={openable ? 0 : undefined}
@@ -47,8 +74,7 @@ export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
       data-item="artifact"
       className={cn(
         'flex w-full items-center gap-2.5 rounded-item border border-line-8 bg-content py-2 pl-2 pr-2.5 outline-none transition-colors',
-        openable &&
-          'cursor-pointer hover:border-(--line-16) hover:bg-hover-5 focus-visible:ring-2 focus-visible:ring-accent/70',
+        openable && 'cursor-pointer hover:border-(--line-16) hover:bg-hover-5',
       )}
     >
       <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-accent-15 text-accent">
@@ -64,5 +90,14 @@ export function ArtifactCard({ item, onOpen }: ArtifactCardProps) {
         <ChevronRight size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-fg-3" />
       ) : null}
     </div>
+  )
+  if (menu.length === 0) return card
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItems items={menu} />
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

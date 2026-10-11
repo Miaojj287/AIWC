@@ -48,7 +48,7 @@ export function ContextRing({ usage, onCompact, disabled = false, size = 18 }: C
           onFocus={show}
           onBlur={hide}
           className={cn(
-            'inline-flex size-6 shrink-0 items-center justify-center rounded-control outline-none transition-colors hover:bg-line-8 focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-40',
+            'inline-flex size-7 shrink-0 items-center justify-center rounded-control outline-none transition-colors hover:bg-hover-7 disabled:opacity-40',
             tone,
           )}
         >
@@ -64,7 +64,6 @@ export function ContextRing({ usage, onCompact, disabled = false, size = 18 }: C
               strokeLinecap="round"
               strokeDasharray={CIRC}
               strokeDashoffset={CIRC * (1 - ratio)}
-              className="transition-[stroke-dashoffset] duration-(--dur-base)"
             />
           </svg>
         </button>

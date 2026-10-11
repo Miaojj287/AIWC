@@ -1,15 +1,17 @@
 /**
  * 回复方式 card — the entire rule. 发送方式 (segmented) decides whether a reply waits for 确认发送
  * or counts down; 回复来源 (segmented) swaps the rows below:
- *   固定文案 → the text that gets sent, with variable chips
- *   AI 生成  → the system prompt, and how many past messages the model reads
+ *   固定文案   → the text that gets sent, with variable chips
+ *   AI 生成    → the system prompt, and how many past messages the model reads
+ *   Jev（beta）→ the candidate replies Jev chooses between, its guidance and confidence gate (jev/JevRows)
  */
 import { Plus } from 'lucide-react'
 import { useRef } from 'react'
 import type { AutoReplyRule, ReplySendMode, ReplySource } from '@aiwc/protocol'
-import { useT, type MessageKey } from '@/i18n'
+import { useT } from '@/i18n'
 import { Card, Chip, InlineHint, Input, SegmentedControl, SettingRow, Textarea } from '@/kit'
 import { useConfig } from '@/platform/configStore'
+import { JevRows } from '../jev/JevRows'
 import {
   HISTORY_COUNT_OPTIONS,
   RULE_VARIABLES,
@@ -24,17 +26,13 @@ export interface ReplyCardProps {
   draft: AutoReplyRule
   errors: RuleErrors
   patch: (p: Partial<AutoReplyRule>) => void
+  /** A TypeSafe key is saved; the Jev rows point at the settings when it is not. */
+  jevConfigured: boolean
 }
 
-const SOURCE_DESCRIPTION: Record<ReplySource, MessageKey> = {
-  fixed: 'autoreply.reply.sourceDescription.fixed',
-  ai: 'autoreply.reply.sourceDescription.ai',
-}
-
-export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
+export function ReplyCard({ draft, errors, patch, jevConfigured }: ReplyCardProps) {
   const t = useT()
   const textRef = useRef<HTMLTextAreaElement>(null)
-  const historyCount = draft.historyCount
   const countdownMs = useConfig((c) => c.autoReply.countdownMs) ?? 5000
   const sendMode: ReplySendMode = draft.sendMode ?? 'auto'
   const sendModeDescriptionKey = SEND_MODE_OPTIONS.find((o) => o.value === sendMode)?.descriptionKey
@@ -56,6 +54,38 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
     })
   }
 
+  const historyRow = (
+    <SettingRow
+      title={t('autoreply.reply.historyCount')}
+      footer={errors.historyCount ? <InlineHint kind="error">{errors.historyCount}</InlineHint> : null}
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {HISTORY_COUNT_OPTIONS.map((n) => (
+            <Chip
+              key={n}
+              label={String(n)}
+              selected={draft.historyCount === n}
+              onClick={() => patch({ historyCount: n })}
+              aria-label={t('autoreply.rule.historyCount', { n })}
+            />
+          ))}
+        </div>
+        <Input
+          size="sm"
+          type="number"
+          mono
+          aria-label={t('autoreply.reply.historyCount')}
+          value={String(draft.historyCount ?? '')}
+          onChange={(e) => patch({ historyCount: Number(e.target.value) })}
+          error={Boolean(errors.historyCount) || undefined}
+          wrapperClassName="w-[84px]"
+        />
+        <span className="text-micro text-fg-3">{t('autoreply.reply.historyCountUnit')}</span>
+      </div>
+    </SettingRow>
+  )
+
   return (
     <Card variant="rows">
       <SettingRow title={t('autoreply.reply.sendMode')} description={sendModeDescription}>
@@ -66,7 +96,10 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
           onValueChange={(mode) => patch({ sendMode: mode })}
         />
       </SettingRow>
-      <SettingRow title={t('autoreply.reply.source')} description={t(SOURCE_DESCRIPTION[draft.source])}>
+      <SettingRow
+        title={t('autoreply.reply.source')}
+        help={draft.source === 'jev' ? t('autoreply.jev.editor.help') : undefined}
+      >
         <SegmentedControl<ReplySource>
           aria-label={t('autoreply.reply.source')}
           value={draft.source}
@@ -78,7 +111,6 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
       {draft.source === 'fixed' ? (
         <SettingRow
           title={t('autoreply.reply.fixedText')}
-          description={t('autoreply.reply.fixedTextDescription')}
           stacked
           footer={
             errors.fixedText && (draft.fixedText ?? '') !== '' ? (
@@ -112,13 +144,9 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
             </div>
           </div>
         </SettingRow>
-      ) : (
+      ) : draft.source === 'ai' ? (
         <>
-          <SettingRow
-            title={t('autoreply.reply.systemPrompt')}
-            description={t('autoreply.reply.systemPromptDescription')}
-            stacked
-          >
+          <SettingRow title={t('autoreply.reply.systemPrompt')} stacked>
             <Textarea
               autosize
               minRows={4}
@@ -129,36 +157,12 @@ export function ReplyCard({ draft, errors, patch }: ReplyCardProps) {
               onChange={(e) => patch({ prompt: e.target.value })}
             />
           </SettingRow>
-          <SettingRow
-            title={t('autoreply.reply.historyCount')}
-            description={t('autoreply.reply.historyCountDescription')}
-            footer={errors.historyCount ? <InlineHint kind="error">{errors.historyCount}</InlineHint> : null}
-          >
-            <div className="flex items-center gap-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {HISTORY_COUNT_OPTIONS.map((n) => (
-                  <Chip
-                    key={n}
-                    label={String(n)}
-                    selected={historyCount === n}
-                    onClick={() => patch({ historyCount: n })}
-                    aria-label={t('autoreply.rule.historyCount', { n })}
-                  />
-                ))}
-              </div>
-              <Input
-                size="sm"
-                type="number"
-                mono
-                aria-label={t('autoreply.reply.historyCount')}
-                value={String(historyCount ?? '')}
-                onChange={(e) => patch({ historyCount: Number(e.target.value) })}
-                error={Boolean(errors.historyCount) || undefined}
-                wrapperClassName="w-[84px]"
-              />
-              <span className="text-micro text-fg-3">{t('autoreply.reply.historyCountUnit')}</span>
-            </div>
-          </SettingRow>
+          {historyRow}
+        </>
+      ) : (
+        <>
+          <JevRows draft={draft} errors={errors} patch={patch} configured={jevConfigured} />
+          {historyRow}
         </>
       )}
     </Card>

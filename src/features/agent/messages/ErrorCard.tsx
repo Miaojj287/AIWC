@@ -19,6 +19,10 @@ const TITLE_BY_CODE: Record<string, MessageKey> = {
   network: 'agent.error.title.network',
   invalid_request: 'agent.error.title.invalidRequest',
   unsupported_tools: 'agent.error.title.unsupportedTools',
+  stream_stalled: 'agent.error.title.streamStalled',
+  content_filter: 'agent.error.title.contentFilter',
+  empty_response: 'agent.error.title.emptyResponse',
+  output_truncated: 'agent.error.title.outputTruncated',
   unknown: 'agent.error.title.unknown',
 }
 
@@ -62,11 +66,11 @@ export function ErrorCard({ item, onAction, onDismiss }: ErrorCardProps) {
     <div
       role="alert"
       data-item="error"
-      className="relative flex w-full flex-col gap-2 rounded-window border border-danger/30 bg-danger/8 px-3 py-2.5"
+      className="relative flex w-full flex-col gap-2 rounded-item border border-danger/30 bg-danger/8 px-3 py-2.5"
     >
       <div className="flex items-center gap-2 pr-6">
         <CircleAlert size={14} strokeWidth={ICON_STROKE} aria-hidden className="shrink-0 text-danger" />
-        <span className="min-w-0 truncate text-body font-medium text-danger">{title}</span>
+        <span className="min-w-0 truncate text-body font-medium text-danger-ink">{title}</span>
       </div>
       <p className="m-0 break-words text-caption leading-4 text-fg-2 select-text">{detail}</p>
       {actions.length > 0 ? (

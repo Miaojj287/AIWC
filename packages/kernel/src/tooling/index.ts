@@ -8,8 +8,9 @@ export { createApprovalGate } from './approval'
 export { createHookRunner } from './hooks'
 export { createRolloutStore } from './rollout'
 
-export { createSkillIndex } from './skillIndex'
+export { createSkillIndex, SkillOpError, type SkillIndexExt } from './skillIndex'
 export { skillTools } from './skillTools'
 export { planTools } from './planTools'
+export { askUserTool, createQuestionGate } from './questions'
 // createFragment / truncateToTokens live in @aiwc/protocol (kernel/src/index.ts re-exports the runtime
 // createFragment explicitly); nothing here re-exports them.

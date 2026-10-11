@@ -1,129 +1,26 @@
 /**
- * Pure transformations: kernel HistoryItems → ThreadItems (hydration) and Event → ThreadViewState
- * (live folding). No IO, no React — tested in reducer.test.ts. Side effects (toasts, opening the
- * artifact tab) are decided by the store from the same events, never here.
+ * Pure transformation Event → ThreadViewState (live folding; hydrating a thread from its history is historyItems.ts).
+ * No IO, no React — tested in reducer.test.ts. Side effects (toasts, opening the artifact tab) are decided by the
+ * store from the same events, never here.
  */
-import type { CallId, Event, HistoryItem, ThreadId, ToolArtifact, TurnId } from '@aiwc/protocol'
-import { t } from '@/i18n'
-import { createThreadView, type PlanStep, type ThreadItem, type ThreadViewState, type ToolCallView } from './model'
-
-/** Tool names are snake_case; without a kernel summary we show them as words. */
-export const humanizeToolName = (name: string): string => name.replace(/_/g, ' ')
-
-const toolsItemId = (turnId: TurnId, callId: CallId) => `tools_${turnId}_${callId}`
-const artifactItemId = (callId: CallId, index: number) => `art_${callId}_${index}`
-
-/* ------------------------------------------------------------------ history → items */
-
-export function itemsFromHistory(history: HistoryItem[]): ThreadItem[] {
-  const items: ThreadItem[] = []
-  const callIndex = new Map<CallId, { itemIndex: number; callIndex: number }>()
-
-  const pushCall = (turnId: TurnId, call: ToolCallView) => {
-    const last = items[items.length - 1]
-    if (last && last.kind === 'tools' && last.turnId === turnId) {
-      last.calls.push(call)
-      callIndex.set(call.callId, { itemIndex: items.length - 1, callIndex: last.calls.length - 1 })
-      return
-    }
-    items.push({ kind: 'tools', id: toolsItemId(turnId, call.callId), turnId, calls: [call] })
-    callIndex.set(call.callId, { itemIndex: items.length - 1, callIndex: 0 })
-  }
-
-  for (const h of history) {
-    switch (h.type) {
-      case 'user_message':
-        items.push({
-          kind: 'user',
-          id: h.id,
-          turnId: h.turnId,
-          content: h.content,
-          mentions: h.mentions,
-          createdAt: h.createdAt,
-        })
-        break
-      case 'assistant_message':
-        items.push({
-          kind: 'assistant',
-          id: h.id,
-          turnId: h.turnId,
-          text: h.text,
-          reasoning: h.reasoning,
-          streaming: false,
-          modelId: h.modelId,
-          createdAt: h.createdAt,
-        })
-        break
-      case 'tool_call':
-        pushCall(h.turnId, {
-          callId: h.callId,
-          toolName: h.toolName,
-          summary: humanizeToolName(h.toolName),
-          status: 'pending',
-          risk: 'read',
-          input: h.input,
-          startedAt: h.createdAt,
-          kind: 'tool',
-        })
-        break
-      case 'tool_result': {
-        const ref = callIndex.get(h.callId)
-        const output =
-          h.output.type === 'json'
-            ? h.output.value
-            : h.output.type === 'text'
-              ? h.output.text
-              : t('agent.tool.imageOutput', { mediaType: h.output.mediaType })
-        if (ref) {
-          const group = items[ref.itemIndex]
-          const call = group?.kind === 'tools' ? group.calls[ref.callIndex] : undefined
-          if (call) {
-            call.status = h.isError ? 'error' : 'done'
-            call.output = output
-            call.isError = h.isError
-            call.durationMs = h.durationMs
-          }
-        } else {
-          pushCall(h.turnId, {
-            callId: h.callId,
-            toolName: h.toolName,
-            summary: humanizeToolName(h.toolName),
-            status: h.isError ? 'error' : 'done',
-            risk: 'read',
-            input: null,
-            output,
-            isError: h.isError,
-            startedAt: h.createdAt - h.durationMs,
-            durationMs: h.durationMs,
-            kind: 'tool',
-          })
-        }
-        break
-      }
-      case 'compaction_summary':
-        items.push({
-          kind: 'compaction',
-          id: h.id,
-          summaryItemId: h.id,
-          summary: h.summary,
-          foldedItemCount: h.foldedItemCount,
-        })
-        break
-      case 'turn_aborted':
-        items.push({ kind: 'aborted', id: h.id, turnId: h.turnId, reason: h.reason })
-        break
-      case 'context_fragment':
-        break
-    }
-  }
-
-  // A recorded call without a result never finished (the turn was aborted mid-flight).
-  for (const it of items) {
-    if (it.kind !== 'tools') continue
-    for (const c of it.calls) if (c.status === 'pending') c.status = 'error'
-  }
-  return items
-}
+import type { CallId, Event, ToolArtifact, TurnId } from '@aiwc/protocol'
+import { type PlanStep, type ThreadItem, type ThreadViewState, type ToolCallView } from './model'
+import { artifactItemId, itemsFromHistory, toolsItemId } from './historyItems'
+import {
+  appendCheck,
+  applySubagent,
+  applyToolInput,
+  dropStreamingInputs,
+  finishToolInput,
+  PLAN_TOOL,
+  planStepsOf,
+  runsFromTraces,
+  upsertPlan,
+} from './renderEvents'
+import { humanizeToolName } from './toolSummaries'
+import { withoutPendingInput } from './pendingInputs'
+import { reduceTurnSignals } from './turnSignals'
+import { reduceDroppedInputs } from './restoreInput'
 
 /* ------------------------------------------------------------------ event → state */
 
@@ -135,6 +32,11 @@ export interface ReduceOptions {
 /** Fold one kernel Event into a thread view. Events for other threads are ignored. */
 export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOptions = {}): ThreadViewState {
   if (e.threadId !== state.threadId) return state
+  return reduceDroppedInputs(reduceTurnSignals(reduceTranscript(state, e, opts), e), e)
+}
+
+/** Everything except the turn signals (questions, reconnecting / continuing), which turnSignals.ts folds. */
+function reduceTranscript(state: ThreadViewState, e: Event, opts: ReduceOptions): ThreadViewState {
   const now = opts.now ?? Date.now
   switch (e.type) {
     case 'item.user':
@@ -148,9 +50,7 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
           mentions: e.mentions,
           createdAt: now(),
         }),
-        {
-          suggestions: undefined,
-        },
+        { pendingInputs: withoutPendingInput(state.pendingInputs, e.clientInputId) },
       )
 
     case 'turn.started':
@@ -206,6 +106,7 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
         callId: e.callId,
         toolName: e.toolName,
         summary: e.summary || humanizeToolName(e.toolName),
+        display: e.display,
         status: e.status,
         risk: e.risk,
         input: e.input,
@@ -214,17 +115,32 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
         output: e.output,
         isError: e.isError,
         artifacts: e.artifacts,
+        // the recorded traces replace the live view of the call's sub-agents (the same rows history shows)
+        children: runsFromTraces(e.subagents, itemsFromHistory),
         kind: 'tool',
       }
-      let items = upsertCall(state.items, e.turnId, call)
+      // tools run once sampling is over: a reasoning-only reply of the step (no text.end) is finished too
+      let items = finishToolInput(upsertCall(finalizeStreaming(state.items, e.turnId, now), e.turnId, call), e.callId)
       if (e.status === 'done' && e.artifacts?.length) items = appendArtifacts(items, e.turnId, e.callId, e.artifacts)
+      const plan = e.toolName === PLAN_TOOL ? planStepsOf(e.input) : undefined
+      if (plan) items = upsertPlan(items, e.turnId, plan)
       return withItems(state, items)
     }
+
+    case 'tool.input':
+      return withItems(state, applyToolInput(state.items, e, now(), toolsItemId))
+
+    case 'turn.check':
+      return withItems(state, appendCheck(state.items, e))
 
     case 'tool.progress':
       return withItems(
         state,
-        patchCall(state.items, e.callId, (c) => ({ ...c, progress: e.message })),
+        patchCall(state.items, e.callId, (c) => ({
+          ...c,
+          progress: e.message,
+          ...(e.detail !== undefined ? { progressDetail: e.detail } : {}),
+        })),
       )
 
     case 'approval.requested': {
@@ -238,16 +154,19 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
               turnId: e.turnId,
               toolName: e.toolName,
               summary: e.summary,
+              ...(e.display ? { display: e.display } : {}),
               detail: e.detail,
               input: e.input,
               risk: e.risk,
               canAllowAlways: e.canAllowAlways,
+              ...(e.allowKey ? { allowKey: e.allowKey } : {}),
             },
           ]
       const items = upsertCall(state.items, e.turnId, {
         callId: e.callId,
         toolName: e.toolName,
         summary: e.summary || humanizeToolName(e.toolName),
+        display: e.display,
         status: 'awaiting_approval',
         risk: e.risk,
         input: e.input,
@@ -377,6 +296,9 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       )
 
     case 'subagent': {
+      // a child that names its parent call shows under that row; older events stand as rows of their own
+      const attached = applySubagent(state.items, e, now())
+      if (attached) return withItems(state, attached)
       const status: ToolCallView['status'] = e.status === 'started' ? 'running' : e.status === 'done' ? 'done' : 'error'
       const callId = `sub_${e.childId}` as CallId
       const turnId = state.currentTurnId ?? (`trn_${e.childId}` as TurnId)
@@ -396,12 +318,19 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
       )
     }
 
+    case 'step.started':
+      if (!e.revision) return state
+      return withItems(state, append(state.items, { kind: 'revision', id: `revision_${e.stepId}`, turnId: e.turnId }))
     case 'thread.created':
     case 'thread.settings':
     case 'thread.title':
     case 'memory.written':
-    case 'step.started':
+    case 'question.requested':
+    case 'question.resolved':
+    case 'turn.continuing':
       return state
+    case 'stream.retrying':
+      return withItems(state, dropStreamingInputs(state.items, e.turnId))
   }
   return state
 }
@@ -409,10 +338,6 @@ export function reduceEvent(state: ThreadViewState, e: Event, opts: ReduceOption
 /** Fold a whole event sequence (tests / replay). */
 export function reduceEvents(state: ThreadViewState, events: Event[], opts?: ReduceOptions): ThreadViewState {
   return events.reduce((s, e) => reduceEvent(s, e, opts), state)
-}
-
-export function viewFromHistory(threadId: ThreadId, history: HistoryItem[]): ThreadViewState {
-  return createThreadView(threadId, { items: itemsFromHistory(history), loaded: true })
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -505,6 +430,8 @@ function upsertCall(
     approvalId: call.approvalId,
     progress: call.progress,
     kind: call.kind ?? 'tool',
+    ...(call.display ? { display: call.display } : {}),
+    ...(call.children ? { children: call.children } : {}),
   }
   const last = items[items.length - 1]
   if (last && last.kind === 'tools' && last.turnId === turnId) {
@@ -549,13 +476,4 @@ function finalizeStreaming(items: ThreadItem[], turnId: TurnId, now: () => numbe
     }
   })
   return changed ? next : items
-}
-
-/** Last user input of a turn (for 重试 / 重新生成). Falls back to the most recent user item. */
-export function findUserInput(items: ThreadItem[], turnId?: TurnId): Extract<ThreadItem, { kind: 'user' }> | undefined {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i]
-    if (it?.kind === 'user' && (turnId === undefined || it.turnId === turnId)) return it
-  }
-  return undefined
 }

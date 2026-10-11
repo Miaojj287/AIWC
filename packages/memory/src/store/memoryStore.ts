@@ -6,7 +6,8 @@
  *  - drift detection: the hash of the last content this store wrote is remembered; when the file on
  *    disk differs AND no longer round-trips through the parser, the mutation is refused (`blocked`)
  *    and a `.bak.<ts>` copy is taken so nothing is silently lost
- *  - budgets are character based (model independent); addEntry refuses `over_budget` and `duplicate`
+ *  - budgets are character based (model independent); addEntry refuses `over_budget` and `duplicate`, and
+ *    `over_count` once the file holds `maxEntries()` entries (never evicts: that would be an unconfirmed delete)
  *  - removeEntry with an expected text re-checks the entry under the lock, so a stale index never removes
  *    a different entry than the one that was shown and approved
  *  - snapshot() is the only render the kernel injects; it carries a usage header per file
@@ -39,6 +40,12 @@ export interface MemoryStoreOptions {
   limits?: Partial<Record<MemoryFile, number>>
   /** injectable clock (tests) */
   now?: () => number
+  /**
+   * Most entries one file may hold through addEntry (设置 › 记忆 › 记忆条数上限), read on every add so a settings
+   * change applies at once. Reaching it refuses the add (`over_count`) instead of evicting: dropping an old
+   * entry is a deletion, and deletions need the user's confirmation. The settings editor (`write`) is not capped.
+   */
+  maxEntries?: () => number | undefined
 }
 
 type Source = NonNullable<MemoryEntry['source']>
@@ -47,7 +54,12 @@ type Listener = (e: { file: MemoryFile; source: MemoryEntry['source'] }) => void
 interface EntryMeta {
   addedAt: number
   source: Source
+  /** Agent thread that wrote the entry (provenance shown in 设置 › 记忆). */
+  threadId?: string
 }
+
+/** Thread ids are kernel ids (`thr_…`); anything else is not stored as provenance. */
+const PROVENANCE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 interface MetaFile {
   /** sha256 of the last content this store wrote — survives restarts so a clean file is never flagged as drift */
   contentHash?: string
@@ -156,7 +168,13 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
     return { entries }
   }
 
-  const persist = (file: MemoryFile, entries: string[], source: Source, touched: readonly string[]) => {
+  const persist = (
+    file: MemoryFile,
+    entries: string[],
+    source: Source,
+    touched: readonly string[],
+    threadId?: string,
+  ) => {
     const content = serializeEntries(entries)
     atomicWriteFile(pathFor(file), content)
     const contentHash = sha256(content)
@@ -172,7 +190,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
     }
     for (const text of touched) {
       const k = metaKey(text)
-      if (keep[k]) keep[k] = { addedAt: ts, source }
+      if (keep[k]) keep[k] = { addedAt: ts, source, ...(threadId ? { threadId } : {}) }
     }
     const nextMeta: MetaFile = { contentHash, entries: keep }
     atomicWriteFile(metaPath(file), JSON.stringify(nextMeta, null, 2) + '\n')
@@ -186,7 +204,9 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
     const meta = readMeta(file)
     return parseEntries(readRaw(file)).map((text, index) => {
       const m = meta.entries[metaKey(text)]
-      return m ? { index, text, addedAt: m.addedAt, source: m.source } : { index, text }
+      return m
+        ? { index, text, addedAt: m.addedAt, source: m.source, ...(m.threadId ? { threadId: m.threadId } : {}) }
+        : { index, text }
     })
   }
 
@@ -219,6 +239,7 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
 
     async addEntry(file, text, o) {
       const source: Source = o?.source ?? 'agent'
+      const threadId = o?.threadId && PROVENANCE_ID_RE.test(o.threadId) ? o.threadId : undefined
       const clean = text.replace(/\r\n/g, '\n').trim()
       if (!clean) return { ok: false, reason: 'duplicate' }
       return locked(file, () => {
@@ -228,9 +249,12 @@ export function createMemoryStore(opts: MemoryStoreOptions): MemoryStoreExt {
         const norm = normaliseForCompare(clean)
         if (entries.some((e) => normaliseForCompare(e) === norm))
           return { ok: false as const, reason: 'duplicate' as const }
+        const cap = opts.maxEntries?.()
+        if (cap !== undefined && cap > 0 && entries.length >= cap)
+          return { ok: false as const, reason: 'over_count' as const }
         const next = [...entries, clean]
         if (joinEntries(next).length > limits[file]) return { ok: false as const, reason: 'over_budget' as const }
-        persist(file, next, source, [clean])
+        persist(file, next, source, [clean], threadId)
         return { ok: true as const }
       })
     },

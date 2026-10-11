@@ -105,7 +105,7 @@ export function ConfirmDialog({
       >
         <DialogHeader icon={icon} tone={tone} title={title} description={description} />
         {children ? <DialogBody>{children}</DialogBody> : null}
-        <DialogFooter>
+        <DialogFooter actions>
           <Button ref={cancelRef} variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             {cancelLabel ?? t('kit.dialog.cancel')}
           </Button>
@@ -185,7 +185,7 @@ export function DangerDialog({
             ) : null}
           </DialogBody>
         ) : null}
-        <DialogFooter>
+        <DialogFooter actions>
           <Button ref={cancelRef} variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             {cancelLabel ?? t('kit.dialog.cancel')}
           </Button>
@@ -249,7 +249,7 @@ export function FormDialog({
         <form onSubmit={handleSubmit} className="contents">
           <DialogHeader icon={icon} tone="accent" title={title} description={description} />
           <DialogBody>{children}</DialogBody>
-          <DialogFooter>
+          <DialogFooter actions>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
               {cancelLabel ?? t('kit.dialog.cancel')}
             </Button>
@@ -356,7 +356,16 @@ export function ProgressDialog({
             <ol className="flex flex-col gap-1.5 pt-0.5">
               {steps.map((s) => (
                 <li key={s.id} data-status={s.status} className="flex items-center gap-2 text-tab">
-                  <span className="flex size-4 shrink-0 items-center justify-center">{STEP_ICON[s.status]}</span>
+                  {/* Keyed by status: a step turning ✓ remounts its icon and plays the one kit entrance. */}
+                  <span
+                    key={s.status}
+                    className={cn(
+                      'flex size-4 shrink-0 items-center justify-center',
+                      s.status === 'done' && 'kit-enter',
+                    )}
+                  >
+                    {STEP_ICON[s.status]}
+                  </span>
                   <span
                     className={cn(
                       'min-w-0 flex-1 truncate',

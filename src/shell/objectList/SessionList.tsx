@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronRight, Folder, Ellipsis, Pin } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, Ellipsis, Pin, TextSearch } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VList, type VListHandle } from 'virtua'
 import type { WxSession } from '@aiwc/protocol'
 import { runCommand } from '@/app/commands'
-import { detectMac } from '@/app/shortcuts'
+import { detectMac, formatShortcut } from '@/app/shortcuts'
 import { useT } from '@/i18n'
 import {
   Avatar,
@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
   EmptyState,
   IconButton,
+  Kbd,
   ListItem,
   SkeletonListRows,
   toast,
@@ -25,6 +26,7 @@ import {
 } from '@/kit'
 import { formatCount, formatTime } from '@/platform/format'
 import { invoke, useBridgeEvent, useInvoke } from '@/platform/hooks'
+import { listKeyNav } from '@/platform/listNavigation'
 import { useAccountStatus } from '@/platform/useAccountStatus'
 import type { ObjectListProps } from '@/shell/objectListRegistry'
 import { useShellStore } from '@/shell/shellStore'
@@ -226,8 +228,9 @@ export function SessionList({ query, activeObjectId }: ObjectListProps) {
       />
     )
   }
+  // Skeleton rows start where real rows do (list px-2 + row px-3), so nothing jumps when the data lands.
   if (failure === 'waiting' && state.items.length === 0) {
-    return <SkeletonListRows rows={8} className="px-4 pt-2" />
+    return <SkeletonListRows rows={8} className="px-5 pt-2" />
   }
   if (state.error && state.items.length === 0) {
     return (
@@ -242,7 +245,7 @@ export function SessionList({ query, activeObjectId }: ObjectListProps) {
     )
   }
   if (state.loading && state.items.length === 0) {
-    return <SkeletonListRows rows={8} className="px-4 pt-2" />
+    return <SkeletonListRows rows={8} className="px-5 pt-2" />
   }
   if (visible.length === 0) {
     return filtered || includeHidden ? (
@@ -255,10 +258,17 @@ export function SessionList({ query, activeObjectId }: ObjectListProps) {
             ? t('shell.sessions.empty.noNameMatch', { query: query.trim() })
             : t('shell.sessions.empty.loosenFilters')
         }
-        action={{
-          label: t('shell.objectList.clearFilters'),
-          onClick: () => useShellStore.getState().clearListFilters(),
-        }}
+        // A term no chat name contains may still be in the messages: offer the full-history search first, then the
+        // way out of whatever narrowed the list (the header keeps 清除筛选 for filters next to a search term).
+        action={
+          query.trim()
+            ? {
+                label: t('shell.sessions.searchHistory'),
+                icon: TextSearch,
+                onClick: () => runCommand('tab.openSearch', { query: query.trim() }),
+              }
+            : { label: t('shell.objectList.clearFilters'), onClick: () => useShellStore.getState().clearListFilters() }
+        }
         secondaryAction={
           query.trim()
             ? { label: t('shell.sessions.empty.clearSearch'), onClick: () => useShellStore.getState().setListQuery('') }
@@ -280,52 +290,78 @@ export function SessionList({ query, activeObjectId }: ObjectListProps) {
     )
   }
 
+  const searchText = query.trim()
   return (
-    <VList
-      ref={listRef}
-      data={visible}
-      onScroll={onScroll}
-      onScrollEnd={onScroll}
-      className="h-full px-2 pb-2 pt-0.5"
-      style={{ height: '100%' }}
-      aria-label={t('shell.sessions.listLabel')}
-    >
-      {(session) =>
-        session.folder ? (
+    // ↑ / ↓ / Home / End walk the rows (platform/listNavigation); Tab still leaves the list in one step per row.
+    <div className="flex h-full flex-col" onKeyDown={listKeyNav}>
+      {searchText ? (
+        // Stays put above the scrolling rows: the same text, searched in every chat's messages (搜索聊天记录 Tab).
+        <div className="shrink-0 px-2 pt-0.5">
           <ListItem
-            key={session.id}
-            data-session-folder={session.folder}
-            aria-expanded={expanded.has(session.folder)}
             leading={
               <span className="flex size-9 items-center justify-center rounded-item bg-raised text-fg-2">
-                <Folder size={20} />
+                <TextSearch size={18} strokeWidth={ICON_STROKE} aria-hidden />
               </span>
             }
-            title={t('shell.sessions.folderTitle', { title: session.title, count: session.count })}
-            subtitle={session.lastPreview}
-            meta={formatTime(session.lastMessageAt)}
-            trailing={
-              <span className="flex items-center gap-1">
-                {session.unread > 0 ? <Badge tone="accent">{formatCount(session.unread)}</Badge> : null}
-                {expanded.has(session.folder) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </span>
-            }
-            onSelect={() => toggleFolder(session.folder!)}
+            title={t('shell.sessions.searchHistory')}
+            subtitle={t('shell.sessions.searchHistoryHint', { query: searchText })}
+            trailing={<Kbd keys={formatShortcut({ key: 'enter', mod: false }, mac)} />}
+            onSelect={() => runCommand('tab.openSearch', { query: searchText })}
           />
-        ) : (
-          <div key={session.id} className={session.child ? 'pl-4' : undefined}>
-            <SessionRow
-              key={session.id}
-              session={session}
-              selected={session.id === activeObjectId}
-              mac={mac}
-              hiddenView={includeHidden}
-              onFlags={(flags) => void setFlags(session.id, flags)}
-            />
-          </div>
-        )
-      }
-    </VList>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <VList
+          ref={listRef}
+          data={visible}
+          onScroll={onScroll}
+          onScrollEnd={onScroll}
+          className="h-full px-2 pb-2 pt-0.5"
+          style={{ height: '100%' }}
+          aria-label={t('shell.sessions.listLabel')}
+        >
+          {(session) =>
+            session.folder ? (
+              <ListItem
+                key={session.id}
+                data-session-folder={session.folder}
+                aria-expanded={expanded.has(session.folder)}
+                leading={
+                  <span className="flex size-9 items-center justify-center rounded-item bg-raised text-fg-2">
+                    <Folder size={20} strokeWidth={ICON_STROKE} aria-hidden />
+                  </span>
+                }
+                title={t('shell.sessions.folderTitle', { title: session.title, count: session.count })}
+                subtitle={session.lastPreview}
+                meta={formatTime(session.lastMessageAt)}
+                trailing={
+                  <span className="flex items-center gap-1">
+                    {session.unread > 0 ? <Badge tone="accent">{formatCount(session.unread)}</Badge> : null}
+                    {expanded.has(session.folder) ? (
+                      <ChevronDown size={14} strokeWidth={ICON_STROKE} aria-hidden />
+                    ) : (
+                      <ChevronRight size={14} strokeWidth={ICON_STROKE} aria-hidden />
+                    )}
+                  </span>
+                }
+                onSelect={() => toggleFolder(session.folder!)}
+              />
+            ) : (
+              <div key={session.id} className={session.child ? 'pl-4' : undefined}>
+                <SessionRow
+                  key={session.id}
+                  session={session}
+                  selected={session.id === activeObjectId}
+                  mac={mac}
+                  hiddenView={includeHidden}
+                  onFlags={(flags) => void setFlags(session.id, flags)}
+                />
+              </div>
+            )
+          }
+        </VList>
+      </div>
+    </div>
   )
 }
 

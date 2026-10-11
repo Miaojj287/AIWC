@@ -2,7 +2,13 @@
  * delegate_analysis — fan out up to four read-only sub-analyses to one-shot child threads (profile
  * 'subagent', depth 1, 12-step cap) and return only their conclusions + evidence anchors.
  */
-import { defineTool, type ToolContext, type ToolDefinition, type ToolServices } from '@aiwc/protocol'
+import {
+  defineTool,
+  type SubagentTrace,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolServices,
+} from '@aiwc/protocol'
 import { z } from 'zod'
 import type { KernelInternal } from './types'
 
@@ -41,12 +47,17 @@ export function createDelegateTool(getKernel: () => KernelInternal): ToolDefinit
     async execute(input, ctx: ToolContext<ToolServices>) {
       if (ctx.depth > 0) return { content: '子代理不能再次委派。', isError: true }
       const kernel = getKernel()
+      const traces: SubagentTrace[] = []
       const results = await Promise.all(
         input.tasks.map(async (task, index) => {
-          ctx.progress(`子任务 ${index + 1}/${input.tasks.length}：${task.title}`, index / input.tasks.length)
+          // the row shows the progress text as is: the task's own title is data, not copy to translate
+          ctx.progress(task.title, index / input.tasks.length)
           try {
             const r = await kernel.runChild({
               parentThreadId: ctx.threadId,
+              parentTurnId: ctx.turnId,
+              parentCallId: ctx.callId,
+              onTrace: (trace) => traces.push(trace),
               origin: ctx.origin ?? { channel: ctx.channel },
               input: {
                 content: [{ type: 'text', text: `${CHILD_PREAMBLE}\n\n任务：${task.title}\n${task.prompt}` }],
@@ -63,9 +74,14 @@ export function createDelegateTool(getKernel: () => KernelInternal): ToolDefinit
           }
         }),
       )
-      ctx.progress('全部子任务完成', 1)
+      ctx.progress(`${input.tasks.length}/${input.tasks.length}`, 1)
       const content = results.map((r) => `## ${r.title}${r.ok ? '' : '（失败）'}\n${r.text}`).join('\n\n')
-      return { content, isError: results.every((r) => !r.ok), meta: { failed: results.filter((r) => !r.ok).length } }
+      return {
+        content,
+        isError: results.every((r) => !r.ok),
+        meta: { failed: results.filter((r) => !r.ok).length },
+        ...(traces.length ? { subagents: traces } : {}),
+      }
     },
   })
 }

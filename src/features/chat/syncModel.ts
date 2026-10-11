@@ -25,17 +25,9 @@ export function readOverview(stats: StatsResult | undefined): OverviewCounts | u
 }
 
 export function countsSummary(counts: OverviewCounts): string {
-  // Numbers pick the plural form, the *Text params carry the grouped digits (1,284).
-  return t('chat.sync.countsSummary', {
-    messages: counts.total,
-    messagesText: formatNumber(counts.total),
-    images: counts.imageCount,
-    imagesText: formatNumber(counts.imageCount),
-    files: counts.fileCount,
-    filesText: formatNumber(counts.fileCount),
-    voices: counts.voiceCount,
-    voicesText: formatNumber(counts.voiceCount),
-  })
+  // The number picks the plural form, the text param carries the grouped digits (1,284). Media counts live
+  // in the header's 会话信息 popover, not in the bar.
+  return t('chat.sync.countsSummary', { messages: counts.total, messagesText: formatNumber(counts.total) })
 }
 
 export type SyncPhaseView = 'never' | 'synced' | 'syncing' | 'error'

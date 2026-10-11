@@ -66,6 +66,8 @@ export async function reflectConversation(
       label: '对话反思',
       temperature: 0.2,
       maxOutputTokens: 700,
+      // A background pass after each conversation: the least reasoning the model allows keeps it cheap and quick.
+      reasoningEffort: 'lowest',
       ...(signal ? { signal } : {}),
     },
     reflectSchema,
