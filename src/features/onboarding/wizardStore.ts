@@ -78,7 +78,8 @@ export interface WizardState {
   dismissAcquireResult(): void
   dismissPermissionDialog(): void
   setManualKey(kind: KeyKind, input: string): Promise<{ ok: boolean; error?: string }>
-  clearKey(kind: KeyKind): void
+  /** Delete the saved key from the selected account's secret store; rejects (key kept) when that fails. */
+  clearKey(kind: KeyKind): Promise<void>
   /** Test the connection; on success persist account + onboarding.completed. */
   testAndFinish(): Promise<boolean>
   /**
@@ -389,8 +390,19 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
   },
 
-  clearKey(kind) {
-    set((s) => ({ keys: { ...s.keys, [kind]: { status: 'missing' } } }))
+  async clearKey(kind) {
+    const { wxid, dbRoot } = get()
+    await invoke('substrate:clearKey', { kind, ...(wxid && dbRoot ? { target: { wxid, dbRoot } } : {}) })
+    set((s) => ({
+      keys: { ...s.keys, [kind]: { status: 'missing' } },
+      ...(kind === 'db_key'
+        ? {
+            verifyState: 'idle' as const,
+            verifyError: undefined,
+            accounts: s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: false } : a)),
+          }
+        : {}),
+    }))
   },
 
   async testAndFinish() {

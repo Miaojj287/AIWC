@@ -283,6 +283,7 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
       acquireRun?.abort()
     },
     'substrate:setManualKey': ({ kind, hex }) => validateHex(kind, hex),
+    'substrate:clearKey': () => undefined,
     'substrate:testConnection': async () => {
       await ctx.delay(500)
       return { ok: true }

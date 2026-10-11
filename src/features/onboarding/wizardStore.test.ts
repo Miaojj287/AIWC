@@ -53,6 +53,49 @@ it('keeps AES case intact and invalidates account verification when replacing th
   expect(useWizardStore.getState().verifyState).toBe('idle')
 })
 
+it('clearing a key deletes it from the selected account, so it stays missing after the next launch', async () => {
+  const invoke = vi.fn(async () => undefined)
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({
+    wxid: 'selected',
+    dbRoot: '/selected',
+    verifyState: 'verified',
+    accounts: [{ wxid: 'selected', dbRoot: '/selected', verified: true }],
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'acquired', source: 'cached' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  await useWizardStore.getState().clearKey('db_key')
+  expect(invoke).toHaveBeenCalledWith('substrate:clearKey', {
+    kind: 'db_key',
+    target: { wxid: 'selected', dbRoot: '/selected' },
+  })
+  expect(useWizardStore.getState()).toMatchObject({
+    keys: { db_key: { status: 'missing' }, image_xor: { status: 'acquired' } },
+    verifyState: 'idle',
+    accounts: [{ wxid: 'selected', verified: false }],
+  })
+})
+
+it('keeps showing the key when deleting it fails', async () => {
+  const invoke = vi.fn(async () => {
+    throw new Error('store locked')
+  })
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({
+    keys: {
+      db_key: { status: 'missing' },
+      image_xor: { status: 'acquired', source: 'cached' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  await expect(useWizardStore.getState().clearKey('image_xor')).rejects.toThrow('store locked')
+  expect(invoke).toHaveBeenCalledWith('substrate:clearKey', { kind: 'image_xor' })
+  expect(useWizardStore.getState().keys.image_xor).toEqual({ status: 'acquired', source: 'cached' })
+})
+
 it('automatically detects the data directory during hydration even when WeChat is not running', async () => {
   const invoke = vi.fn(async (channel: string) => {
     if (channel === 'app:getInfo') return { dataDir: '/app' }

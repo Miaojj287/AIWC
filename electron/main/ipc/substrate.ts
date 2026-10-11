@@ -172,6 +172,17 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     return { ok: true }
   })
 
+  handle('substrate:clearKey', (req) => {
+    const kind: unknown = req?.kind
+    if (typeof kind !== 'string' || !Object.hasOwn(KEY_REF_BY_KIND, kind))
+      throw new Error(t('main.ipc.operationFailed'))
+    const { ref, field } = KEY_REF_BY_KIND[kind as keyof typeof KEY_REF_BY_KIND]
+    const { config, secrets } = credentials(req.target ? AccountTargetSchema.parse(req.target) : undefined)
+    const configured = config.get().account[field]
+    for (const saved of new Set([ref, configured])) if (typeof saved === 'string' && saved) secrets.delete(saved)
+    if (kind === 'db_key') config.set({ account: { verifiedAt: 0 } })
+  })
+
   handle('substrate:testConnection', async (target) => {
     const { config, secrets } = credentials(target || undefined)
     const a = { ...config.get().account, ...target }

@@ -195,6 +195,8 @@ export interface InvokeMap
     req: { kind: 'db_key' | 'image_xor' | 'image_aes'; hex: string; target?: AccountTarget }
     res: { ok: boolean; error?: string }
   }
+  /** Delete a saved key from the target account's secret store (default: the active account). */
+  'substrate:clearKey': { req: { kind: 'db_key' | 'image_xor' | 'image_aes'; target?: AccountTarget }; res: void }
   'substrate:testConnection': { req: { wxid: string; dbRoot: string } | void; res: { ok: boolean; error?: string } }
   'substrate:connect': {
     req: void | AccountTarget
@@ -525,6 +527,7 @@ export const INVOKE_CHANNELS = [
   'substrate:acquireKeys',
   'substrate:cancelAcquireKeys',
   'substrate:setManualKey',
+  'substrate:clearKey',
   'substrate:testConnection',
   'substrate:connect',
   'substrate:sync',

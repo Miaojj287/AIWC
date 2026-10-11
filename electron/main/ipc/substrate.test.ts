@@ -28,7 +28,7 @@ vi.mock('@aiwc/substrate', () => ({
 
 function setup() {
   const config = { ...defaultConfig(), account: { wxid: 'old', dbRoot: '/old', dbKeyRef: 'account:dbKey' } }
-  const secrets = { set: vi.fn(), reveal: vi.fn(() => 'a'.repeat(64)) }
+  const secrets = { set: vi.fn(), reveal: vi.fn(() => 'a'.repeat(64)), delete: vi.fn() }
   const set = vi.fn()
   const logger = { child: () => logger }
   const ipc = createHandlerHarness()
@@ -39,8 +39,30 @@ function setup() {
   )
   // setManualKey answers synchronously; the tests read its result without awaiting.
   const invoke = <K extends InvokeChannel>(channel: K, req: InvokeReq<K>) => ipc.invoke(channel, req) as InvokeRes<K>
-  return { secrets, invoke }
+  return { secrets, set, invoke, invokeRaw: ipc.invokeRaw }
 }
+
+describe('clearing a saved WeChat key', () => {
+  it('deletes the key under both its conventional and its configured ref, and drops verification for the database key', () => {
+    const { invoke, secrets, set } = setup()
+    invoke('substrate:clearKey', { kind: 'db_key' })
+    expect(secrets.delete).toHaveBeenCalledWith('account.dbKey')
+    expect(secrets.delete).toHaveBeenCalledWith('account:dbKey')
+    expect(set).toHaveBeenCalledWith({ account: { verifiedAt: 0 } })
+  })
+  it('keeps the account verified when only an image key is cleared', () => {
+    const { invoke, secrets, set } = setup()
+    invoke('substrate:clearKey', { kind: 'image_aes' })
+    expect(secrets.delete).toHaveBeenCalledWith('account.imageAesKey')
+    expect(set).not.toHaveBeenCalled()
+  })
+  it('refuses anything that is not one of the three WeChat keys', () => {
+    const { invokeRaw, secrets } = setup()
+    expect(() => invokeRaw('substrate:clearKey', { kind: 'toString' })).toThrow()
+    expect(() => invokeRaw('substrate:clearKey', { kind: 'db_key', target: { wxid: '..', dbRoot: '/x' } })).toThrow()
+    expect(secrets.delete).not.toHaveBeenCalled()
+  })
+})
 
 describe('manual WeChat key IPC', () => {
   it.each([

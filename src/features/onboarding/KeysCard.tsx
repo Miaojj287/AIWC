@@ -6,7 +6,19 @@ import { Check, CircleAlert, Eye, EyeOff, KeyRound, RefreshCw, ScanSearch, Setti
 import { useEffect, useState } from 'react'
 import type { AppConfig } from '@aiwc/protocol'
 import { useT } from '@/i18n'
-import { Badge, Button, Card, FieldLabel, IconButton, InlineHint, Input, TaskProgress, cn, toast } from '@/kit'
+import {
+  Badge,
+  Button,
+  Card,
+  DangerDialog,
+  FieldLabel,
+  IconButton,
+  InlineHint,
+  Input,
+  TaskProgress,
+  cn,
+  toast,
+} from '@/kit'
 import { useConfig } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
 import { openUrl } from '@/platform/openExternal'
@@ -104,6 +116,7 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | undefined>()
   const [saving, setSaving] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
   const meta = KEY_META[kind]
   const present = hasKey(state)
 
@@ -120,6 +133,12 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
     const res = await setManualKey(kind, draft)
     setSaving(false)
     setError(res.ok ? undefined : res.error)
+  }
+
+  const confirmClear = async () => {
+    await clearKey(kind)
+    setConfirmingClear(false)
+    toast.success(t('onboarding.keys.cleared', { label: t(meta.label) }))
   }
 
   const failed = state.status === 'failed'
@@ -193,11 +212,19 @@ function KeyRow({ kind, state, wide = false }: { kind: KeyKind; state: KeyState;
           </Button>
         ) : null}
         {present ? (
-          <Button variant="ghost" size="sm" onClick={() => clearKey(kind)} disabled={acquiring}>
+          <Button variant="ghost" size="sm" onClick={() => setConfirmingClear(true)} disabled={acquiring}>
             {t('onboarding.keys.clear')}
           </Button>
         ) : null}
       </div>
+      <DangerDialog
+        open={confirmingClear}
+        onOpenChange={setConfirmingClear}
+        title={t('onboarding.keys.clearConfirmTitle')}
+        description={t('onboarding.keys.clearConfirmDescription', { label: t(meta.label) })}
+        confirmLabel={t('onboarding.keys.clear')}
+        onConfirm={confirmClear}
+      />
       {error ? <InlineHint kind="error">{error}</InlineHint> : null}
       {failed && !panelShowsFailure ? (
         <div className="flex items-center gap-2">

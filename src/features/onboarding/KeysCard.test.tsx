@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { defaultConfig, type AiwcBridge, type KeyAcquireStep } from '@aiwc/protocol'
 import { TooltipProvider } from '@/kit'
@@ -41,6 +41,40 @@ it('reveals all three automatically acquired keys before config refs reach the r
   )
   for (const button of screen.getAllByRole('button', { name: '隐藏' })) fireEvent.click(button)
   expect(Array.from(container.querySelectorAll('input')).every((i) => /^•+$/.test(i.value))).toBe(true)
+})
+
+it('deletes a saved key only after the danger confirmation, and cancelling keeps it', async () => {
+  useConfigStore.setState({ config: defaultConfig(), hydrated: true })
+  useWizardStore.setState({
+    wxid: 'wxid_a',
+    dbRoot: '/root',
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'missing' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  const invoke = vi.fn(async () => undefined)
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  render(
+    <TooltipProvider>
+      <KeysCard />
+    </TooltipProvider>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: '清除' }))
+  fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+  expect(invoke).not.toHaveBeenCalledWith('substrate:clearKey', expect.anything())
+  expect(useWizardStore.getState().keys.db_key.status).toBe('acquired')
+
+  fireEvent.click(screen.getByRole('button', { name: '清除' }))
+  const dialog = await screen.findByRole('dialog')
+  screen.getByText('将从本机删除解密密钥，之后需要重新获取或手动输入。')
+  fireEvent.click(within(dialog).getByRole('button', { name: '清除' }))
+  await waitFor(() => expect(useWizardStore.getState().keys.db_key.status).toBe('missing'))
+  expect(invoke).toHaveBeenCalledWith('substrate:clearKey', {
+    kind: 'db_key',
+    target: { wxid: 'wxid_a', dbRoot: '/root' },
+  })
 })
 
 /** A bridge whose acquireKeys stays pending until `finish` is called; pushes go through `push`. */
