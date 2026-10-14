@@ -4,6 +4,7 @@
  * table column shapes, Name2Id availability and the account owner's Name2Id rowid.
  */
 import { createHash } from 'node:crypto'
+import { SubstrateError } from '../shared/errors'
 import type { MessageShard, MessageShardKind } from './dbFiles'
 import { quoteIdent, type WcdbQuery } from './query'
 
@@ -159,7 +160,8 @@ export class MessageTableIndex {
         const hash = extractMessageTableHash(name)
         if (hash) hashes.set(hash, [...(hashes.get(hash) ?? []), name])
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SubstrateError && error.code === 'locked') throw error
       // unreadable shard: treat as empty but retry after TTL
     }
     const entry = { hashes, scannedAt: this.now() }

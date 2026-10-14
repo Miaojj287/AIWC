@@ -15,6 +15,8 @@ export interface WcdbBridgeOptions {
   nativeDir: string
   /** Where the SQLCipher engine keeps decrypted copies. */
   cacheDir: string
+  /** Saved per-file credentials use the engine proven never to write alongside the source. */
+  readOnlyCopy?: boolean
   logger?: WcdbLogger
 }
 
@@ -26,7 +28,7 @@ function requestedEngine(): WcdbEngine | 'auto' {
 }
 
 export function createWcdbBridge(opts: WcdbBridgeOptions): { bridge: WcdbBridge; engine: WcdbEngine } {
-  const requested = requestedEngine()
+  const requested = opts.readOnlyCopy ? 'sqlcipher' : requestedEngine()
   if (requested !== 'sqlcipher') {
     // `resolveWcdbLibrary` throws NativeMissingError, which is the right answer only when the caller
     // explicitly asked for the native engine.

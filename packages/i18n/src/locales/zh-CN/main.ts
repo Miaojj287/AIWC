@@ -77,6 +77,12 @@ export const main = {
     },
   },
   substrate: {
+    credentialsMissing: '部分聊天数据尚未连接，请在设置 › 账号中点击「补齐连接」，再重试',
+    credentialsInvalid: '连接凭据已失效，请重新连接当前账号',
+    credentialsSaveFailed: '连接凭据未能安全保存，请检查系统钥匙串后重试连接',
+    connectionTimeout: '连接超时，请确认微信已登录后重试',
+    connectionProbeFailed: '连接探测未完成，请重试或在设置中查看连接状态',
+
     noDataDir: '未找到微信数据目录，请先在「设置 › 账号」中选择',
     keysAcquired: '密钥获取完成',
     keysAcquireFailed: '未能自动获取数据库密钥，可重试或手动粘贴',
@@ -84,7 +90,7 @@ export const main = {
     keysAcquiredPartial: '已获取数据库密钥，图片密钥可稍后补齐',
     selectDbRootAndAccount: '请先选择数据库目录和账号',
     dbKeyMissing: '尚未获取数据库密钥',
-    accountKeyMissing: '所选账号没有匹配的数据库密钥，请为该账号重新获取密钥后再验证',
+    accountKeyMissing: '所选账号尚未连接，请点击「连接微信」后重试',
     accountKeyVerifyFailed: '验证失败：{detail}。请为所选账号重新获取密钥后再验证',
     exported: '已导出 {n} 条消息',
     openLocation: '打开文件',

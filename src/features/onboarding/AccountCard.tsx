@@ -2,7 +2,7 @@
  * Card ① 微信与账号 (Figma 135:415 上半 / 155:415 ①): database path (自动获取 / 浏览), optional cache dir
  * (恢复默认), account Select with verified badges + 验证 / 重新扫描.
  */
-import { CircleCheck, ExternalLink, Folder, FolderOpen, RefreshCw, RotateCcw, Sparkles, UserRound } from 'lucide-react'
+import { ExternalLink, Folder, FolderOpen, RefreshCw, RotateCcw, Sparkles, UserRound } from 'lucide-react'
 import { useT } from '@/i18n'
 import { Avatar, Badge, Button, Card, FieldLabel, InlineHint, Input, Select, type SelectOption } from '@/kit'
 import { toMediaUrl } from '@/platform/mediaUrl'
@@ -199,33 +199,22 @@ export function AccountCard() {
               ) : undefined
             }
           />
-          {verified ? (
-            <Button
-              variant="ghost"
-              icon={RefreshCw}
-              loading={s.accountsLoading}
-              onClick={() => void s.loadAccounts()}
-              disabled={!s.dbRoot}
-            >
-              {t('onboarding.account.rescan')}
-            </Button>
-          ) : (
-            <Button
-              icon={CircleCheck}
-              loading={s.verifyState === 'verifying'}
-              onClick={() => void s.verify()}
-              disabled={!s.wxid || !s.dbRoot}
-            >
-              {t('onboarding.account.verify')}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            icon={RefreshCw}
+            loading={s.accountsLoading}
+            onClick={() => void s.loadAccounts()}
+            disabled={!s.dbRoot}
+          >
+            {t('onboarding.account.rescan')}
+          </Button>
         </div>
         {s.accountsError ? (
           <InlineHint kind="error">{s.accountsError}</InlineHint>
         ) : s.verifyState === 'failed' ? (
           <InlineHint kind="error">{s.verifyError ?? t('onboarding.account.verifyMismatch')}</InlineHint>
         ) : verified ? null : s.wxid ? (
-          <InlineHint kind="warning">{t('onboarding.account.verifyToContinue')}</InlineHint>
+          <InlineHint kind="warning">{t('onboarding.connection.selectHint')}</InlineHint>
         ) : s.accounts.length > 1 ? (
           <InlineHint kind="info">{t('onboarding.account.chooseOne', { n: s.accounts.length })}</InlineHint>
         ) : null}

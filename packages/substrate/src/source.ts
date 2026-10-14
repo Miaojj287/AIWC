@@ -4,14 +4,16 @@
  * the public SubstrateService. Implementations: WcdbSourceReader (packages/substrate/src/wcdb),
  * DemoSourceReader (packages/substrate/src/demo).
  */
-import type { WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
+import type { WechatDbCredentialBundle, WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
 import type { GuardedSql } from './shared/sqlGuard'
 
 export interface SourceOpenOptions {
   dbRoot: string
   wxid: string
-  /** 64-hex SQLCipher key */
+  /** Legacy 64-hex SQLCipher key; empty when per-database credentials are available. */
   dbKeyHex: string
+  /** Private account credentials. Never forwarded to renderer state or event payloads. */
+  dbCredentials?: WechatDbCredentialBundle
   cacheDir: string
   imageKeys?: { xorHex?: string; aesHex?: string }
 }

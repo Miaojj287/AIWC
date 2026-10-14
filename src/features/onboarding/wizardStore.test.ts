@@ -116,12 +116,14 @@ it('automatically detects the data directory during hydration even when WeChat i
 it('keeps the saved directory instead of replacing it with automatic detection', async () => {
   const invoke = vi.fn(async (channel: string) => (channel === 'substrate:listAccounts' ? [] : {}))
   __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
-  await useWizardStore.getState().hydrate({ ...defaultConfig(), account: { dbRoot: '/saved' } })
+  await useWizardStore
+    .getState()
+    .hydrate({ ...defaultConfig(), account: { ...defaultConfig().account, dbRoot: '/saved' } })
   expect(useWizardStore.getState().dbRoot).toBe('/saved')
   expect(invoke).not.toHaveBeenCalledWith('substrate:detectWeChat', undefined)
 })
 
-it('enters a later launch without reconnecting when the saved account is already open and nothing changed', async () => {
+it('verifies and connects a cached account when the user retries entry', async () => {
   const invoke = vi.fn(async (channel: string) =>
     channel === 'substrate:status'
       ? { connection: 'ready', sync: {}, account: { wxid: 'me', dbRoot: '/root', verified: true } }
@@ -138,7 +140,7 @@ it('enters a later launch without reconnecting when the saved account is already
     },
   })
   expect(await useWizardStore.getState().enter()).toBe(true)
-  expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(['substrate:status', 'substrate:connect'])
+  expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(['substrate:testConnection', 'substrate:connect'])
 })
 
 it('runs the full connection test on 进入 after a key was replaced on the page', async () => {

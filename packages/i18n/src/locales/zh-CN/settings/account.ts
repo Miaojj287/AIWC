@@ -1,6 +1,6 @@
 /** settings.account — 账号 page (AccountPage, AccountKeys, SecretField, accountModel). */
 export const account = {
-  sections: { dirs: '目录与账号验证', keys: '解密密钥' },
+  sections: { dirs: '目录与账号验证', keys: '微信连接与图片' },
   verified: '已验证',
   unverified: '未验证',
   loading: '读取中…',
@@ -60,11 +60,11 @@ export const account = {
     connectFailed: '连接失败',
   },
   dbKey: {
-    title: '数据库解密密钥',
-    description: '64 位十六进制',
-    help: '可直接编辑，回车或失焦时校验并保存；也可自动获取。',
+    title: '微信数据连接',
+    description: '连接一次，保存后可直接读取',
+    help: '连接时只读获取当前账号各个数据库的凭据并加密保存。普通连接不会重启微信；没有保存凭据时可手动输入已有的 64 位十六进制密钥。',
     fieldLabel: '解密密钥',
-    acquire: '自动获取密钥',
+    acquire: '连接微信',
   },
   imageKeys: {
     title: '图片解密密钥',

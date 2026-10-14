@@ -235,6 +235,15 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
 
   const handlers: HandlersFor<'substrate'> = {
     'substrate:status': () => ({ connection: state.connection, sync: state.sync, account: data.account }),
+    'substrate:credentialStatus': ({ wxid, dbRoot }) => ({
+      database: wxid === data.account.wxid && dbRoot === data.account.dbRoot,
+      imageXor: true,
+      imageAes: true,
+      matched: 3,
+      total: 3,
+      missing: [],
+      revision: 1,
+    }),
     'substrate:detectWeChat': async () => {
       await ctx.delay(400)
       return { running: true, dbRoot: data.account.dbRoot, version: '4.0（演示）' }
@@ -252,10 +261,14 @@ export function substrateHandlers(ctx: MockContext): HandlersFor<'substrate'> & 
       acquireRun?.abort()
       acquireRun = controller
       const ids: KeyAcquireStep['id'][] =
-        scope === 'image' ? ['image_xor', 'image_aes'] : ['db_key', 'image_xor', 'image_aes', 'verify']
+        scope === 'image'
+          ? ['image_xor', 'image_aes']
+          : scope === 'database'
+            ? ['db_key', 'verify']
+            : ['db_key', 'image_xor', 'image_aes', 'verify']
       const steps: KeyAcquireStep[] = ids.map((id) => ({ id, label: '', status: 'todo' }))
       const PHASES: Record<KeyAcquireStep['id'], KeyAcquireStep['phase'][]> = {
-        db_key: ['reading_memory', 'reading_dumps'],
+        db_key: ['reading_memory'],
         image_xor: ['deriving_image_key'],
         image_aes: ['scanning_image_key'],
         verify: ['verifying'],

@@ -1,3 +1,4 @@
+import { type WechatCredentialsInvokeMap, WECHAT_CREDENTIALS_INVOKE_CHANNELS } from './wechatCredentials'
 import type { AccountTarget } from './wechatKeys'
 /**
  * Renderer ↔ main IPC contract. The preload exposes `window.aiwc: AiwcBridge`. Every channel is
@@ -122,6 +123,7 @@ export interface UpdateStatus {
 /** Core channels live here; newer domains are split into ./ipcDomains and merged in. */
 export interface InvokeMap
   extends
+    WechatCredentialsInvokeMap,
     ConversationInvokeMap,
     PrivacyInvokeMap,
     SkillsInvokeMap,
@@ -185,7 +187,7 @@ export interface InvokeMap
   'substrate:listAccounts': { req: { dbRoot?: string }; res: WxAccount[] }
   'substrate:verifyAccount': { req: { wxid: string; dbRoot: string }; res: { ok: boolean; error?: string } }
   'substrate:acquireKeys': {
-    /** `scope: 'image'` = only the image keys (never touches WeChat's process); default 'all'. */
+    /** Database-first by default; explicit image scope may read process memory for media only. */
     req: { wxid: string; dbRoot: string; strategy?: 'auto' | 'memory_scan'; scope?: KeyAcquireScope }
     res: KeyAcquireStep[]
   }
@@ -638,6 +640,7 @@ export const INVOKE_CHANNELS = [
   ...DATA_INVOKE_CHANNELS,
   ...MOBILE_INVOKE_CHANNELS,
   ...EXTENSIONS_INVOKE_CHANNELS,
+  ...WECHAT_CREDENTIALS_INVOKE_CHANNELS,
 ] as const satisfies readonly InvokeChannel[]
 
 export const EVENT_CHANNELS = [

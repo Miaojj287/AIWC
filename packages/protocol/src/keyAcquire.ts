@@ -53,6 +53,8 @@ export const KEY_ACQUIRE_FAILURES = [
   'not_found',
   /** Something threw; `detail` carries the message. */
   'unexpected',
+  'timeout',
+  'unsupported_version',
 ] as const
 export type KeyAcquireFailure = (typeof KEY_ACQUIRE_FAILURES)[number]
 
@@ -70,14 +72,14 @@ export interface KeyAcquireStep {
 }
 
 /** Which keys a run acquires: everything, or only the image keys. */
-export type KeyAcquireScope = 'all' | 'image'
+export type KeyAcquireScope = 'all' | 'database' | 'image'
 
 /** The steps a run reports, in display order. */
 const KEY_ACQUIRE_STEP_IDS: readonly KeyAcquireStep['id'][] = ['db_key', 'image_xor', 'image_aes', 'verify']
 const IMAGE_STEP_IDS: readonly KeyAcquireStep['id'][] = ['image_xor', 'image_aes']
 
 export function keyAcquireStepIds(scope: KeyAcquireScope = 'all'): readonly KeyAcquireStep['id'][] {
-  return scope === 'image' ? IMAGE_STEP_IDS : KEY_ACQUIRE_STEP_IDS
+  return scope === 'image' ? IMAGE_STEP_IDS : scope === 'database' ? ['db_key', 'verify'] : KEY_ACQUIRE_STEP_IDS
 }
 
 /**

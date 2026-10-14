@@ -36,3 +36,9 @@ export * from './modelUsage'
 export * from './threadSearch'
 export * from './extensions'
 export * from './skills'
+
+export * from './wechatCredentials'
+export * from './wechatKeyHostWire'
+export * from './wechatImageScan'
+
+export { WechatManualKeyRequestSchema, WechatClearKeyRequestSchema } from './wechatKeys'

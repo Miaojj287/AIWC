@@ -16,7 +16,10 @@ afterEach(() => {
 })
 
 function setup(results: { ok: boolean; error?: string }[]) {
-  let config = { ...defaultConfig(), account: { wxid: 'old', dbRoot: '/old', verifiedAt: 1 } }
+  let config = {
+    ...defaultConfig(),
+    account: { ...defaultConfig().account, wxid: 'old', dbRoot: '/old', verifiedAt: 1 },
+  }
   useConfigStore.setState({ config, hydrated: true })
   const connected: string[] = []
   const invoke = vi.fn(async (channel: string, req: unknown) => {

@@ -3,7 +3,7 @@
  * save; `set(patch)` deep-merges, re-validates, saves and notifies subscribers. Pure module (paths
  * injected, no `electron` import) so it is unit-testable.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { AppConfigSchema, type AppConfig, type ConfigPatch, defaultConfig } from '@aiwc/protocol'
 import type { Logger } from '../log'
@@ -12,7 +12,7 @@ import { t } from '../i18n'
 
 export interface ConfigService {
   get(): AppConfig
-  /** Deep-merge `patch`, validate, persist, notify. Throws (and keeps the old config) when invalid. */
+  /** Deep-merge, validate, persist, notify; failures keep the previous config and do not notify. */
   set(patch: ConfigPatch): AppConfig
   /** Replace the whole config (used by import / reset). */
   replace(next: unknown): AppConfig
@@ -59,8 +59,12 @@ export function deepMerge<T>(base: T, patch: unknown): T {
 export function atomicWriteJson(file: string, value: unknown): void {
   mkdirSync(dirname(file), { recursive: true })
   const tmp = `${file}.${process.pid}.tmp`
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  renameSync(tmp, file)
+  try {
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+    renameSync(tmp, file)
+  } finally {
+    rmSync(tmp, { force: true })
+  }
 }
 
 export function createConfigService(opts: ConfigServiceOptions): ConfigService {
@@ -128,8 +132,8 @@ export function createConfigService(opts: ConfigServiceOptions): ConfigService {
 
   function commit(next: AppConfig): AppConfig {
     const prev = current
-    current = next
     persist(next)
+    current = next
     for (const l of listeners) {
       try {
         l(next, prev)

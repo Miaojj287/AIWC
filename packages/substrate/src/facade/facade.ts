@@ -148,7 +148,8 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
       }
       const merged = mirror.listMessages({ ...q, limit })
       return { items: merged.items, hasMore: merged.hasMore || live.length >= limit }
-    } catch {
+    } catch (error) {
+      if (error instanceof SubstrateError && error.code === 'locked') throw error
       return local
     }
   }
@@ -167,7 +168,8 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
       const fresh = [...before, ...after]
       if (fresh.length) mirror.insertMessages(fresh, { advanceWatermark: false })
       return mirror.getContext(anchor, r)
-    } catch {
+    } catch (error) {
+      if (error instanceof SubstrateError && error.code === 'locked') throw error
       return local
     }
   }
@@ -341,7 +343,8 @@ export function createSubstrateFacade(opts: SubstrateFacadeOptions): SubstrateFa
           )
           return mirror.listGroupMembers(groupId, q)
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof SubstrateError && error.code === 'locked') throw error
         /* fall through */
       }
       return local

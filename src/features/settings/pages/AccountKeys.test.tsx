@@ -46,7 +46,7 @@ it('asks main for the image keys only, so getting them never restarts WeChat', a
   expect(onClose).toHaveBeenCalled()
 })
 
-it('explains a Developer Tools denial and links to the setting', async () => {
+it('explains a process access denial and links to the setting without promising a permission fixes it', async () => {
   const { onClose } = setup(
     Promise.resolve([
       { id: 'db_key', label: '', status: 'failed', failure: 'needs_authorization' },
@@ -67,7 +67,7 @@ it('explains a Developer Tools denial and links to the setting', async () => {
       />
     </TooltipProvider>,
   )
-  await screen.findByText(/开发者工具/)
+  await screen.findByText(/系统未允许读取微信进程/)
   screen.getByRole('button', { name: '打开系统设置' })
   expect(onClose).not.toHaveBeenCalled()
 })

@@ -6,9 +6,8 @@
 import type { WxAccount, WxContact, WxMedia, WxMessage, WxSession } from '@aiwc/protocol'
 import type { SourceOpenOptions, SourceReader } from '../source'
 import type { GuardedSql } from '../shared/sqlGuard'
-import { createDbKeyResolver } from '../key/dbKeyResolver'
-import { collectWeChatDbKeyCandidates } from '../key/liveKeyCandidates'
-import { verifyDbKey } from '../key/sqlcipherPage'
+import { createDbKeyResolver, type DbKeyResolver } from '../key/dbKeyResolver'
+import { SubstrateError } from '../shared/errors'
 import { buildIdentityKeys, cleanAccountDirName } from './accountUtils'
 import { ContactDirectory } from './contactQueries'
 import {
@@ -25,6 +24,12 @@ import { findMessageRow, queryMessagesAfter, queryMessagesBefore, type MessageQu
 import { resolveMediaFor, type MediaResolverContext } from './mediaResolver'
 import type { WcdbBridge, WcdbLogger } from './bridge'
 import { createWcdbBridge } from './engine'
+import {
+  pickSessionDatabase,
+  requireDatabaseCredentials,
+  savedContactDatabasePaths,
+  savedMessageDatabasePaths,
+} from './sourceCredentials'
 import { createBridgeQuery, yieldToLoop, type WcdbQuery } from './query'
 import { querySessionActivity, querySessions, querySessionsChangedSince } from './sessionQueries'
 import { MessageTableIndex } from './tableResolver'
@@ -49,7 +54,7 @@ interface OpenState {
   emoticonDbPath: string | null
   hardlinkDbPath: string | null
   mediaDbPaths: string[]
-  keyHex: string
+  keys: DbKeyResolver
   selfKeys: string[]
   q: WcdbQuery
   contacts: ContactDirectory
@@ -82,22 +87,27 @@ export class WcdbSourceReader implements SourceReader {
     if (!dbStoragePath) throw new Error(`未找到账号目录或 db_storage: ${opts.dbRoot}`)
     const sessionCandidates = findSessionDbCandidates(dbStoragePath)
     if (sessionCandidates.length === 0) throw new Error(`未找到 session.db: ${dbStoragePath}`)
+    const keys = createDbKeyResolver({
+      accountId: opts.wxid,
+      dbStoragePath,
+      sessionKeyHex: keyHex,
+      dbCredentials: opts.dbCredentials,
+      logger: this.options.logger,
+    })
 
     const { bridge, engine } = createWcdbBridge({
       nativeDir: this.options.nativeDir,
       cacheDir: opts.cacheDir,
       logger: this.options.logger,
+      readOnlyCopy: !!opts.dbCredentials,
     })
     try {
-      const sessionDbPath = this.pickSessionDb(bridge, sessionCandidates, keyHex)
-      // WeChat on Windows keys every database separately, so the verified key is only the starting
-      // point: each file resolves its own key from what WeChat has in memory (see dbKeyResolver).
-      const keys = createDbKeyResolver({
-        sessionKeyHex: keyHex,
-        collectCandidates: () => collectWeChatDbKeyCandidates(),
-        logger: this.options.logger,
+      const sessionDbPath = pickSessionDatabase(bridge, sessionCandidates, keys)
+      const q = createBridgeQuery(bridge, (dbPath) => {
+        const resolved = keys.keyFor(dbPath)
+        if (resolved === undefined) throw new SubstrateError('locked', 'WECHAT_DATABASE_CREDENTIALS_MISSING')
+        return resolved
       })
-      const q = createBridgeQuery(bridge, (dbPath) => keys.keyFor(dbPath))
       const contactDbPath = findNamedDb(dbStoragePath, 'contact.db')
       const shards = findMessageShards(dbStoragePath)
       this.state = {
@@ -110,7 +120,7 @@ export class WcdbSourceReader implements SourceReader {
         emoticonDbPath: findNamedDb(dbStoragePath, 'emoticon.db'),
         hardlinkDbPath: findNamedDb(dbStoragePath, 'hardlink.db'),
         mediaDbPaths: findMediaDbs(dbStoragePath),
-        keyHex,
+        keys,
         selfKeys: Array.from(new Set([opts.wxid, cleanAccountDirName(opts.wxid)].filter(Boolean))),
         q,
         contacts: new ContactDirectory(q, contactDbPath, findNamedDb(dbStoragePath, 'head_image.db')),
@@ -127,6 +137,7 @@ export class WcdbSourceReader implements SourceReader {
       })
       this.startWatching()
     } catch (error) {
+      keys.clear()
       bridge.dispose()
       throw error
     }
@@ -137,6 +148,7 @@ export class WcdbSourceReader implements SourceReader {
     this.stopWatching = null
     if (this.state) {
       this.state.index.reset()
+      this.state.keys.clear()
       this.state.bridge.dispose()
     }
     this.state = null
@@ -146,7 +158,7 @@ export class WcdbSourceReader implements SourceReader {
     const s = this.requireOpen()
     let nickname: string | undefined
     let avatarPath: string | undefined
-    for (const key of s.selfKeys) {
+    for (const key of this.readableContacts(s) ? s.selfKeys : []) {
       const record = s.contacts.get(key)
       if (record) {
         nickname = record.nickname ?? record.displayName
@@ -159,7 +171,7 @@ export class WcdbSourceReader implements SourceReader {
 
   async sessions(onPage?: (sessions: readonly WxSession[]) => void): Promise<WxSession[]> {
     const s = this.requireOpen()
-    const contacts = s.contacts.available ? s.contacts : null
+    const contacts = this.readableContacts(s) ? s.contacts : null
     const list = await querySessions({ q: s.q, sessionDbPath: s.sessionDbPath, contacts }, yieldToLoop, onPage)
     for (const session of list) {
       if (session.lastMessageAt)
@@ -170,7 +182,9 @@ export class WcdbSourceReader implements SourceReader {
 
   async contacts(): Promise<WxContact[]> {
     const s = this.requireOpen()
-    if (!s.contacts.available) return []
+    requireDatabaseCredentials(s.keys, savedContactDatabasePaths(s.dbStoragePath, s.opts.dbCredentials))
+    if (!s.contactDbPath) return []
+    requireDatabaseCredentials(s.keys, [s.contactDbPath])
     let activity = new Map<string, number>()
     try {
       activity = querySessionActivity(s.q, s.sessionDbPath)
@@ -182,6 +196,8 @@ export class WcdbSourceReader implements SourceReader {
 
   async groupMembers(groupId: string): Promise<WxContact[]> {
     const s = this.requireOpen()
+    requireDatabaseCredentials(s.keys, savedContactDatabasePaths(s.dbStoragePath, s.opts.dbCredentials))
+    if (s.contactDbPath) requireDatabaseCredentials(s.keys, [s.contactDbPath])
     return s.contacts.groupMembers(groupId)
   }
 
@@ -249,6 +265,7 @@ export class WcdbSourceReader implements SourceReader {
             : []
           : this.currentShards().map((x) => x.dbPath)
     if (targets.length === 0) throw new Error(`${db} 数据库不可用`)
+    requireDatabaseCredentials(s.keys, targets)
     let columns: string[] = []
     const rows: unknown[][] = []
     let lastError: unknown
@@ -262,6 +279,7 @@ export class WcdbSourceReader implements SourceReader {
           if (rows.length >= statement.limit) return { columns, rows }
         }
       } catch (error) {
+        if (error instanceof SubstrateError && error.code === 'locked') throw error
         lastError = error
       }
       if (targets.length > 1) await yieldToLoop()
@@ -278,23 +296,8 @@ export class WcdbSourceReader implements SourceReader {
     return this.state
   }
 
-  /** First session.db this key both verifies against (pure TS) and the engine can actually open. */
-  private pickSessionDb(bridge: WcdbBridge, candidates: string[], keyHex: string): string {
-    let lastError = ''
-    for (const candidate of candidates) {
-      const check = verifyDbKey(candidate, keyHex)
-      if (!check.ok) {
-        lastError = check.error ?? ''
-        continue
-      }
-      if (bridge.canOpen(candidate, keyHex)) return candidate
-      lastError = 'WCDB 无法打开数据库'
-    }
-    throw new Error(
-      lastError.includes('不匹配')
-        ? '当前密钥与微信数据库不匹配，请重新获取当前登录账号的数据库密钥'
-        : `数据库打开失败：${lastError || '未知原因'}`,
-    )
+  private readableContacts(s: OpenState): boolean {
+    return !!s.contactDbPath && s.keys.keyFor(s.contactDbPath) !== undefined
   }
 
   private currentShards(): MessageShard[] {
@@ -308,18 +311,25 @@ export class WcdbSourceReader implements SourceReader {
 
   private messageContext(): MessageQueryContext {
     const s = this.requireOpen()
+    requireDatabaseCredentials(s.keys, [
+      ...this.currentShards().map((shard) => shard.dbPath),
+      ...savedMessageDatabasePaths(s.dbStoragePath, s.opts.dbCredentials),
+    ])
+    const canReadContacts = this.readableContacts(s)
     return {
       q: s.q,
       index: s.index,
       selfWxid: s.opts.wxid,
       selfKeys: s.selfKeys,
       resolveName: (sessionId, username) => {
+        if (!canReadContacts) return undefined
         if (buildIdentityKeys(username).some((k) => s.selfKeys.map((x) => x.toLowerCase()).includes(k))) {
           return s.contacts.get(username)?.displayName ?? s.contacts.get(cleanAccountDirName(username))?.displayName
         }
         return s.contacts.senderNameIn(sessionId, username)
       },
       onShardError: (dbPath, error) => {
+        if (error instanceof SubstrateError && error.code === 'locked') throw error
         this.log('warn', 'shard query failed', {
           dbPath,
           error: error instanceof Error ? error.message : String(error),

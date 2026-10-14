@@ -64,6 +64,7 @@ const webOnly = process.env.AIWC_WEB_ONLY === '1'
 const mainEntries = [
   { entry: 'electron/main/index.ts', out: 'main' },
   { entry: 'electron/hosts/substrateHost.ts', out: 'substrateHost' },
+  { entry: 'electron/hosts/keyAcquireHost.ts', out: 'keyAcquireHost' },
 ]
 
 export default defineConfig({

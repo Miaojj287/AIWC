@@ -1,3 +1,4 @@
+import { readWechatCredentials } from './services/wechatCredentials'
 /**
  * Composition root: the ONLY place that knows about every package. createApp() wires config,
  * secrets, substrate (utility process), memory, gateway, kernel, auto-reply, 每日待办 and clone
@@ -157,15 +158,16 @@ export async function createApp(deps: CreateAppDeps): Promise<AppContext> {
   const resolveOpen = (_mode: SubstrateMode): SourceOpenOptions | undefined => {
     const a = cfg().account
     const cacheDir = substrateCacheDir(paths, cacheDirOverride())
-    if (!a.dbRoot || !a.wxid || !a.dbKeyRef) return undefined
-    const dbKeyHex = secrets.reveal(a.dbKeyRef)
-    if (!dbKeyHex) return undefined
+    if (!a.dbRoot || !a.wxid) return undefined
+    const { dbKeyHex, dbCredentials } = readWechatCredentials({ config, secrets }, a.wxid)
+    if (!dbKeyHex && !dbCredentials) return undefined
     const xorHex = a.imageXorKeyRef ? (secrets.reveal(a.imageXorKeyRef) ?? undefined) : undefined
     const aesHex = a.imageAesKeyRef ? (secrets.reveal(a.imageAesKeyRef) ?? undefined) : undefined
     return {
       dbRoot: a.dbRoot,
       wxid: a.wxid,
-      dbKeyHex,
+      dbKeyHex: dbKeyHex ?? '',
+      dbCredentials,
       cacheDir,
       imageKeys: xorHex || aesHex ? { xorHex, aesHex } : undefined,
     }

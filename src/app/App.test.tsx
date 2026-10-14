@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { useEffect } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultConfig, type AiwcBridge, type AppConfig, type ConfigPatch } from '@aiwc/protocol'
 import { clearToasts } from '@/kit'
@@ -31,6 +31,9 @@ vi.mock('./registerFeatures', () => ({ registerFeatures: () => {} }))
 let failingWrites: number
 let writes: ConfigPatch[]
 let initialConfig: AppConfig
+let hasCachedConnection: boolean
+let connectionFails: boolean
+let connectionCalls: string[]
 
 function fakeBridge(): AiwcBridge {
   let current: AppConfig = initialConfig
@@ -40,6 +43,22 @@ function fakeBridge(): AiwcBridge {
     on: () => () => {},
     invoke: (async (channel: string, req: unknown) => {
       if (channel === 'config:get') return current
+      if (channel === 'substrate:credentialStatus') {
+        connectionCalls.push(channel)
+        return {
+          database: hasCachedConnection,
+          imageXor: false,
+          imageAes: false,
+          matched: hasCachedConnection ? 1 : 0,
+          total: 1,
+          missing: [],
+          revision: 1,
+        }
+      }
+      if (channel === 'substrate:connect') {
+        connectionCalls.push(channel)
+        return { ok: !connectionFails }
+      }
       if (channel === 'config:set') {
         const patch = req as ConfigPatch
         writes.push(patch)
@@ -65,6 +84,9 @@ beforeEach(() => {
   failingWrites = 0
   writes = []
   initialConfig = defaultConfig()
+  hasCachedConnection = false
+  connectionFails = false
+  connectionCalls = []
   __resetConfigStoreForTests()
   __setBridgeForTests(fakeBridge())
 })
@@ -107,6 +129,44 @@ describe('App onboarding', () => {
 })
 
 describe('App later launches', () => {
+  it('automatically opens the saved account without scanning or another confirmation click', async () => {
+    initialConfig = {
+      ...defaultConfig(),
+      onboarding: { completed: true },
+      account: { ...defaultConfig().account, wxid: 'saved', dbRoot: '/saved' },
+    }
+    hasCachedConnection = true
+    __setBridgeForTests(fakeBridge())
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+    await flush()
+    expect(screen.getByRole('main').textContent).toBe('工作台')
+    expect(screen.queryByRole('button', { name: '进入' })).toBeNull()
+    expect(connectionCalls).toEqual(['substrate:credentialStatus', 'substrate:connect'])
+    expect(writes).toEqual([])
+  })
+
+  it('keeps the connection page after a failed cached connection and does not retry on rerender', async () => {
+    initialConfig = {
+      ...defaultConfig(),
+      onboarding: { completed: true },
+      account: { ...defaultConfig().account, wxid: 'saved', dbRoot: '/saved' },
+    }
+    hasCachedConnection = true
+    connectionFails = true
+    __setBridgeForTests(fakeBridge())
+    const view = render(<App />)
+    await flush()
+    expect(screen.queryByRole('main')).toBeNull()
+    expect(screen.getByRole('button', { name: '进入' })).toBeTruthy()
+    view.rerender(<App />)
+    await flush()
+    expect(connectionCalls).toEqual(['substrate:credentialStatus', 'substrate:connect'])
+  })
+
   it('stops on the connect page first and opens the Shell only after 进入, without writing config', async () => {
     initialConfig = { ...defaultConfig(), onboarding: { completed: true } }
     __setBridgeForTests(fakeBridge())

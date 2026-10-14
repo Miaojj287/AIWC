@@ -51,3 +51,12 @@ export function validateWechatKey(kind: WechatKeyKind, input: string): WechatKey
   if (hex.length !== length) return { ok: false, error: `密钥应为 ${length} 位十六进制字符，当前 ${hex.length} 位` }
   return { ok: true, hex }
 }
+
+/** Runtime-validated manual key input and account boundary. */
+export const WechatManualKeyRequestSchema = z.strictObject({
+  kind: z.enum(['db_key', 'image_xor', 'image_aes']),
+  hex: z.string().max(4096),
+  target: AccountTargetSchema.optional(),
+})
+/** Runtime-validated credential deletion request. */
+export const WechatClearKeyRequestSchema = WechatManualKeyRequestSchema.omit({ hex: true })

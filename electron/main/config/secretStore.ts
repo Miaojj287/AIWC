@@ -3,7 +3,7 @@
  * On disk: secrets.bin = JSON { version: 1, entries: { [ref]: base64(ciphertext) } }, mode 0600.
  * The safeStorage-like object is injected so tests can use a fake; the module never imports electron.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { Logger } from '../log'
 import { nullLogger } from '../log'
@@ -48,6 +48,7 @@ export function isValidSecretRef(ref: string): boolean {
 /** Conventional refs used by the composition root / settings UI. */
 export const SECRET_REFS = {
   dbKey: 'account.dbKey',
+  dbCredentials: 'account.databaseCredentials.v1',
   imageXorKey: 'account.imageXorKey',
   imageAesKey: 'account.imageAesKey',
   providerApiKey: (providerId: string) => `ai.provider.${providerId}.apiKey`,
@@ -68,7 +69,7 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
       removedPersistedSessionSecret = true
     }
   }
-  if (removedPersistedSessionSecret) persist()
+  if (removedPersistedSessionSecret) persist(data)
 
   function load(): SecretsFile {
     if (!existsSync(opts.file)) return { version: 1, entries: {} }
@@ -89,17 +90,21 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
     return { version: 1, entries: {} }
   }
 
-  function persist(): void {
+  function persist(next: SecretsFile): void {
     mkdirSync(dirname(opts.file), { recursive: true })
     const tmp = `${opts.file}.${process.pid}.tmp`
-    const entries = Object.fromEntries(Object.entries(data.entries).filter(([ref]) => !sessionOnlyRefs.has(ref)))
-    writeFileSync(tmp, JSON.stringify({ ...data, entries }), { encoding: 'utf8', mode: 0o600 })
+    const entries = Object.fromEntries(Object.entries(next.entries).filter(([ref]) => !sessionOnlyRefs.has(ref)))
     try {
-      chmodSync(tmp, 0o600)
-    } catch {
-      // Windows: mode bits are not supported; ACL of userData protects the file
+      writeFileSync(tmp, JSON.stringify({ ...next, entries }), { encoding: 'utf8', mode: 0o600 })
+      try {
+        chmodSync(tmp, 0o600)
+      } catch {
+        // Windows: mode bits are not supported; ACL of userData protects the file.
+      }
+      renameSync(tmp, opts.file)
+    } finally {
+      rmSync(tmp, { force: true })
     }
-    renameSync(tmp, opts.file)
   }
 
   function assertRef(ref: string): void {
@@ -117,8 +122,9 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
         throw new Error(t('main.config.encryptionUnavailable'))
       }
       const cipher = opts.safeStorage.encryptString(value)
-      data.entries[ref] = cipher.toString('base64')
-      persist()
+      const next = { ...data, entries: { ...data.entries, [ref]: cipher.toString('base64') } }
+      persist(next)
+      data.entries = next.entries
     },
     reveal(ref) {
       const b64 = data.entries[ref]
@@ -132,8 +138,10 @@ export function createSecretStore(opts: SecretStoreOptions): SecretStore {
     },
     delete(ref) {
       if (!(ref in data.entries)) return
-      delete data.entries[ref]
-      persist()
+      const next = { ...data, entries: { ...data.entries } }
+      delete next.entries[ref]
+      persist(next)
+      data.entries = next.entries
     },
     list() {
       return Object.keys(data.entries).sort()

@@ -29,7 +29,14 @@ function copyReferencedSecrets(
     ...config.ai.providers.map((provider) => provider.apiKeyRef),
     config.ai.jev.apiKeyRef,
     PROXY_PASSWORD_SECRET_REF,
-    ...(includeAccount ? [config.account.dbKeyRef, config.account.imageXorKeyRef, config.account.imageAesKeyRef] : []),
+    ...(includeAccount
+      ? [
+          config.account.dbKeyRef,
+          config.account.dbCredentialsRef,
+          config.account.imageXorKeyRef,
+          config.account.imageAesKeyRef,
+        ]
+      : []),
   ]
   for (const ref of refs) {
     if (!ref || target.has(ref)) continue

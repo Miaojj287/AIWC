@@ -23,7 +23,18 @@ import type {
 } from '@aiwc/protocol'
 import { mainLanguage, t } from './i18n'
 
-export const localizeText = <T extends string | undefined>(text: T): T => localizeKnown(text, mainLanguage()) as T
+export const localizeText = <T extends string | undefined>(text: T): T => {
+  const codes: Record<string, string> = {
+    WECHAT_DATABASE_CREDENTIALS_MISSING: t('main.substrate.credentialsMissing'),
+    WECHAT_DATABASE_CREDENTIALS_INVALID: t('main.substrate.credentialsInvalid'),
+    KEY_HOST_TIMEOUT: t('main.substrate.connectionTimeout'),
+    KEY_HOST_SAVE_FAILED: t('main.substrate.credentialsSaveFailed'),
+    KEY_HOST_FAILED: t('main.substrate.connectionProbeFailed'),
+    KEY_HOST_EXITED: t('main.substrate.connectionProbeFailed'),
+    INVALID_KEY_HOST_RESULT: t('main.substrate.connectionProbeFailed'),
+  }
+  return (text === undefined ? undefined : (codes[text] ?? localizeKnown(text, mainLanguage()))) as T
+}
 
 const withError = <T extends { error?: string }>(value: T): T =>
   value.error ? { ...value, error: localizeText(value.error) } : value

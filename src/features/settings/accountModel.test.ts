@@ -22,8 +22,8 @@ describe('validateKeyHex', () => {
 describe('secret refs & masks', () => {
   it('prefers the configured ref and falls back to the conventional one', () => {
     expect(secretRefFor(undefined, 'db_key')).toBe('account:dbKey')
-    expect(secretRefFor({ dbKeyRef: 'custom:ref' }, 'db_key')).toBe('custom:ref')
-    expect(secretRefFor({}, 'image_aes')).toBe('account:imageAesKey')
+    expect(secretRefFor({ credentialRevision: 0, dbKeyRef: 'custom:ref' }, 'db_key')).toBe('custom:ref')
+    expect(secretRefFor({ credentialRevision: 0 }, 'image_aes')).toBe('account:imageAesKey')
   })
   it('masks without leaking length beyond 48 dots', () => {
     expect(maskSecret('db_key')).toHaveLength(48)

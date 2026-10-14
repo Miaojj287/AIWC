@@ -14,7 +14,10 @@ afterEach(() => {
 
 it('shows the connected account avatar when saved config disagrees, and groups directories above keys', async () => {
   useConfigStore.setState({
-    config: { ...defaultConfig(), account: { wxid: 'saved_b', dbRoot: '/root', verifiedAt: 1 } },
+    config: {
+      ...defaultConfig(),
+      account: { ...defaultConfig().account, wxid: 'saved_b', dbRoot: '/root', verifiedAt: 1 },
+    },
     hydrated: true,
   })
   __setBridgeForTests({

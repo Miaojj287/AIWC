@@ -213,6 +213,8 @@ export const AppConfigSchema = z.object({
       dbRoot: z.string().optional(),
       cacheDir: z.string().optional(),
       dbKeyRef: z.string().optional(),
+      dbCredentialsRef: z.string().optional(),
+      credentialRevision: z.number().int().nonnegative().optional(),
       imageXorKeyRef: z.string().optional(),
       imageAesKeyRef: z.string().optional(),
       verifiedAt: z.number().optional(),
@@ -338,5 +340,7 @@ export const defaultConfig = (): AppConfig => AppConfigSchema.parse({})
 
 /** Deep-partial patch type used by config:set. */
 export type ConfigPatch = {
-  [K in keyof AppConfig]?: AppConfig[K] extends object ? Partial<AppConfig[K]> : AppConfig[K]
+  [K in keyof AppConfig]?: AppConfig[K] extends object
+    ? { [P in keyof AppConfig[K]]?: AppConfig[K][P] | (undefined extends AppConfig[K][P] ? null : never) }
+    : AppConfig[K]
 }

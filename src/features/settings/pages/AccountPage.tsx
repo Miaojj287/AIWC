@@ -29,6 +29,7 @@ import { secretRefFor, type KeyKind } from '../accountModel'
 import { activateAccount, errorMessage, refreshConfig, saveConfig } from '../hooks'
 import { PagePlaceholder, SRow, Section } from '../pageKit'
 import { AcquireKeysButton, InlineKeyAcquire, SecretField } from './AccountKeys'
+import { DatabaseCredentialStatus, SavedDatabaseCredentials } from './DatabaseCredentialStatus'
 import { OfficeSection } from './OfficeSection'
 import { MobileSection } from './MobileSection'
 
@@ -39,13 +40,19 @@ export function AccountPage() {
   const accounts = useInvoke('substrate:listAccounts', { dbRoot: account?.dbRoot }, [account?.dbRoot])
   const [switching, setSwitching] = useState(false)
   const [keyVersion, setKeyVersion] = useState(0)
-  const [acquire, setAcquire] = useState<'all' | 'image' | null>(null)
+  const [acquire, setAcquire] = useState<'database' | 'image' | null>(null)
   const [verifyWxid, setVerifyWxid] = useState<string | undefined>(account?.wxid)
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState<string | undefined>()
   const [testing, setTesting] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [resetCache, setResetCache] = useState(false)
+  const credentials = useInvoke(
+    'substrate:credentialStatus',
+    { wxid: account?.wxid ?? '', dbRoot: account?.dbRoot ?? '' },
+    [account?.wxid, account?.dbRoot, account?.credentialRevision, keyVersion],
+    { enabled: Boolean(account?.wxid && account.dbRoot) },
+  )
 
   useEffect(() => {
     if (account?.wxid) setVerifyWxid(account.wxid)
@@ -308,12 +315,13 @@ export function AccountPage() {
             stacked
             footer={
               <>
-                {acquire === 'all' ? (
+                <DatabaseCredentialStatus credentials={credentials.data} />
+                {acquire === 'database' ? (
                   <InlineKeyAcquire
                     key="acquire-all"
                     wxid={account.wxid}
                     dbRoot={account.dbRoot}
-                    scope="all"
+                    scope="database"
                     onFinished={afterKeys}
                     onManual={(kind) => document.getElementById(`account-key-${kind}`)?.focus()}
                     onClose={() => setAcquire(null)}
@@ -323,19 +331,24 @@ export function AccountPage() {
             }
           >
             <div className="flex flex-wrap items-center gap-2">
-              <SecretField
-                kind="db_key"
-                secretRef={secretRefFor(account, 'db_key')}
-                version={keyVersion}
-                onSaved={afterKeys}
-                label={t('settings.account.dbKey.fieldLabel')}
-                className="min-w-[200px] flex-1"
-              />
+              {account.dbCredentialsRef ? (
+                <SavedDatabaseCredentials />
+              ) : (
+                <SecretField
+                  kind="db_key"
+                  secretRef={secretRefFor(account, 'db_key')}
+                  version={keyVersion}
+                  onSaved={afterKeys}
+                  label={t('settings.account.dbKey.fieldLabel')}
+                  className="min-w-[200px] flex-1"
+                />
+              )}
               <AcquireKeysButton
                 secretRef={secretRefFor(account, 'db_key')}
                 version={keyVersion}
+                available={credentials.data?.database}
                 icon={KeyRound}
-                onClick={() => setAcquire('all')}
+                onClick={() => setAcquire('database')}
               >
                 {t('settings.account.dbKey.acquire')}
               </AcquireKeysButton>

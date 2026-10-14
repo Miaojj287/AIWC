@@ -80,7 +80,7 @@ it('restores the database key status when retry verification succeeds', async ()
   })
 })
 
-it('rejects keys displayed for another account even when the target has its own valid cached key', async () => {
+it('clears old account key display and verifies using the newly selected account', async () => {
   vi.mocked(invoke).mockResolvedValue({ ok: true })
   useWizardStore.setState({
     keyTarget: { wxid: 'old', dbRoot: '/root' },
@@ -91,11 +91,15 @@ it('rejects keys displayed for another account even when the target has its own 
     },
   })
   useWizardStore.getState().selectWxid('new')
-  expect(await useWizardStore.getState().verify()).toBe(false)
-  expect(invoke).not.toHaveBeenCalled()
+  expect(useWizardStore.getState().keys).toMatchObject({
+    db_key: { status: 'missing' },
+    image_xor: { status: 'missing' },
+  })
+  expect(await useWizardStore.getState().verify()).toBe(true)
+  expect(invoke).toHaveBeenCalledWith('substrate:verifyAccount', { wxid: 'new', dbRoot: '/root' })
   expect(useWizardStore.getState()).toMatchObject({
-    verifyState: 'failed',
-    keys: { db_key: { status: 'failed' }, image_xor: { status: 'missing' } },
+    verifyState: 'verified',
+    keyTarget: { wxid: 'new', dbRoot: '/root' },
   })
 })
 

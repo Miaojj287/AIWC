@@ -1,369 +1,69 @@
-/**
- * macOS db-key acquisition. WeChat's raw account key only lives in memory during login, so the
- * bundled `wechat_memory_scan_helper` (read-only Mach VM scan) is the primary source; we also try
- * WeChat's own crash dumps. Everything is spawned with an explicit timeout and never uses sudo —
- * a task_for_pid failure surfaces as `needsAuthorization` so the UI can guide the user.
- */
-import { execFile, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
-import { promisify } from 'node:util'
+/** Read-only macOS image probing; database connection uses the version-bound codec helper. */
+import { execFile } from 'node:child_process'
+import { WechatImageScanResultSchema } from '@aiwc/protocol'
+import type { KeyAcquireFailure } from '@aiwc/protocol'
 import { resolveOptionalNative } from '../wcdb/nativeLib'
-import { isValidKeyHex } from './sqlcipherPage'
 
-const execFileAsync = promisify(execFile)
+const MAX_OUTPUT_BYTES = 16 * 1024
+const DEFAULT_TIMEOUT_MS = 30_000
+const IMAGE_BLOCK_BYTES = 16
 
-export interface MacScanResult {
+interface ImageScanResult {
   key?: string
-  needsAuthorization?: boolean
-  error?: string
+  failure?: KeyAcquireFailure
 }
 
-interface HelperPayload {
-  success?: boolean
-  key?: string
-  /** `--image` mode: the 16-byte image AES key, hex encoded. */
-  aesKeyHex?: string
-  attached?: boolean
-  attachCode?: number
-}
-
-function helperPath(nativeDir: string): string | null {
-  return resolveOptionalNative(nativeDir, 'wechat_memory_scan_helper', 'AIWC_WX_MEMORY_HELPER_PATH')
-}
-
-function parseHelperPayload(stdout: string): HelperPayload | null {
-  const line = stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .at(-1)
-  if (!line) return null
+function decodeImageResult(stdout: string): ImageScanResult {
   try {
-    return JSON.parse(line) as HelperPayload
+    const result = WechatImageScanResultSchema.safeParse(JSON.parse(stdout))
+    if (!result.success) return { failure: 'unexpected' }
+    if (result.data.success) return { key: Buffer.from(result.data.aesKeyHex, 'hex').toString('ascii') }
+    return { failure: result.data.attached === false && result.data.attachCode ? 'needs_authorization' : 'not_found' }
   } catch {
-    return null
+    // Malformed helper output is rejected without including private output in diagnostics.
+    return { failure: 'unexpected' }
   }
 }
 
-async function runHelper(
-  helper: string,
-  args: string[],
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<HelperPayload | null> {
-  try {
-    const { stdout } = await execFileAsync(helper, args, {
-      timeout: Math.max(10_000, timeoutMs),
-      maxBuffer: 4 * 1024 * 1024,
-      encoding: 'utf8',
-      signal,
-    })
-    return parseHelperPayload(stdout)
-  } catch (error) {
-    // A completed scan with no match exits non-zero but still prints its JSON payload.
-    const stdout =
-      typeof (error as { stdout?: string })?.stdout === 'string' ? (error as { stdout: string }).stdout : ''
-    return parseHelperPayload(stdout)
-  }
-}
-
-function toKey(payload: HelperPayload | null): string | undefined {
-  const key = payload?.key
-  return typeof key === 'string' && isValidKeyHex(key) ? key.toLowerCase() : undefined
-}
-
-function crashDumpDir(): string {
-  return join(
-    homedir(),
-    'Library',
-    'Containers',
-    'com.tencent.xinWeChat',
-    'Data',
-    'Documents',
-    'app_data',
-    'crashinfo',
-    'completed',
-  )
-}
-
-/**
- * Live read-only scan of WeChat's process memory via the bundled helper.
- * `sessionDbPath` MUST be a concrete `session.db` file (not the db_storage dir): the helper reads
- * its SQLCipher salt from that file's first page and only returns a key that decrypts it. The live
- * scan needs task_for_pid, which the packaged app gets from the `com.apple.security.cs.debugger`
- * entitlement + the user's "Developer Tools" grant; unsigned dev runs fall back to the crash dump.
- */
-export async function scanMacDbKey(
-  pid: number,
-  sessionDbPath: string,
-  nativeDir: string,
-  timeoutMs = 25_000,
-  signal?: AbortSignal,
-): Promise<MacScanResult> {
-  const helper = helperPath(nativeDir)
-  if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
-  if (!Number.isInteger(pid) || pid <= 0) return { error: '未找到微信进程' }
-  const payload = await runHelper(helper, [String(pid), sessionDbPath], timeoutMs, signal)
-  const key = toKey(payload)
-  if (key) return { key }
-  // attachCode set (and not attached) means task_for_pid was denied → user must authorize / disable SIP.
-  if (payload && payload.attached === false && typeof payload.attachCode === 'number' && payload.attachCode !== 0) {
-    return { needsAuthorization: true, error: '需要授权（无法附加到微信进程，请在系统设置中授予权限或关闭 SIP）' }
-  }
-  return {}
-}
-
-/**
- * WeChat crash dumps can retain the key even after the login window closes. This path reads dump
- * FILES only (no task_for_pid), so it works in an unsigned dev build and is the reliable fallback
- * when the live scan is denied. `sessionDbPath` is the concrete session.db used to validate matches.
- */
-export async function scanMacDbKeyFromDumps(
-  sessionDbPath: string,
-  nativeDir: string,
-  timeoutMs = 30_000,
-  signal?: AbortSignal,
-): Promise<MacScanResult> {
-  const helper = helperPath(nativeDir)
-  if (!helper) return { error: '缺少 wechat_memory_scan_helper' }
-  const dumpPath = crashDumpDir()
-  if (!existsSync(dumpPath)) return {}
-  const payload = await runHelper(helper, ['--dump', dumpPath, sessionDbPath], timeoutMs, signal)
-  const key = toKey(payload)
-  return key ? { key } : {}
-}
-
-/** Read-only image AES scan (`--image <pid> <ciphertext-hex>`); returns the 16-char ASCII key. */
+/** Read only image AES material, reporting native outcomes through stable codes. */
 export async function scanMacImageAesKey(
   pid: number,
   ciphertext: Buffer,
   nativeDir: string,
-  timeoutMs = 30_000,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
   signal?: AbortSignal,
-): Promise<string | null> {
-  const helper = helperPath(nativeDir)
-  if (!helper || ciphertext.length < 16 || pid <= 0) return null
-  try {
-    const { stdout } = await execFileAsync(
+): Promise<ImageScanResult> {
+  if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
+  const helper = resolveOptionalNative(nativeDir, 'wechat_memory_scan_helper', 'AIWC_WX_MEMORY_HELPER_PATH')
+  if (!helper) return { failure: 'unsupported_version' }
+  if (ciphertext.length < IMAGE_BLOCK_BYTES || pid <= 0) return { failure: 'not_found' }
+  return new Promise<ImageScanResult>((resolve, reject) => {
+    execFile(
       helper,
-      ['--image', String(pid), ciphertext.subarray(0, 16).toString('hex')],
+      ['--image', String(pid), ciphertext.subarray(0, IMAGE_BLOCK_BYTES).toString('hex')],
       {
-        timeout: Math.max(10_000, timeoutMs),
-        maxBuffer: 1024 * 1024,
+        timeout: timeoutMs,
+        maxBuffer: MAX_OUTPUT_BYTES,
         encoding: 'utf8',
         signal,
       },
+      (error, stdout) => {
+        if (signal?.aborted || error?.code === 'ABORT_ERR') {
+          reject(new DOMException('aborted', 'AbortError'))
+          return
+        }
+        if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          resolve({ failure: 'unexpected' })
+          return
+        }
+        if (error?.killed) {
+          resolve({ failure: 'timeout' })
+          return
+        }
+        const result = decodeImageResult(stdout)
+        // Some helper failures also use nonzero exit codes; their valid status still describes the cause.
+        resolve(error && result.key ? { failure: 'unexpected' } : result)
+      },
     )
-    const payload = parseHelperPayload(stdout)
-    const keyHex = payload?.aesKeyHex
-    if (payload?.success && typeof keyHex === 'string' && /^[0-9a-fA-F]{32}$/.test(keyHex)) {
-      return Buffer.from(keyHex, 'hex').toString('ascii')
-    }
-  } catch {
-    // helper unavailable / timed out / aborted — the caller falls back to XOR-only
-  }
-  return null
-}
-
-/* ------------------------------------------------------ login-time hook capture */
-
-export interface MacHookCaptureResult {
-  key?: string
-  /**
-   * helper error code (ATTACH_FAILED / PROCESS_NOT_FOUND / SCAN_FAILED / HOOK_FAILED / …), or ours:
-   * PROCESS_EXITED (WeChat quit while the hook waited), ABORTED (cancelled), SPAWN_FAILED.
-   */
-  code?: string
-  error?: string
-  /** true when the failure is a denied attach — the user must disable SIP / grant debugger access. */
-  needsAuthorization?: boolean
-}
-
-export interface MacHookCaptureOptions {
-  /** How long the armed hook waits for a login before the helper gives up. */
-  timeoutMs?: number
-  signal?: AbortSignal
-  /** Fires once the hook is armed; `waitUntil` is the epoch-ms deadline for the user to log in. */
-  onArmed?: (waitUntil: number) => void
-  /** Liveness probe for the hooked process (injected in tests); default `process.kill(pid, 0)`. */
-  isProcessAlive?: (pid: number) => boolean
-  now?: () => number
-}
-
-/** How often the armed hook checks that WeChat is still running. */
-const HOOK_LIVENESS_POLL_MS = 1_000
-/** Grace after the helper's own deadline before we kill it. */
-const HOOK_KILL_GRACE_MS = 10_000
-
-function xkeyHelperPath(nativeDir: string): string | null {
-  return resolveOptionalNative(nativeDir, 'wechat_xkey_helper', 'AIWC_WX_XKEY_HELPER_PATH')
-}
-
-/** `kill(pid, 0)`: ESRCH = gone; EPERM = alive but not ours (WeChat runs as the same user, still alive). */
-function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return (error as NodeJS.ErrnoException)?.code === 'EPERM'
-  }
-}
-
-/** Extract a 64-hex key from any JSON `{success,key}` fragment the helper prints. */
-function extractHookKeyFromJson(output: string): string | undefined {
-  const re = /\{[^{}]*\}/g
-  let match: RegExpExecArray | null
-  while ((match = re.exec(output)) !== null) {
-    try {
-      const payload = JSON.parse(match[0]) as { success?: boolean; key?: string }
-      if (payload?.success === true && typeof payload.key === 'string' && isValidKeyHex(payload.key)) {
-        return payload.key.toLowerCase()
-      }
-    } catch {
-      // ignore malformed fragments
-    }
-  }
-  return undefined
-}
-
-/** Parse the helper's terminal line: a bare 64-hex key, or `ERROR:CODE:detail`. */
-function parseHookResult(raw: string): { key?: string; code?: string; detail?: string } {
-  const text = raw.trim()
-  if (!text) return { code: 'UNKNOWN' }
-  const fromJson = extractHookKeyFromJson(text)
-  if (fromJson) return { key: fromJson }
-  const lastLine =
-    text
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .at(-1) ?? ''
-  if (isValidKeyHex(lastLine)) return { key: lastLine.toLowerCase() }
-  if (lastLine.startsWith('ERROR:')) {
-    const parts = lastLine.split(':')
-    return { code: parts[1] || 'UNKNOWN', detail: parts.slice(2).join(':') || undefined }
-  }
-  return { code: 'UNKNOWN', detail: lastLine || undefined }
-}
-
-function mapHookError(code?: string, detail?: string): string {
-  if (code === 'PROCESS_NOT_FOUND') return '微信主进程未运行'
-  if (code === 'ATTACH_FAILED')
-    return `无法附加微信进程（${detail || 'operation not permitted'}）。请关闭 SIP 或授予调试权限后重试。`
-  if (code === 'SCAN_FAILED') return `未定位到目标函数（${detail || 'sink pattern not found'}）`
-  if (code === 'HOOK_FAILED')
-    return `已定位目标，但等待超时（${detail || 'hook timeout'}）。请在提示出现后登录微信或退出后重新登录。`
-  if (code === 'HOOK_TARGET_ONLY') return `仅定位到目标地址，尚未捕获到最终密钥（${detail || ''}）`
-  return detail ? `${code || 'UNKNOWN'}：${detail}` : '密钥获取失败'
-}
-
-/**
- * Login-time db-key capture via the bundled `wechat_xkey_helper`. This is the reliable macOS path:
- * WeChat 4.x derives the raw account key at login, so the helper attaches to the running process,
- * installs a hook, and returns the key the next time the user logs in (or logs out then back in).
- *
- * It needs debugger access (SIP disabled, or the packaged app's debugger entitlement + Developer
- * Tools grant). `onArmed` fires when the helper prints `hook installed` — from then on the user has
- * to log in. The helper is killed when `signal` aborts, when WeChat quits while it waits (the user
- * quit the app instead of logging out — the hooked process is gone, so waiting longer is pointless),
- * or shortly after its own deadline.
- */
-export async function captureMacDbKeyViaHook(
-  pid: number,
-  nativeDir: string,
-  options: MacHookCaptureOptions = {},
-): Promise<MacHookCaptureResult> {
-  if (process.platform !== 'darwin') return { error: 'macOS only' }
-  const helper = xkeyHelperPath(nativeDir)
-  if (!helper) return { error: '缺少 wechat_xkey_helper' }
-  if (!Number.isInteger(pid) || pid <= 0) return { code: 'PROCESS_NOT_FOUND', error: '未找到微信主进程' }
-  return runHookHelper(helper, pid, options)
-}
-
-/** Spawns the hook helper and supervises it (abort / liveness / deadline). Exported for tests. */
-export function runHookHelper(
-  helper: string,
-  pid: number,
-  options: MacHookCaptureOptions = {},
-): Promise<MacHookCaptureResult> {
-  const { signal, onArmed } = options
-  const isAlive = options.isProcessAlive ?? defaultIsProcessAlive
-  const now = options.now ?? Date.now
-  const waitMs = Math.max(options.timeoutMs ?? 60_000, 30_000)
-  if (signal?.aborted) return Promise.resolve({ code: 'ABORTED' })
-
-  return new Promise<MacHookCaptureResult>((resolve) => {
-    const child = spawn(helper, [String(pid), String(waitMs)], { stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = ''
-    let stderr = ''
-    let stderrBuf = ''
-    let settled = false
-    /** Set when we stopped the helper ourselves, so its exit is reported as that reason. */
-    let stoppedFor: 'ABORTED' | 'PROCESS_EXITED' | undefined
-    const stop = (reason: 'ABORTED' | 'PROCESS_EXITED' | 'DEADLINE') => {
-      if (reason !== 'DEADLINE') stoppedFor ??= reason
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        // already gone
-      }
-    }
-    const onAbort = () => stop('ABORTED')
-    const finish = (result: MacHookCaptureResult) => {
-      if (settled) return
-      settled = true
-      clearTimeout(killTimer)
-      clearInterval(livenessTimer)
-      signal?.removeEventListener('abort', onAbort)
-      resolve(result)
-    }
-    const onHelperLine = (line: string) => {
-      if (line.includes('hook installed')) onArmed?.(now() + waitMs)
-    }
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString()
-    })
-    child.stderr?.on('data', (chunk) => {
-      const data = chunk.toString()
-      stderr += data
-      stderrBuf += data
-      const parts = stderrBuf.split(/\r?\n/)
-      stderrBuf = parts.pop() || ''
-      for (const line of parts) onHelperLine(line.trim())
-    })
-    child.on('error', (error) =>
-      finish({ code: 'SPAWN_FAILED', error: error instanceof Error ? error.message : String(error) }),
-    )
-    child.on('close', () => {
-      if (stderrBuf.trim()) onHelperLine(stderrBuf.trim())
-      const parsed = parseHookResult(stdout || stderr)
-      if (parsed.key) {
-        finish({ key: parsed.key })
-        return
-      }
-      if (stoppedFor) {
-        finish({ code: stoppedFor })
-        return
-      }
-      const needsAuthorization = parsed.code === 'ATTACH_FAILED'
-      finish({ code: parsed.code, needsAuthorization, error: mapHookError(parsed.code, parsed.detail) })
-    })
-    signal?.addEventListener('abort', onAbort, { once: true })
-    const livenessTimer = setInterval(() => {
-      if (!isAlive(pid)) stop('PROCESS_EXITED')
-    }, HOOK_LIVENESS_POLL_MS)
-    const killTimer = setTimeout(() => stop('DEADLINE'), waitMs + HOOK_KILL_GRACE_MS)
   })
-}
-
-/** macOS System Integrity Protection status; the hook capture needs it disabled (or a signed helper). */
-export async function isSipEnabled(): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('/usr/bin/csrutil', ['status'], { timeout: 5_000 })
-    return stdout.toLowerCase().includes('enabled')
-  } catch {
-    return false
-  }
 }

@@ -46,8 +46,12 @@ function setup() {
 it('stages B keys without replacing A keys or selecting B', () => {
   const s = setup()
   s.secrets.set(SECRET_REFS.dbKey, 'a-key')
+  s.config.set({ account: { dbCredentialsRef: SECRET_REFS.dbCredentials, credentialRevision: 2 } })
+  s.secrets.set(SECRET_REFS.dbCredentials, 'fictional-private-bundle')
   const b = s.session.credentials({ wxid: 'b', dbRoot: '/wechat' })
   expect(b.secrets.has(SECRET_REFS.dbKey)).toBe(false)
+  expect(b.secrets.has(SECRET_REFS.dbCredentials)).toBe(false)
+  expect(b.config.get().account.dbCredentialsRef).toBeUndefined()
   b.secrets.set(SECRET_REFS.dbKey, 'b-key')
   expect(s.secrets.reveal(SECRET_REFS.dbKey)).toBe('a-key')
   expect(openAccountProfile(s.base).wxid).toBe('a')

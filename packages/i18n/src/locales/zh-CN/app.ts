@@ -3,6 +3,7 @@ export const app = {
   bootFailed: '本地数据服务不可用',
   configError: '无法读取配置',
   starting: '正在启动',
+  restoringConnection: '正在恢复微信连接…',
   /** Toast when saving `onboarding.completed` fails and the window returns to the wizard; detail = the error. */
   onboardingSaveFailed: '无法完成设置',
   bridgeUnavailable: '无法连接本地微信数据服务，请在桌面应用中打开或重启应用。',
@@ -83,10 +84,10 @@ export const app = {
   /** Key acquisition panel (onboarding 密钥 card, 设置 › 账号) — src/platform/wechatKeys.ts. */
   keyAcquire: {
     step: {
-      dbKey: '数据库密钥',
+      dbKey: '读取聊天记录',
       imageXor: '图片 XOR 密钥',
       imageAes: '图片 AES 密钥',
-      verify: '校验密钥',
+      verify: '验证账号',
     },
     phase: {
       starting: '正在准备',
@@ -107,18 +108,20 @@ export const app = {
       reopening: '微信会自动重新打开',
     },
     failedTitle:
-      '{id, select, db_key {未能获取数据库密钥} image_xor {未能获取图片 XOR 密钥} image_aes {未能获取图片 AES 密钥} other {密钥校验未通过}}',
-    doneTitle: '密钥已就绪',
+      '{id, select, db_key {微信连接未完成} image_xor {未能获取图片 XOR 密钥} image_aes {未能获取图片 AES 密钥} other {密钥校验未通过}}',
+    doneTitle: '微信数据已就绪',
     openSettings: '打开系统设置',
     failure: {
       cancelled: '已取消',
+      timeout: '读取微信连接凭据超时。确认微信已登录后重试。',
+      unsupported_version: '当前微信版本尚未适配。可使用已保存的连接或在高级选项中手动输入。',
       skipped: '未执行',
       login_timeout: '没有等到重新登录。重试后，在微信中退出登录再登录。',
       wechat_exited: '等待时微信被退出了。请保持微信打开，在微信里退出登录后重试。',
       wechat_relaunch_failed: '微信没有重新打开。请手动打开微信后重试。',
       relaunch_timeout: '微信重启后仍未读到密钥。登录并进入任意聊天后重试，或手动粘贴。',
-      sip_enabled: '系统完整性保护（SIP）阻止了登录捕获。可关闭 SIP 后重试，或手动粘贴密钥。',
-      needs_authorization: '没有访问微信的权限。请在「系统设置 › 隐私与安全性 › 开发者工具」中允许 AIWC 后重试。',
+      sip_enabled: '系统阻止了访问微信。请使用已有连接，或在高级选项中手动输入。',
+      needs_authorization: '系统未允许读取微信进程。请检查访问权限后重试，或使用已有连接。',
       wechat_not_running: '没有找到微信。请先打开并登录微信。',
       not_found: '没有找到密钥。确认微信已登录并进入任意聊天后重试。',
       unexpected: '出错了：{detail}',

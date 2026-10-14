@@ -1,11 +1,22 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig } from '@aiwc/protocol'
 import { createConfigService, deepMerge } from './configService'
 
 let dir: string
+const SECRET_REF = 'fictional.database'
+const BUNDLE_REF = 'fictional.database.bundle'
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'aiwc-config-'))
 })
@@ -86,6 +97,33 @@ describe('configService', () => {
     expect(svc.get().agent.maxStepsPerTurn).toBe(40)
     expect(JSON.parse(readFileSync(file, 'utf8')).agent.maxStepsPerTurn).toBe(40)
   })
+
+  it.each(['set', 'replace'] as const)(
+    '%s keeps saved refs and sends no notification when the atomic rename fails',
+    (method) => {
+      const file = join(dir, 'config.json')
+      const service = createConfigService({ file })
+      service.set({ account: { wxid: 'fictional-account', dbKeyRef: SECRET_REF, dbCredentialsRef: BUNDLE_REF } })
+      const previous = service.get()
+      const saved = readFileSync(file, 'utf8')
+      const notify = vi.fn()
+      service.subscribe(notify)
+      const blocked = `${file}.saved`
+      renameSync(file, blocked)
+      mkdirSync(file)
+
+      expect(() =>
+        method === 'set'
+          ? service.set({ account: { dbKeyRef: 'fictional.replacement' } })
+          : service.replace({ ...previous, account: { dbKeyRef: 'fictional.replacement' } }),
+      ).toThrow()
+      expect(service.get()).toBe(previous)
+      expect(service.get().account).toMatchObject({ dbKeyRef: SECRET_REF, dbCredentialsRef: BUNDLE_REF })
+      expect(notify).not.toHaveBeenCalled()
+      expect(readFileSync(blocked, 'utf8')).toBe(saved)
+      expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    },
+  )
 
   it('reloads a valid file and falls back to defaults (with backup) on a corrupt one', () => {
     const file = join(dir, 'config.json')

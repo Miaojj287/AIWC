@@ -19,9 +19,8 @@ export * from './shared'
 // wcdb / key / discovery / decrypt (owner: substrate-wcdb)
 export { createWcdbSourceReader } from './wcdb'
 export { detectWeChat, listAccounts, verifyAccount } from './discovery'
-export { acquireKeys, type RelaunchCapture } from './key'
+export { acquireKeys } from './key'
 // Low-level scanners + path helpers the electron host needs for the last-resort relaunch capture.
-export { scanMacDbKey, scanMacDbKeyFromDumps } from './key/macosMemoryScanner'
 
 export { findWeChatPidSync } from './discovery/processDetect'
 // Where the SQLCipher engine keeps plaintext copies of WeChat's databases: the main process has to
@@ -36,3 +35,6 @@ export { substrateTools } from './tools'
 export { compactMessage, MAX_ANCHOR_TEXT_CHARS, MAX_TEXT_CHARS } from './tools/shared'
 
 export { resolveAccountDir } from './wcdb/dbFiles'
+
+export type { AcquireKeysResult } from './key/acquireKeys'
+export { inspectDbCredentials } from './key/credentialCoverage'

@@ -251,34 +251,6 @@ function loadKernel32(): Kernel32Api | null {
   }
 }
 
-/** The Win32 entry points for this platform. `injected` is only ever passed by tests. */
-function kernel32For(injected?: Kernel32Api): Kernel32Api | null {
-  if (injected) return injected
-  return process.platform === 'win32' ? loadKernel32() : null
-}
-
-/**
- * Open the target process read-only, hand the handle to `use`, and close it exactly once. Every exit
- * — early return, exception, or falling off the end — leaves through the same `finally`: Windows
- * recycles handle values, so closing one twice can end up closing an unrelated handle that a worker
- * thread opened in between.
- */
-export function withProcessHandle<T>(
-  api: Kernel32Api | null,
-  pid: number,
-  fallback: T,
-  use: (k: Kernel32, handle: bigint) => T,
-): T {
-  if (!api || !Number.isInteger(pid) || pid <= 0) return fallback
-  const handle = BigInt(api.openProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, 0, pid))
-  if (!handle) return fallback
-  try {
-    return use({ virtualQueryEx: api.virtualQueryEx, readProcessMemory: api.readProcessMemory }, handle)
-  } finally {
-    api.closeHandle(handle)
-  }
-}
-
 function readRemote(k: Kernel32, handle: bigint, address: bigint, size: number): Buffer | null {
   if (address < 0x10000n || address >= MAX_USER_ADDRESS || size <= 0) return null
   const buffer = Buffer.allocUnsafe(size)
@@ -435,31 +407,6 @@ function scanConfigCipherKey(
     }
   }
   return { stop, candidates }
-}
-
-/**
- * Every key WeChat has configured WCDB with in this process, for matching against individual
- * databases locally. One walk serves the whole account: on Windows each database has its own key, and
- * re-walking the process for every message shard would cost seconds each.
- */
-export function collectWindowsConfigCipherKeys(pid: number, deadline?: number, api?: Kernel32Api): string[] {
-  const keys: string[] = []
-  withProcessHandle(kernel32For(api), pid, undefined, (k, handle) => {
-    try {
-      walkConfigCipherRuns(
-        k,
-        handle,
-        (hex) => {
-          keys.push(hex)
-          return false
-        },
-        deadline,
-      )
-    } catch {
-      // A mapping can change mid-walk; whatever was collected so far is still usable.
-    }
-  })
-  return keys
 }
 
 /**

@@ -10,6 +10,7 @@ export function createAccountActivator(
   ctx: Pick<AppContext, 'config' | 'substrate'> & Partial<Pick<AppContext, 'activate'>>,
   session?: AccountSession,
   scope?: string,
+  verify?: (target: AccountTarget) => Promise<{ ok: boolean; error?: string }>,
 ) {
   let pending: Promise<unknown> = Promise.resolve()
   return (target: AccountTarget | void) => {
@@ -30,7 +31,7 @@ export function createAccountActivator(
           const credentials = session.credentials(target)
           const ref = credentials.config.get().account.dbKeyRef
           const dbKeyHex = ref ? (credentials.secrets.reveal(ref) ?? undefined) : undefined
-          const verified = await verifyAccount({ ...target, dbKeyHex })
+          const verified = verify ? await verify(target) : await verifyAccount({ ...target, dbKeyHex })
           if (!verified.ok) return verified
           session.switch(target)
           return { ok: true }

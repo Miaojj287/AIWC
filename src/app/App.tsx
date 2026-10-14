@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AiwcBridge, ToastPayload } from '@aiwc/protocol'
 import { AgentWindow } from '@/features/agent'
 import { LaunchSplash, OnboardingWizard } from '@/features/onboarding'
@@ -9,6 +9,7 @@ import { getBridge } from '@/platform/bridge'
 import { useConfig, useConfigStore } from '@/platform/configStore'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
 import { installInputModality } from '@/platform/inputModality'
+import { restoreSavedConnection } from '@/platform/restoreConnection'
 import { installWindowFocus } from '@/platform/windowFocus'
 import { Shell } from '@/shell/Shell'
 import { CloseBehaviorDialog, type CloseBehavior } from './CloseBehaviorDialog'
@@ -22,8 +23,8 @@ import { ShortcutsDialog } from './ShortcutsDialog'
 /**
  * App — renderer root. Hydrates config (which stamps the theme) behind the launch splash, registers features, then
  * renders the Onboarding wizard (single page, no columns). A first run walks the whole wizard; every later launch
- * lands on its connect page with the cached keys and account filled in, and 进入 opens the four-column Shell (or
- * the Agent window). Providers: Tooltip, Toaster, global shortcuts, main-process events (commands / toasts / close).
+ * restores the previously selected account from saved credentials before opening the Shell or Agent window.
+ * A failed restore keeps the connection page available for an explicit recovery action.
  */
 export function App() {
   const t = useT()
@@ -33,8 +34,9 @@ export function App() {
   const shellMode = useConfig((c) => c.ui.shellMode) ?? 'workbench'
   const [bridge, setBridge] = useState<Pick<AiwcBridge, 'platform' | 'runtime'> | null>(null)
   const [splashDone, setSplashDone] = useState(false)
-  // Passed the connect page in this run. Not persisted: every launch confirms the account on that page first.
   const [entered, setEntered] = useState(false)
+  const [restoreFinished, setRestoreFinished] = useState(false)
+  const restoreStarted = useRef(false)
 
   useEffect(installInputModality, [])
   useEffect(installWindowFocus, [])
@@ -48,10 +50,29 @@ export function App() {
       .catch(() => undefined)
   }, [])
 
+  useEffect(() => {
+    if (!hydrated || !bridge || !completed || entered || restoreStarted.current) return
+    const account = useConfigStore.getState().config?.account
+    if (!account) return
+    restoreStarted.current = true
+    void restoreSavedConnection(account).then((ready) => {
+      const current = useConfigStore.getState().config?.account
+      if (!current || current.wxid !== account.wxid || current.dbRoot !== account.dbRoot) {
+        setRestoreFinished(true)
+        return
+      }
+      if (ready) setEntered(true)
+      setRestoreFinished(true)
+    })
+  }, [hydrated, bridge, completed, entered])
+
   // The splash is always the last child of the same fragment, so it keeps animating while what is underneath
   // switches from the loading state to the first screen; it fades out over that screen.
   const splash = splashDone ? null : (
-    <LaunchSplash ready={Boolean((hydrated && bridge) || error)} onFinished={() => setSplashDone(true)} />
+    <LaunchSplash
+      ready={Boolean((hydrated && bridge && (!completed || entered || restoreFinished)) || error)}
+      onFinished={() => setSplashDone(true)}
+    />
   )
 
   if (!hydrated || !bridge) {
@@ -90,6 +111,10 @@ export function App() {
             }}
             modelStep={(props) => <ModelSetupStep {...props} />}
           />
+        ) : !entered && !restoreFinished ? (
+          <div className="flex h-full items-center justify-center bg-shell text-fg" role="status">
+            {t('app.restoringConnection')}
+          </div>
         ) : !entered ? (
           <OnboardingWizard returning onDone={() => setEntered(true)} />
         ) : shellMode === 'agent' ? (

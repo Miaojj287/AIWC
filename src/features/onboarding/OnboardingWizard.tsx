@@ -33,8 +33,7 @@ export interface OnboardingWizardProps {
   /** The user confirmed leaving the wizard; entered values are already mirrored into AppConfig. */
   onExit?(): void
   /**
-   * A later launch: setup is done, so the wizard is just its connect page with the saved account and keys filled
-   * in, and 进入 goes straight to the app (no steps, no exit, no model page).
+   * Recovery after a later launch could not restore the saved connection; no model step or exit action.
    */
   returning?: boolean
 }
@@ -109,10 +108,8 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
   const testing = useWizardStore((s) => s.testing)
   const testError = useWizardStore((s) => s.testError)
   const clearTestError = useWizardStore((s) => s.clearTestError)
-  const testAndFinish = useWizardStore((s) => s.testAndFinish)
+  const connect = useWizardStore((s) => s.connect)
   const persistDraft = useWizardStore((s) => s.persistDraft)
-  const acquire = useWizardStore((s) => s.acquire)
-  const enter = useWizardStore((s) => s.enter)
   const loadAccounts = useWizardStore((s) => s.loadAccounts)
   const [exitOpen, setExitOpen] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -138,13 +135,13 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
     }
   })
 
-  const finish = async () => {
+  const finish = async (forceAcquire = false) => {
+    const ok = await connect(forceAcquire)
+    if (!ok) return
     if (returning) {
-      if (await enter()) onDone()
+      onDone()
       return
     }
-    const ok = await testAndFinish()
-    if (!ok) return
     toast.success(t('onboarding.wizard.connected'))
     // Someone who already has a model (re-running setup) goes straight in; everyone else gets 接入模型 next.
     if (modelStep && !hasUsableModel(useConfigStore.getState().config?.ai.providers)) setPage('model')
@@ -208,7 +205,7 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
       <ConnectFailDialog
         error={testError}
         onOpenChange={(o) => !o && clearTestError()}
-        onReacquire={() => void acquire('auto')}
+        onReacquire={() => void finish(true)}
       />
     </div>
   )

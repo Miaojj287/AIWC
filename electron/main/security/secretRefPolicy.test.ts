@@ -27,6 +27,16 @@ describe('secret ref policy', () => {
       expect(isRendererSecretRef(ref), String(ref)).toBe(false)
   })
 
+  it('keeps the database bundle and its revision private at every generic renderer entry', () => {
+    expect(isRendererSecretRef(SECRET_REFS.dbCredentials)).toBe(false)
+    expect(isRevealableSecretRef(SECRET_REFS.dbCredentials)).toBe(false)
+    expect(refusedSecretRefInPatch({ account: { dbCredentialsRef: SECRET_REFS.dbCredentials } })).toBe(
+      SECRET_REFS.dbCredentials,
+    )
+    expect(refusedSecretRefInPatch({ account: { dbCredentialsRef: null } })).toBe(SECRET_REFS.dbCredentials)
+    expect(refusedSecretRefInPatch({ account: { credentialRevision: 42 } })).toBe(SECRET_REFS.dbCredentials)
+  })
+
   it('reveals only the account keys in clear', () => {
     expect(isRevealableSecretRef(SECRET_REFS.dbKey)).toBe(true)
     expect(isRevealableSecretRef('account:imageXorKey')).toBe(true)

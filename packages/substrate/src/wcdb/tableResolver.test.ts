@@ -3,6 +3,7 @@ import { MessageTableIndex, extractMessageTableHash, messageTableHash } from './
 import type { MessageShard } from './dbFiles'
 import type { WcdbQuery } from './query'
 import type { Row } from './rowDecoders'
+import { SubstrateError } from '../shared/errors'
 
 describe('message table hashing', () => {
   it('hashes and extracts session table names', () => {
@@ -92,6 +93,17 @@ describe('MessageTableIndex', () => {
     index.invalidate()
     now = 1
     expect(index.tablesFor('wxid_friend')).toHaveLength(1)
+  })
+
+  it('propagates a locked shard rather than caching an incomplete empty table list', () => {
+    const query: WcdbQuery = {
+      ...q,
+      tables: () => {
+        throw new SubstrateError('locked', 'WECHAT_DATABASE_CREDENTIALS_MISSING')
+      },
+    }
+    const index = new MessageTableIndex(query, () => shards)
+    expect(() => index.tablesFor('wxid_friend')).toThrow(expect.objectContaining({ code: 'locked' }))
   })
 })
 

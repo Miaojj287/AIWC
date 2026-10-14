@@ -22,7 +22,7 @@ AIWC/
 ├─ electron/
 │  ├─ main/              组合根：启动、窗口、配置、密钥、IPC、调度器、把各包接成一个应用
 │  ├─ preload/           typed bridge（window.aiwc）
-│  └─ hosts/             utility process 入口（substrateHost：WCDB 原生访问隔离）
+│  └─ hosts/             utility process 入口（substrateHost：读取隔离；keyAcquireHost：短生命周期连接与凭据校验）
 ├─ src/                  渲染层（React 19）：kit（组件库）→ shell（四列壳）→ workspace（Tab 容器）→ features（各页面）
 ├─ skills/               内置 SKILL.md
 ├─ dev/fixtures/         演示数据、生成器与开发预览页（只被测试和预览页使用，不进应用）
@@ -49,12 +49,14 @@ Renderer (React)  ──IPC(typed)──▶  Main (composition root)
                                      ├─ Kernel（进程内，Thread 实例）
                                      ├─ Gateway（iLink 长轮询、UI 注入、观察流）
                                      ├─ 每日待办 scanner（croner，默认关闭）
-                                     └─ SubstrateClient ──MessagePort──▶ substrateHost (utility process)
-                                                                          └─ WCDB(koffi 原生) / SQLite 镜像 / 解密
+                                     ├─ SubstrateClient ──MessagePort──▶ substrateHost (utility process)
+                                     │                                    └─ WCDB / SQLite 镜像 / 解密
+                                     └─ KeyAcquireClient ──私有消息──▶ keyAcquireHost (短生命周期 utility)
+                                                                          └─ 显式只读获取 / 保存凭据的页认证
 ```
 
-- 原生代码（koffi 加载的 WCDB 桥、密钥扫描 helper、图片解密模块）与 SQLite 镜像（`node:sqlite`）只在 `substrateHost` 里跑：崩了只重启这个进程。
-- 读微信库有两套引擎，由 `wcdb/engine.ts` 按 `resources/native` 里有没有当前平台的 WCDB 库选择（§13.1）：macOS 走原生 WCDB 桥，没有原生库的平台走纯 TypeScript 的 SQLCipher 引擎，两者都实现 `wcdb/bridge.ts` 的同一个接口，上层查询代码不知道差别。
+- WCDB 桥、图片解密模块与 SQLite 镜像（`node:sqlite`）在 `substrateHost` 里跑；用户主动连接 / 图片补齐的 helper 和保存凭据的页认证在独立 `keyAcquireHost` 里跑。原生能力只在 utility process 懒加载，主进程负责账号安全存储及接线。
+- 读微信库有两套引擎，都实现 `wcdb/bridge.ts`。已有 REA 每库凭据的账号由 `wcdb/engine.ts` 强制走纯 TypeScript SQLCipher 的只读源库 / 应用缓存副本路径（§13.1）；其他账号按原生 WCDB 库是否可用选择。普通读取不隐式启动密钥扫描。
 - 内核跑在 main 进程，避免每个工具调用两跳。`KernelHost` 抽象保留把内核挪到 utility process 的余地。
 - 渲染层必须连接桌面 preload；纯浏览器或桥接缺失时显示连接错误。mockBridge 仅供隔离测试使用，不会由应用加载。
 - **本地数据、文件预览、更新**（2026-10-11，`electron/main/ipc/data.ts`）：`storage:usage` 只按 AppPaths 推出的位置统计（`services/storage.ts`）；`storage:clear` 只接受可重建的缓存（明文副本：先 `substrate.shutdown()`，删完再 `start()`；媒体与 `cache/previews`；旧日志）。`storage:wipeAll` 不在运行中删数据：写 `<userData>/aiwc-reset.json` 后重启，`index.ts` 在 `ensureDirs` 之前由 `services/dataReset.ts` 删除数据目录，以及**应用时从已保存配置推出**的自定义缓存目录（与启动时同样校验）里的 `media` / `wcdb-plain`——标记文件只表示「要清除」，其中列出的目录一律忽略（它在两次运行之间留在磁盘上，伪造的标记不能指向别处），标记本身也在 `protectedDataPaths` 里。docx / xlsx 在主进程解析成纯数据（`services/preview/*`，复用 `services/zip.ts`；解压前按目录里声明的大小检查单个部件 ≤ 24 MB、单次预览合计 ≤ 48 MB，超出即报「文件太大，无法预览」，解压量不超过声明大小，多个工作表指向同一部件只解析一次），渲染层按 React 渲染，不注入 HTML；PDF 用 pdf.js（懒加载，CMap 与标准字体随包）；HTML 在 `sandbox=""` 的 iframe 里显示并带 `default-src 'none'` 的 CSP。聊天文件消息的附件在微信目录里、不在文件白名单内：`file:stageChatFile` 由 substrate 按消息定位附件（必须在账号的微信数据根目录内），复制到 `cache/previews/<hash>/` 再交给文件 Tab 或默认应用。聊天视频不复制：它们（和封面帧）未加密，位于 `<账号>/…/msg/video/`；`aiwc-media://` 在文件白名单之外另有一条只读规则（`security/wechatVideoAccess.ts`）——只放行当前配置的账号根目录下 `msg/video` 里的 mp4 / mov / m4v / jpg / png（符号链接解析后再查一次），从而原地流式播放（Range）。这条规则不进 `AllowList`，`file:*` 读写仍然碰不到微信目录。更新走 electron-updater（懒加载），只有打包版本且安装包带 `app-update.yml` 时可用。
@@ -240,50 +242,29 @@ Agent 有一个通用 `shell` 工具，让它能像 Cursor / Hermes 这类通用
 - **包内系统消息**：业务包不依赖 i18n。它们既有的中文报错、原因、进度登记在 `known` 命名空间，主进程在 IPC 返回与错误（`ipc/register.ts`）、推送与 Toast（`broadcast.ts`）两个边界用 `electron/main/localizePayloads.ts` 反查翻译；`known.test.ts` 校验每条模板仍能在包源码里找到。
 - **不翻译**：模型提示词与工具 description、日志、微信数据本身、导出文件里的聊天内容。导出文件的标题与表头跟随导出时的界面语言。
 
-## 13. 微信密钥获取与真实数据（macOS，2026-09-06 实测）
+## 13. 微信连接、每库凭据与真实数据（REA，2026-10-15）
 
-- **绝不显示假数据**：桌面 App 永远以 `wcdb` 模式运行真实微信数据基座。未配置账号/密钥时基座停在 `no_config` 空态（由 onboarding 引导），**不再退回 demo**。演示数据只在测试与开发预览页里通过 mock bridge 出现；`npm run dev:web` 在纯浏览器里只显示连接提示。
-- **真实库路径**：微信 4.x 在 `~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/<wxid_目录>/db_storage/{session,contact,message,...}`。reader/mirror/facade 已在真机 4.1.13 上实测：同步出 1008 会话 / 74 万消息 / 15 万媒体，FTS 检索可用。
-- **db 密钥获取顺序**（`packages/substrate/src/key/acquireKeys.ts`，macOS）：
-  1. **只读内存 helper** `wechat_memory_scan_helper <pid> <session.db>` —— 需 `task_for_pid`，打包 App 靠 `com.apple.security.cs.debugger` 权限 + 用户在「系统设置 › 隐私与安全性 › 开发者工具」授权。
-  2. **崩溃转储扫描** `--dump <crashinfo/completed> <session.db>` —— 只读文件、**无需特权**，未签名的 dev 构建也能用；本机就是靠它拿到并校验了真实密钥。
-  3. **登录挂钩** `wechat_xkey_helper <pid> <waitMs>` —— 附加到正在运行的微信，打印 `hook installed` 后等待用户在微信里**退出登录再登录**（默认等 120 秒，界面显示倒计时）。需要调试权限，SIP 开启时跳过；等待期间每秒检查微信进程，用户直接退出微信应用时立即结束并报「微信被退出」。
-  4. **重启捕获兜底** `electron/main/wechat/relaunchCapture.ts` —— 关闭微信（SIGTERM，8 秒不退再 SIGKILL，**确认进程消失后**才启动）→ 按 bundle id `open -b com.tencent.xinWeChat` 启动并等主进程出现（重试一次）→ 在 120 秒内对新进程重试 1+2。只要它关过微信，返回前（成功 / 超时 / 取消 / 异常）一律确保微信重新在运行。系统已拒绝访问微信内存（`needsAuthorization`）时不触发：重启帮不上忙，只会打断用户。
-  - 顺序与失败原因的取舍在 `key/macDbKeyFlow.ts`（依赖注入，单测覆盖）；`strategy: 'memory_scan'` 只走 1+2，不挂钩也不重启；`scope: 'image'` 只取图片密钥，完全不碰微信进程。
-  - 关键点：helper 的第二个参数必须是具体的 `session.db` 文件（读取 SQLCipher salt 校验），不是 `db_storage` 目录。
-  - 微信 4.1.13 **不经 CommonCrypto `CCKeyDerivationPBKDF`** 派生 WCDB 密钥，旧的 LLDB 断点在该版本上不触发，故以内存/转储扫描为主。
-- **图片密钥**：`imageKeys.ts` 从 kvcomm 缓存码 + wxid 纯推导（XOR + AES），无需特权，已实测成功。
-- **进度、取消与失败（2026-10-11）**：每个步骤带稳定代码——运行中的 `phase`（`reading_memory` / `reading_dumps` / `arming_hook` / `waiting_login` / `closing_wechat` / `launching_wechat` / `waiting_relaunch_login` / `deriving_image_key` / `scanning_image_key` / `verifying`，等待用户的阶段附 `waitUntil` 截止时间）与失败时的 `failure`（`login_timeout`、`wechat_exited`、`wechat_relaunch_failed`、`relaunch_timeout`、`sip_enabled`、`needs_authorization`、`not_found`、`cancelled`、`skipped`、`unexpected` 等，定义在 `@aiwc/protocol` 的 `keyAcquire.ts`）。界面按代码出文案（`src/platform/wechatKeys.ts` → kit `TaskProgress`，引导页与设置 › 账号共用），包里的中文 `detail` 只作诊断。`acquireKeys` 从不抛错，结束时每个步骤都是 `done` / `failed`（`StepTracker.finish`）。主进程同一时间只跑一次获取：`substrate:cancelAcquireKeys` 或新的请求通过 `AbortSignal` 中止上一次（杀掉 helper、停止轮询、把微信拉起来），被取消的一次不写入任何密钥、不弹结果 Toast。macOS 上若开始时微信在运行、结束时不在（用户等待时退出了微信），主进程会重新打开它。
-- **打包签名**：`resources/macos/entitlements.mac.plist` 含 debugger 权限；`scripts/afterPack.cjs` 在打包时对 `wechat_memory_scan_helper` 用 `resources/macos/helper.entitlements.plist` 重新签名。
-- **前置条件**：SIP 关闭 + 已安装 Xcode/命令行工具（仅重启捕获这条路用到 lldb）；用户需授权「开发者工具」TCC 才能走只读实时扫描，否则自动回退到崩溃转储/重启捕获/手动粘贴。
+- **绝不显示假数据**：桌面 App 以 `wcdb` 模式读取真实微信数据。未配置或凭据不可用时停在可恢复的连接空态，不回退到 demo。演示数据只用于隔离测试与开发预览。
+- **账号与目录**：微信 4.x 数据位于 `~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/<account-directory>/db_storage/{session,contact,message,...}`。账号由用户明确选择；目录修改时间、扫描命中数量和内存候选均不证明当前登录身份。路径片段及 realpath 边界由发现与凭据解析层验证。
+- **一个「连接微信」动作**：引导页与设置先查询所选账号保存凭据的实际可用状态。已有可用数据库凭据就验证并连接；首次连接或用户主动补齐时发送 `scope: database` 的获取请求。文字连接不等待图片获取；图片入口只发送 `scope: image`。`strategy: auto/memory_scan` 保留请求兼容性，两者均只读，不再执行登录挂钩或重启捕获。
+- **macOS 只读 codec 获取**（`key/macosCodecScanner.ts`、`native/wechat-codec`）：`wechat_codec_helper` 核对微信 4.1.15（270134）的业务库 SHA-256、arm64 UUID、路径及 provider KDF/AES 回调后，读取已打开数据库的 codec，识别 XOR 混淆的派生材料，并在自己的内存中还原。每个成功条目完成首页 AES / SQLite 结构检查，以及首页、第二页、末页的 HMAC 认证。它不附加调试器、不调用微信函数、不写目标内存、不修改线程、登录状态或微信文件。适配身份、扫描上限、构建、许可证和产物哈希见 [native README](../resources/native/README.md)；静态证据与限度见 [登录密钥调查](WECHAT-LOGIN-KEY-RESEARCH.md)。
+- **逐库保存**：`@aiwc/protocol` 的 `WechatDbCredentialBundleSchema` 定义版本化集合：账号归属、规范化库相对路径、salt、`raw/direct` 形式及私有密钥材料。集合仅写入所选账号的 safeStorage `secretStore`；配置只存 `dbCredentialsRef` 和 `credentialRevision`。macOS 当前获取的是每库 `direct` 材料，不能把 session.db 的结果当作全账号通用口令。补齐结果在同账号内按库合并；数据库被替换后旧 salt 不再可用，不能默默回退。渲染层只得到已认证数量、相对缺失路径、能力状态与错误码；私有集合不能通过通用 `secret:reveal` 显示或复制。
+- **先确认保存，再继续**（`electron/hosts/keyAcquireRuntime.ts`、`main/substrate/keyAcquireClient.ts`）：短生命周期 utility 的输入、私有结果和进度均经 schema 校验。数据库材料认证后发送私有 `database` 消息，主进程写完目标账号安全存储才返回 `database_ack`；utility 收到成功 ACK 才标记数据库完成并继续可选图片步骤。最终结果也等待 `final_ack`，主进程等待进程清理退出后才完成请求。ACK、整个调用和退出宽限均有超时；中止时传递 AbortSignal 并有界终止。保存已经确认的数据库连接不因随后图片失败或取消而删除，保存之前取消的材料不会被标为成功。
+- **查询不扫描**：`key/dbKeyResolver.ts` 只用传入的账号私有凭据，按库路径、账号边界、salt 和首页 HMAC 认证；缓存随 reader 关闭擦除。不在普通 SQL 查询时收集微信进程候选。没有材料、库消失、salt 变化或认证失败时返回 locked；消息任一必需分片不可读就拒绝该次读取，镜像同步不把不完整结果当成空聊天推进 watermark。会话库可读仅表示可以打开会话列表，联系人、消息与媒体能力分别检查。
+- **图片独立补齐**：`imageKeys.ts` 先从本地缓存推导 XOR/AES；需要时由旧 `wechat_memory_scan_helper --image` 只读检查图片 AES 材料，仍可能受进程访问权限限制。成功保存后增加凭据修订号并受控重连 reader，使媒体立即使用新材料。图片失败、超时或取消不撤销已保存数据库连接。
+- **权限与失败**：当前流程报告 `wechat_not_running`、`needs_authorization`、`unsupported_version`、`timeout`、`not_found`、`cancelled` 等稳定代码；界面按两种语言给出操作提示。程序不会自行提权、改 SIP、改微信签名、退出登录或重启微信。codec 的 arm64 适配只覆盖本机该版本；Intel helper 明确返回不支持。已成功的权限证据来自 SIP 关闭环境，SIP 开启及正式发布签名的首次连接仍待验证，不能承诺仅一次系统授权就一定成功。
+- **启动复用**：已完成引导后，`src/platform/restoreConnection.ts` 仅对上次明确选择的同一账号调用 `substrate:credentialStatus` 和 `substrate:connect`。凭据解密并对当前库认证成功才进入工作台；失败保留连接页面供用户主动恢复，不扫描、不自动切换账号。后台服务的恢复边界见 §18。
+- **本机证据**：2026-10-15 生产 helper 扫描 82 个候选文件、24 个通过页认证；随后真实 reader 读取 1024 会话、17580 联系人、6 个消息分片及 200 条消息。reader 使用同一内存凭据集合关闭后重开，未访问微信进程，源主库与同级文件清单未变；输出仅保留匿名计数且临时明文缓存已删除。真实 Electron 的后续隔离验证中，采集耗时 497 ms，24 条材料经系统 safeStorage 加密落盘，再由新 SecretStore 实例重新加载，集合完全一致；覆盖 24/25 个库，所选会话、联系人及全部消息分片可认证，仍明确保留 1 个未覆盖库。数据库 ACK 在保存后发出，两次 utility 均正常退出，无强制终止或残留 helper，临时账号环境已清除。这些验证未重启整个 Electron、未退出微信；SIP 开启及分发环境仍待现场验收，详细证据和边界以研究报告为准。
 
-### 13.1 Windows（2026-09-16）
+### 13.1 Windows 与两套数据库引擎
 
-- **db 密钥**：`key/windowsMemoryScanner.ts` 只申请 `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION`，按三条路依次尝试：
-  1. **`Config.Cipher` 节点**（微信 4.1.13+）——WCDB 把每个库的密钥以 XOR 混淆的形式挂在 `com.Tencent.WCDB.Config.Cipher` 配置对象上，只要微信在登录状态、这个库被它打开过就能直接读出来，拿到的是**已派生**（`direct`）密钥，**不需要用户重新登录**。
-  2. **裸 UUID 块**——4.1.x 登录过程里出现在内存里的账号密钥，`raw` 形式（还要过一遍 PBKDF2），通常只在刚登录时能扫到。
-  3. **ASCII `x'<key><salt>'` 记录**——旧版本。
-  只有当前登录账号的库会出现在第 1 条路里；`db_storage` 里其他历史账号的密钥不在内存中，界面会要求切到那个账号重新登录。
-- **Windows 是「一库一密钥」（2026-09-16 真机实测）**：`packages/substrate/src/key/windowsKeys.realdb.test.ts` 在真机上逐库扫描的结果是 4 个库、4 把互不相同的密钥，全部为 `direct` 形态：
-
- | 库 | salt | 形态 |
- |---|---|---|
- | `session.db` | `fcbf391c…` | direct |
- | `contact.db` | `be79928f…` | direct |
- | `biz_message_0.db` | `85acbfb4…` | direct |
- | `message_0.db` | `20932641…` | direct |
-
- 所以 `account.dbKeyRef` 存的那一把只是**会话库**的密钥，它是账号可用性的门槛，不是全账号的钥匙。其余库的密钥由 `key/dbKeyResolver.ts` 在读取时解析：先试存下来的密钥，不行就用 `collectWindowsConfigCipherKeys()` 把微信进程里所有 Config.Cipher 候选**一次性**收集起来（一次遍历约 2 秒），再用各库首页在本地逐个匹配（每个候选一次 AES）；命中即缓存，未命中的库进 30 秒负缓存，避免在查询循环里反复扫描。查询层的 `createBridgeQuery(bridge, keyFor)` 本来就是按 `dbPath` 取密钥的，两套引擎都按库缓存连接，所以这里不需要改引擎。
-- **限制**：Windows 上读消息库需要微信进程在运行（候选密钥只存在于它的内存里）。微信没开时会话列表仍可用（会话库密钥已持久化），消息库会失败并记一条 warn。把按库密钥持久化进 `secretStore` 是待办。
-- **候选密钥两种形态都要试**：Config.Cipher 里的 run 可能是 SQLCipher 原样使用的密钥，也可能是账号口令（要过 PBKDF2）。先对所有候选做便宜的直连校验，失败后再对最多 16 个候选做延迟的 PBKDF2 校验；扫描优先返回能打开整个账号的密钥（`fitsAccount`），只能开会话库的作为兜底返回并标 `accountWide: false`。
-- **两个平台拿到的密钥形态不同、值也无关**：macOS 的 helper 找的是账号口令（`raw`，按各文件 salt 走 PBKDF2，因此一把通用），Windows 的 `Config.Cipher` 给的是按库派生、SQLCipher 原样使用的密钥（`direct`）；再加上两台机器的微信库本来就是两套各自随机加密的文件，同一个微信号在 Mac 和 Windows 上的密钥必然完全不同，互相不能用。`classifyKeyAgainstPage` 判别形态，两种形态在 WCDB 桥和 SQLCipher 引擎里都各自处理。
-- `verifyAccount` 只做「目录形态 + 会话库密钥初筛」；`acquireKeys` 的「校验密钥」步骤用 `verifyDbKeyAcross` 报告这把密钥覆盖到哪些库，只覆盖会话库在 Windows 上是正常结果。
-- **数据库引擎**：`resources/native` 里没有 Windows 的 WCDB 库，所以走纯 TypeScript 的 SQLCipher 引擎（`wcdb/sqlcipherBridge.ts`）：
-  - `sqlcipherCodec.ts` 按 SQLCipher 4 的页格式（页 4096、reserved 80 = IV 16 + HMAC-SHA512 64、页 1 前 16 字节是 KDF salt）用 `node:crypto` 逐页解密；解密后的页保留 reserved 尾部，页头仍然声明 `reserved = 80`，因此**任何标准 SQLite 都能直接读**（SQLite 由页头第 20 字节推导 usable size，`sqlcipherBridge.test.ts` 有回归测试锁住这个前提）。
-  - `decryptedCopy.ts` 把解密结果落在 `<引擎缓存目录>/wcdb-plain/<路径哈希>-<库名>-<salt>.db`（默认 `<dataRoot>/cache/media`，账号设了自定义缓存目录时在那里），**只读源库、从不回写微信目录**。副本名带 salt，换了库就不会复用旧副本。刷新是增量的：主库只在 size/mtime 变化时重扫，且只重解 IV 变过的页（副本自带上次的 IV，重启后也能接着增量）；WAL 帧叠加在上面，来自 WAL 的页把 reserved 尾部清零，等 checkpoint 后自动从主库恢复。
-  - `sqliteWal.ts` 按 SQLite 的 WAL 恢复规则（校验头、盐一致、checksum 链）取到**最后一个完整提交**为止的帧。WCDB 跑在 WAL 模式下，不叠加 WAL 就会看不到最近的消息；微信正在写入造成的残帧会被 checksum 链挡掉。
-  - 副本是明文聊天数据：目录与文件都是 owner-only（`0o700` / `0o600`，Windows 按 ACL），并且**不在 Agent `shell` 工具可读的范围里**（`composition.ts` 的 `protectedPaths`）。注意目前没有任何「清除缓存」入口：换账号后上一个账号的副本会留在 cache 目录里，直到用户自己删。
-- **开发覆盖**：`AIWC_WCDB_ENGINE=wcdb|sqlcipher` 可强制引擎（在 macOS 上就是这样验证 SQLCipher 引擎的）；原生库存在但加载失败时会自动降级到 SQLCipher 引擎并记一条 warn，不会让账号打不开。
+- **历史 Windows 依据**（2026-09-16）：只申请 `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION`，尝试 WCDB `Config.Cipher`、裸 UUID 块及 ASCII keyspec 候选；在当时版本上实测 session、contact、普通消息和业务消息四个库使用不同 `direct` 材料。这不能证明所有账号、版本或未打开库都可扫描，也不能用它推断登录身份。
+- **REA 当前 Windows 范围**：显式获取仍通过 `scanWindowsDbKey` 返回一个 legacy Key，保存前认证所选会话库；本轮尚未接入 Windows 完整每库集合采集。此 Key 对其他库逐一认证，不能认证的联系人或消息库明确保持 locked。原来的 query-time `collectWindowsConfigCipherKeys` 路径已经删除；查询不再要求微信进程运行来尝试兜底，也不承诺仅一个保存 Key 就能读完整 Windows 历史。已保存的每库集合解析契约与平台无关，但 Windows 采集和实机验证仍需补齐。
+- **不按平台猜密钥形式**：`raw` 输入须按文件 salt 派生，`direct` 是该库可直接使用的 AES 材料。macOS 当前 codec 路径与历史 Windows Config.Cipher 都观察到逐库 `direct`；不能延续「Mac 一把 raw 通用、Windows 一库一把」的固定分类。两台机器的本地加密数据库应独立获取并验证材料。
+- **只读副本引擎**：`wcdb/sqlcipherBridge.ts` 通过 `node:crypto` 解密，再由 `node:sqlite` 查询应用缓存副本。每库凭据存在时，即使原生库可用或 `AIWC_WCDB_ENGINE=wcdb` 也强制此路径，以保持微信源目录只读；合成账号测试覆盖该选择和源主库 / 同级清单不变。没有 bundle 的旧配置仍可按平台资源选择原生 WCDB；自动模式加载失败会记 warn 并降级，显式请求原生库时缺库 / 加载失败即报错。
+- `sqlcipherCodec.ts` 支持已认证的 SQLCipher 4 页格式：4096 字节页、reserved 80（IV 16 + HMAC-SHA512 64）、首页前 16 字节 KDF salt。解密页保留 reserved 尾部及页头声明，可由标准 SQLite 读取；错误材料、页号、salt 与篡改密文均被拒绝。
+- `decryptedCopy.ts` 把结果写入 `<账号缓存>/wcdb-plain/<路径哈希>-<库名>-<salt>.db`，只读微信源文件。主库按 size/mtime 与页面 IV 增量刷新；副本名含 salt，不把被替换的数据库认作旧副本。`sqliteWal.ts` 验证 WAL 头、盐、checksum 链，并叠加最后一个完整提交内的已认证页；残帧不被当成已提交数据。单库 WAL 验证不保证多个微信业务库的一致性快照。
+- 明文副本属于本地聊天数据：macOS 目录 / 文件为 `0o700/0o600`，Windows 继承用户目录 ACL；缓存不在 Agent shell 的可读范围内。关闭 reader 释放句柄和凭据缓冲，磁盘副本由「设置 › 数据 › 清除缓存」及清除全部数据流程处理（§3），并按账号隔离。
 
 ## 14. 办公平台连接器（飞书 / 钉钉 / 企业微信，2026-09-13）
 
@@ -325,12 +306,12 @@ Agent 有一个通用 `shell` 工具，让它能像 Cursor / Hermes 这类通用
 - **用户 Hooks**（`extensions/userHooks.ts` + `hookProtocol.ts`）：挂在同一个 kernel `HookRunner` 上（与 `hooks.ts` 的宿主 hook 同一套系统），事件 `SessionStart`（新会话第一条消息前，借 `thread.created` 标记）、`UserPromptSubmit`、`PreToolUse` / `PostToolUse`（按工具名正则匹配）、`Stop`。命令在工作区目录用登录 shell 运行，事件 JSON 走 stdin，按 Hook 设置在 shell 工具的 seatbelt 沙箱内运行；语义与 Claude Code / Codex 一致：退出码 2 = 拦截（stderr 为原因），JSON 输出的 `decision: block` / `continue: false` / `permissionDecision: deny` / `additionalContext` / `updatedInput`；其他退出码与超时不拦截，只记日志并显示在设置里。Hook 只能收紧：`permissionDecision: allow` 被忽略，审批照旧；`updatedInput` 改了参数时，router 对新参数重新分类并重新走审批矩阵——风险升高、放行键变了、或用户确认过的是旧参数，就重新询问（无人可问的定时任务直接拒绝）。
 - **动态工作流**（kernel `runtime/workflow.ts` + `workflowEngine.ts`）：`workflow_run` 让模型把多步工作写成 DAG（最多 8 步、并发 ≤ 4、每步 8 分钟、整次 15 分钟，可中断），每步一个 `runChild` 子线程，前置步骤的结果（截断后）附在后续步骤的提示后；失败步骤的下游标为跳过；`output: 'json'` 的步骤解析 JSON 并检查顶层 `required`。进度经 `tool.progress.detail`（`WorkflowRunView`）推给面板，最终结果是同一结构（带截断的输出），所以重新载入的会话也能显示步骤列表。工作流本身是 `read`：每个写入在子线程里按父线程的权限模式单独审批。子线程不能再启动工作流（`DELEGATION_TOOLS`）。
 
-## 18. 微信账号环境隔离（2026-10-11）
+## 18. 微信账号环境隔离与启动恢复（REA，2026-10-15）
 
 - `services/accountProfiles.ts` 在组合应用之前选择 `<userData>/aiwc/accounts/<SHA-256(账号目录标识)>`。`AppPaths.dataRoot` 及所有可变路径随账号迁移：config、secretStore、Agent 历史与索引、记忆、关系、回复规则/草稿/审计、定时任务、每日待办、手机通道、扩展、工作区、导出、用量与缓存；打包资源保持共享。自定义缓存追加 `aiwc-accounts/<账号摘要>`。账号标识不直接拼入路径。
-- `active-account.json` 只记录明确选择的账号。`substrate:connect` 跨账号时先验证目标目录和已有密钥（尚无密钥时进入新账号的解锁页），再保存选择、停止旧账号任务、关闭通知与窗口并重启完整进程。禁止在旧组合根中只更换数据源。重启（含清除全部数据）只走 `index.ts` 的 `relaunch()`：`npm run dev` 下 vite-plugin-electron 会随 Electron 退出关掉开发服务器，所以由 `vite.config.ts` 启动的进程改为以退出码 75 结束、由它重新拉起 Electron（`electron/main/devRelaunch.ts`），打包版本仍用 `app.relaunch()`。已保存的自定义缓存目录重启后只有 `aiwc-accounts/<账号摘要>` 在文件白名单里，`config:set` / `substrate:connect` 原样提交它时跳过白名单检查（`cacheDirPolicy` 的 `saved`）。切换中的 IPC 被拒绝，旧事件与通知停止发布；新进程重新创建所有服务与界面状态。
-- 自动回复、监控、定时任务、每日扫描和手机通道在用户点击「进入」、确认当前账号之后才启动。停在启动账号选择页不会运行上次账号的提醒。账号密钥获取和手动输入均写入明确目标账号的 secretStore，不改当前账号的密钥或选择；普通 `config:set` 不允许跨账号修改 wxid。
-- 引导页的 `substrate:verifyAccount` 从所选账号的独立 secretStore 取数据库密钥；没有密钥立即拒绝，不能使用底层 `verifyAccount` 的无密钥目录检查作为解锁验证，也不回退到当前账号密钥。渲染层用 `keyTarget` 记录页面密钥归属，加载缓存、获取成功或手动替换数据库密钥时更新；`onboarding/accountVerification.ts` 先拒绝归属不一致的密钥并清除旧密钥的界面状态（不删除安全存储），再调用后台校验。验证失败的多语言提示要求重新获取，账号与密钥的可用状态撤销；账号、目录或密钥已变更后的旧结果忽略。底层无密钥目录检查仍供账号环境切换进入解锁页使用。
+- `active-account.json` 只记录明确选择的账号。`substrate:connect` 跨账号时先认证目标账号保存的数据库材料；缺少可用凭据时由所选账号的连接页主动获取，不能拿旧账号材料放行。认证成功后保存选择、停止旧账号任务、关闭通知与窗口并重启 AIWC 的完整进程。这个环境重启不关闭或重启微信。禁止在旧组合根中只更换数据源。重启（含清除全部数据）只走 `index.ts` 的 `relaunch()`：`npm run dev` 下 vite-plugin-electron 会随 Electron 退出关掉开发服务器，所以由 `vite.config.ts` 启动的进程改为以退出码 75 结束、由它重新拉起 Electron（`electron/main/devRelaunch.ts`），打包版本仍用 `app.relaunch()`。已保存的自定义缓存目录重启后只有 `aiwc-accounts/<账号摘要>` 在文件白名单里，`config:set` / `substrate:connect` 原样提交它时跳过白名单检查（`cacheDirPolicy` 的 `saved`）。切换中的 IPC 被拒绝，旧事件与通知停止发布；新进程重新创建所有服务与界面状态。
+- 首次连接成功或启动时同一已保存账号的凭据认证与连接成功后，`createAccountRuntime` 激活该账号环境，恢复它已有配置控制的自动回复、监控、定时任务、每日扫描和手机通道。启动恢复失败、停在连接页或切换目标但尚未连接时不启动这些后台服务；不会为恢复连接自动扫描微信进程。账号获取和手动输入只写入明确目标账号的 secretStore，不改其他账号材料或 `active-account.json`；普通 `config:set` 不允许跨账号修改 wxid。
+- `substrate:credentialStatus`、`verifyAccount` 与 `testConnection` 从所选账号独立 secretStore 解密材料，经只读页认证报告会话库可用性及每库覆盖；条目存在不等于可用，无密钥目录检查不能作为解锁验证，也不回退到当前账号材料。渲染层目标变化立即清除旧显示状态，再加载新目标能力；获取、验证、测试及能力查询均绑定 target 与 generation，切换离开又切回也不能接受旧结果。保存后增加 `credentialRevision` 并撤销旧 `verifiedAt`，当前 reader 按修订受控重连；界面只显示能力和掩码，不显示私有 bundle。
 - Chromium 使用独立 `persist:account-<摘要>` 分区，媒体协议注册到对应分区，搜索历史/已打开会话等浏览器状态不再共享。文件白名单只允许当前账号目录；即使选择父目录，其他账号和旧公共存储仍被拒绝。聊天视频只开放当前账号的目录，不开放整个微信数据根目录。
 - 旧版公共目录的历史无法可靠判断归属，保留原文件且不自动导入任何账号，也不启动旧任务。首次仅沿用外观、模型接入及账号连接配置；旧扩展、授权、自动回复和扫描设置不继承。切回已建立的新账号目录时恢复其自身数据。清除全部数据仍覆盖全部账号目录与 Chromium 分区。
 - 开发版 macOS 包在 `scripts/aiwc-electron.cjs` 中将标准 Logo 写入 `electron.icns`，缓存路径含图片摘要；Dock、窗口图标和通知使用同一份品牌素材，通知授权界面的图标由应用包提供。

@@ -51,6 +51,13 @@ interface RefFields {
  */
 export function refusedSecretRefInPatch(patch: unknown): string | undefined {
   if (!patch || typeof patch !== 'object') return undefined
+  if (
+    'account' in patch &&
+    patch.account &&
+    typeof patch.account === 'object' &&
+    ('dbCredentialsRef' in patch.account || 'credentialRevision' in patch.account)
+  )
+    return 'account.databaseCredentials.v1'
   const { ai, account } = patch as RefFields
   const checks: Array<[unknown, (ref: unknown) => boolean]> = [
     ...(Array.isArray(ai?.providers) ? ai.providers : []).map((provider): [unknown, (ref: unknown) => boolean] => [

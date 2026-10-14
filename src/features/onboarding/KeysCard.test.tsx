@@ -5,6 +5,7 @@ import { TooltipProvider } from '@/kit'
 import { __setBridgeForTests } from '@/platform/bridge'
 import { __resetConfigStoreForTests, useConfigStore } from '@/platform/configStore'
 import { KeysCard } from './KeysCard'
+import { ConnectStep } from './ConnectStep'
 import { __resetWizardStoreForTests, useWizardStore } from './wizardStore'
 
 afterEach(() => {
@@ -14,7 +15,7 @@ afterEach(() => {
   __resetWizardStoreForTests()
 })
 
-it('reveals all three automatically acquired keys before config refs reach the renderer, and hides them again', async () => {
+it('keeps saved credentials masked in advanced controls and never reveals them', () => {
   useConfigStore.setState({ config: defaultConfig(), hydrated: true })
   useWizardStore.setState({
     keys: {
@@ -23,24 +24,18 @@ it('reveals all three automatically acquired keys before config refs reach the r
       image_aes: { status: 'acquired', source: 'cached' },
     },
   })
-  const secrets: Record<string, string> = {
-    'account:dbKey': 'a'.repeat(64),
-    'account:imageXorKey': '53',
-    'account:imageAesKey': 'b'.repeat(32),
-  }
-  const invoke = vi.fn(async (_channel: string, req: { ref: string }) => secrets[req.ref])
+  const invoke = vi.fn(async () => undefined)
   __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
   const { container } = render(
     <TooltipProvider>
       <KeysCard />
     </TooltipProvider>,
   )
-  for (const button of screen.getAllByRole('button', { name: '显示' })) fireEvent.click(button)
-  await waitFor(() =>
-    expect(Array.from(container.querySelectorAll('input')).map((i) => i.value)).toEqual(Object.values(secrets)),
-  )
-  for (const button of screen.getAllByRole('button', { name: '隐藏' })) fireEvent.click(button)
-  expect(Array.from(container.querySelectorAll('input')).every((i) => /^•+$/.test(i.value))).toBe(true)
+  expect(container.querySelectorAll('input')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: '高级选项 · 手动输入' }))
+  expect(Array.from(container.querySelectorAll('input')).every((input) => /^•+$/.test(input.value))).toBe(true)
+  expect(screen.queryByRole('button', { name: '显示' })).toBeNull()
+  expect(invoke).not.toHaveBeenCalled()
 })
 
 it('deletes a saved key only after the danger confirmation, and cancelling keeps it', async () => {
@@ -61,6 +56,7 @@ it('deletes a saved key only after the danger confirmation, and cancelling keeps
       <KeysCard />
     </TooltipProvider>,
   )
+  fireEvent.click(screen.getByRole('button', { name: '高级选项 · 手动输入' }))
   fireEvent.click(screen.getByRole('button', { name: '清除' }))
   fireEvent.click(await screen.findByRole('button', { name: '取消' }))
   expect(invoke).not.toHaveBeenCalledWith('substrate:clearKey', expect.anything())
@@ -102,7 +98,7 @@ function renderCard() {
   useWizardStore.setState({ wxid: 'wxid_a', dbRoot: '/root' })
   render(
     <TooltipProvider>
-      <KeysCard />
+      <ConnectStep onBack={() => {}} onNext={() => void useWizardStore.getState().connect()} stepsBar={null} />
     </TooltipProvider>,
   )
 }
@@ -110,7 +106,7 @@ function renderCard() {
 it('names the current stage, with what to do while it waits for a login', async () => {
   const bridge = acquireBridge()
   renderCard()
-  fireEvent.click(screen.getByRole('button', { name: '自动获取' }))
+  fireEvent.click(screen.getByRole('button', { name: '连接微信' }))
   await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('substrate:acquireKeys', expect.anything()))
   act(() =>
     bridge.push({
@@ -128,17 +124,18 @@ it('names the current stage, with what to do while it waits for a login', async 
 it('cancels the main-process run, not only the panel', async () => {
   const bridge = acquireBridge()
   renderCard()
-  fireEvent.click(screen.getByRole('button', { name: '自动获取' }))
+  fireEvent.click(screen.getByRole('button', { name: '连接微信' }))
   await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('substrate:acquireKeys', expect.anything()))
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
   await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('substrate:cancelAcquireKeys', undefined))
+  expect(useWizardStore.getState().acquireSteps.map((step) => step.id)).toEqual(['db_key', 'verify'])
   expect(useWizardStore.getState().acquireSteps.every((s) => s.status === 'failed')).toBe(true)
 })
 
 it('keeps a failed run on screen with its reason and a retry', async () => {
   const bridge = acquireBridge()
   renderCard()
-  fireEvent.click(screen.getByRole('button', { name: '自动获取' }))
+  fireEvent.click(screen.getByRole('button', { name: '连接微信' }))
   await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('substrate:acquireKeys', expect.anything()))
   act(() =>
     bridge.finish([
@@ -148,7 +145,7 @@ it('keeps a failed run on screen with its reason and a retry', async () => {
       { id: 'verify', label: '', status: 'failed', failure: 'skipped' },
     ]),
   )
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('未能获取数据库密钥'))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('微信连接未完成'))
   screen.getByText(/没有等到重新登录/)
   expect(screen.getAllByRole('button', { name: '重试' })).toHaveLength(1)
 })

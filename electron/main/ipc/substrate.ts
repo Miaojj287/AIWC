@@ -1,16 +1,13 @@
-import { AccountTargetSchema, validateWechatKey, type WxSession } from '@aiwc/protocol'
 import {
-  acquireKeys,
-  detectWeChat,
-  findWeChatPidSync,
-  listAccounts,
-  scanMacDbKey,
-  scanMacDbKeyFromDumps,
-  verifyAccount,
-} from '@aiwc/substrate'
+  AccountTargetSchema,
+  WechatManualKeyRequestSchema,
+  WechatClearKeyRequestSchema,
+  validateWechatKey,
+  type WxSession,
+} from '@aiwc/protocol'
+import { detectWeChat, listAccounts } from '@aiwc/substrate'
+import { createWechatConnection, registerWechatConnection } from './wechatConnection'
 import { customCacheDir, validateCacheDir } from '../security/cacheDirPolicy'
-import { createRelaunchCapture } from '../wechat/relaunchCapture'
-import { createWeChatControl } from '../wechat/wechatProcess'
 import { createAccountActivator } from '../substrate/activateAccount'
 import { SECRET_REFS } from '../config/secretStore'
 import type { AppContext } from '../contracts'
@@ -22,7 +19,6 @@ import {
 } from '../services/exporter'
 import type { Handle, HostBridge } from './register'
 import { t } from '../i18n'
-import { localizeText } from '../localizePayloads'
 
 const KEY_REF_BY_KIND = {
   db_key: { ref: SECRET_REFS.dbKey, field: 'dbKeyRef' },
@@ -52,13 +48,6 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     throw new Error(t('main.substrate.noDataDir'))
   }
 
-  const storeKey = (kind: keyof typeof KEY_REF_BY_KIND, hex: string, target?: { wxid: string; dbRoot: string }) => {
-    const { config, secrets } = credentials(target)
-    const { ref, field } = KEY_REF_BY_KIND[kind]
-    secrets.set(ref, hex)
-    config.set({ account: { [field]: ref } })
-  }
-
   handle('substrate:status', () => substrate.status())
 
   handle('substrate:detectWeChat', async () => {
@@ -76,134 +65,57 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     })
   })
 
-  handle('substrate:verifyAccount', async (raw) => {
-    const { wxid, dbRoot } = AccountTargetSchema.parse(raw)
-    const { config, secrets } = credentials({ wxid, dbRoot })
-    const ref = config.get().account.dbKeyRef
-    const dbKeyHex = ref ? (secrets.reveal(ref) ?? undefined) : undefined
-    if (!dbKeyHex) return { ok: false, error: t('main.substrate.accountKeyMissing') }
-    const r = await verifyAccount({ dbRoot, wxid, dbKeyHex })
-    return r.ok
-      ? r
-      : { ok: false, error: t('main.substrate.accountKeyVerifyFailed', { detail: localizeText(r.error ?? '') }) }
-  })
+  const connection = createWechatConnection(ctx, host)
+  registerWechatConnection(handle, connection)
 
-  // One acquisition at a time: a new request (or 取消) aborts the running one and waits it out, so two
-  // runs never fight over WeChat or the helper processes, and a stale run cannot store keys later.
-  let inflight: { controller: AbortController; done: Promise<unknown> } | undefined
-
-  handle('substrate:cancelAcquireKeys', () => {
-    inflight?.controller.abort()
-  })
-
-  handle('substrate:acquireKeys', async (req) => {
-    const { wxid, dbRoot } = AccountTargetSchema.parse({ wxid: req?.wxid, dbRoot: req?.dbRoot })
-    if (typeof wxid !== 'string' || !wxid || typeof dbRoot !== 'string' || !dbRoot)
-      throw new Error(t('main.substrate.selectDbRootAndAccount'))
-    const strategy = req.strategy === 'memory_scan' ? 'memory_scan' : 'auto'
-    const scope = req.scope === 'image' ? 'image' : 'all'
-    if (inflight) {
-      inflight.controller.abort()
-      await inflight.done.catch(() => undefined)
+  const refreshCredentials = async (saved: ReturnType<typeof credentials>) => {
+    if (saved.config === ctx.config && substrate.status().connection === 'ready') {
+      const result = await substrate.reconnect()
+      if (!result.ok) throw new Error(result.error ?? t('main.substrate.connectFailed'))
     }
-    const controller = new AbortController()
-    const run = runAcquire(wxid, dbRoot, strategy, scope, controller.signal)
-    inflight = { controller, done: run }
-    try {
-      return await run
-    } finally {
-      if (inflight?.controller === controller) inflight = undefined
-    }
-  })
-
-  const runAcquire = async (
-    wxid: string,
-    dbRoot: string,
-    strategy: 'auto' | 'memory_scan',
-    scope: 'all' | 'image',
-    signal: AbortSignal,
-  ) => {
-    const wechat = createWeChatControl()
-    // If the user quits WeChat while we wait for a login (instead of logging out), bring it back.
-    const wasRunning = process.platform === 'darwin' && wechat.isRunning()
-    const relaunchCapture = createRelaunchCapture({
-      control: wechat,
-      scanLive: (pid, db, ms, sig) => scanMacDbKey(pid, db, ctx.paths.nativeDir, ms, sig),
-      scanDumps: (db, ms, sig) => scanMacDbKeyFromDumps(db, ctx.paths.nativeDir, ms, sig),
-      findPid: findWeChatPidSync,
-      logger: ctx.logger,
-    })
-    const result = await acquireKeys({
-      dbRoot,
-      wxid,
-      strategy,
-      scope,
-      nativeDir: ctx.paths.nativeDir,
-      // Each transition goes to the renderer so the wizard / settings panel can show the stage inline.
-      onStep: (step) => ctx.broadcast('substrate:keyStep', step),
-      relaunchCapture,
-      signal,
-    })
-    if (wasRunning && !wechat.isRunning() && !(await wechat.ensureRunning()))
-      log.warn('WeChat is not running after key acquisition')
-    // A cancelled run stores nothing: the user has moved on and may already be running another one.
-    if (result.cancelled || signal.aborted) return result.steps
-    if (result.dbKeyHex) storeKey('db_key', result.dbKeyHex, { wxid, dbRoot })
-    if (result.imageXorHex) storeKey('image_xor', result.imageXorHex, { wxid, dbRoot })
-    if (result.imageAesHex) storeKey('image_aes', result.imageAesHex, { wxid, dbRoot })
-    if (result.dbKeyHex) credentials({ wxid, dbRoot }).config.set({ account: { wxid, dbRoot } })
-    const imagesComplete = Boolean(result.imageXorHex && result.imageAesHex)
-    const complete = imagesComplete && (scope === 'image' || Boolean(result.dbKeyHex))
-    ctx.toast({
-      id: 'substrate.acquireKeys',
-      kind: complete ? 'success' : scope === 'all' && result.dbKeyHex ? 'info' : 'warning',
-      text: complete
-        ? t('main.substrate.keysAcquired')
-        : scope === 'image'
-          ? t('main.substrate.imageKeysAcquireFailed')
-          : result.dbKeyHex
-            ? t('main.substrate.keysAcquiredPartial')
-            : t('main.substrate.keysAcquireFailed'),
-    })
-    return result.steps
   }
-
-  handle('substrate:setManualKey', ({ kind, hex, target }) => {
+  handle('substrate:setManualKey', async (raw) => {
+    const { kind, hex, target } = WechatManualKeyRequestSchema.parse(raw)
     const v = validateWechatKey(kind, hex)
     if (!v.ok) return v
-    storeKey(kind, v.hex, target)
-    if (kind === 'db_key') credentials(target).config.set({ account: { verifiedAt: 0 } })
+    await connection.settle()
+    const saved = credentials(target)
+    const { ref, field } = KEY_REF_BY_KIND[kind]
+    const account = saved.config.get().account
+    saved.secrets.set(ref, v.hex)
+    saved.config.set({
+      account: {
+        [field]: ref,
+        credentialRevision: (account.credentialRevision ?? 0) + 1,
+        ...(kind === 'db_key' ? { verifiedAt: 0, dbCredentialsRef: null } : {}),
+      },
+    })
+    if (kind === 'db_key') saved.secrets.delete(SECRET_REFS.dbCredentials)
+    await refreshCredentials(saved)
     return { ok: true }
   })
-
-  handle('substrate:clearKey', (req) => {
-    const kind: unknown = req?.kind
-    if (typeof kind !== 'string' || !Object.hasOwn(KEY_REF_BY_KIND, kind))
-      throw new Error(t('main.ipc.operationFailed'))
-    const { ref, field } = KEY_REF_BY_KIND[kind as keyof typeof KEY_REF_BY_KIND]
-    const { config, secrets } = credentials(req.target ? AccountTargetSchema.parse(req.target) : undefined)
-    const configured = config.get().account[field]
-    for (const saved of new Set([ref, configured])) if (typeof saved === 'string' && saved) secrets.delete(saved)
-    if (kind === 'db_key') config.set({ account: { verifiedAt: 0 } })
+  handle('substrate:clearKey', async (raw) => {
+    const { kind, target } = WechatClearKeyRequestSchema.parse(raw)
+    await connection.settle()
+    const saved = credentials(target)
+    const { config, secrets } = saved
+    const { ref, field } = KEY_REF_BY_KIND[kind]
+    const account = config.get().account
+    for (const value of new Set([ref, account[field]])) if (value) secrets.delete(value)
+    if (kind === 'db_key') secrets.delete(SECRET_REFS.dbCredentials)
+    config.set({
+      account: {
+        [field]: null,
+        credentialRevision: (account.credentialRevision ?? 0) + 1,
+        ...(kind === 'db_key' ? { verifiedAt: 0, dbCredentialsRef: null } : {}),
+      },
+    })
+    await refreshCredentials(saved)
   })
 
-  handle('substrate:testConnection', async (target) => {
-    const { config, secrets } = credentials(target || undefined)
-    const a = { ...config.get().account, ...target }
-    if (!a.dbRoot || !a.wxid) return { ok: false, error: t('main.substrate.selectDbRootAndAccount') }
-    const dbKeyHex = a.dbKeyRef ? (secrets.reveal(a.dbKeyRef) ?? undefined) : undefined
-    if (!dbKeyHex) return { ok: false, error: t('main.substrate.dbKeyMissing') }
-    return verifyAccount({ dbRoot: a.dbRoot, wxid: a.wxid, dbKeyHex })
-  })
-
-  const activate = createAccountActivator(ctx, host.accountSession, ctx.paths.accountScope)
+  const activate = createAccountActivator(ctx, host.accountSession, ctx.paths.accountScope, connection.verify)
   handle('substrate:connect', async (target) => {
-    if (inflight) {
-      inflight.controller.abort()
-      await inflight.done.catch((error: unknown) =>
-        log.debug('key acquisition cancelled before account activation', { error: String(error) }),
-      )
-    }
+    await connection.settle()
     const selected = target ? AccountTargetSchema.parse(target) : undefined
     const cache = customCacheDir(selected?.cacheDir)
     if (cache) {

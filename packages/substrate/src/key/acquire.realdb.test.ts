@@ -20,16 +20,12 @@ run('acquireKeys (real machine)', () => {
         console.log('STEP', s.id, s.status, s.detail || '')
       },
     })
-    console.log(
-      'RESULT dbKey:',
-      res.dbKeyHex ? res.dbKeyHex.slice(0, 12) + '… (len ' + res.dbKeyHex.length + ')' : 'NONE',
-    )
-    console.log(
-      'RESULT imageXor:',
-      res.imageXorHex,
-      'imageAes:',
-      res.imageAesHex ? res.imageAesHex.slice(0, 8) + '…' : 'NONE',
-    )
+    console.log('RESULT', {
+      database: Boolean(res.dbKeyHex),
+      matched: res.dbCredentials?.entries.length ?? 0,
+      imageXor: Boolean(res.imageXorHex),
+      imageAes: Boolean(res.imageAesHex),
+    })
     expect(steps.length).toBeGreaterThan(0)
   }, 120_000)
 })

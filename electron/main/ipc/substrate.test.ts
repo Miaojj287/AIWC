@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultConfig,
   type InvokeChannel,
@@ -10,7 +10,7 @@ import {
   type ListMessagesQuery,
   type WxMessage,
 } from '@aiwc/protocol'
-import { acquireKeys, verifyAccount } from '@aiwc/substrate'
+import { runKeyHost } from '../substrate/keyAcquireClient'
 import type { AppContext } from '../contracts'
 import type { HostBridge } from './register'
 import { registerSubstrateIpc } from './substrate'
@@ -19,6 +19,7 @@ import { setMainLanguage, t } from '../i18n'
 import { createConfigService } from '../config/configService'
 import { createSecretStore, SECRET_REFS } from '../config/secretStore'
 
+vi.mock('../substrate/keyAcquireClient', () => ({ runKeyHost: vi.fn() }))
 vi.mock('@aiwc/substrate', () => ({
   acquireKeys: vi.fn(),
   findWeChatPidSync: vi.fn(() => null),
@@ -29,40 +30,54 @@ vi.mock('@aiwc/substrate', () => ({
   verifyAccount: vi.fn().mockResolvedValue({ ok: true }),
 }))
 
-function setup(accountSession?: HostBridge['accountSession']) {
-  const config = { ...defaultConfig(), account: { wxid: 'old', dbRoot: '/old', dbKeyRef: 'account:dbKey' } }
+beforeEach(() => {
+  vi.mocked(runKeyHost).mockReset().mockResolvedValue({ database: true, matched: 1, total: 1, missing: [] })
+})
+
+function setup(accountSession?: HostBridge['accountSession'], ready = false) {
+  const config = { ...defaultConfig(), account: { wxid: 'new', dbRoot: '/new', dbKeyRef: 'account:dbKey' } }
   const secrets = { set: vi.fn(), reveal: vi.fn((): string | undefined => 'a'.repeat(64)), delete: vi.fn() }
   const set = vi.fn()
+  const reconnect = vi.fn(async () => ({ ok: true }))
   const logger = { child: () => logger }
   const ipc = createHandlerHarness()
   registerSubstrateIpc(
-    { logger, config: { get: () => config, set }, secrets, substrate: {}, paths: {} } as unknown as AppContext,
+    {
+      logger,
+      config: { get: () => config, set },
+      secrets,
+      substrate: { status: () => ({ connection: ready ? 'ready' : 'no_config' }), reconnect },
+      paths: {},
+    } as unknown as AppContext,
     { accountSession } as HostBridge,
     ipc.handle,
   )
-  // setManualKey answers synchronously; the tests read its result without awaiting.
   const invoke = <K extends InvokeChannel>(channel: K, req: InvokeReq<K>) => ipc.invoke(channel, req) as InvokeRes<K>
-  return { secrets, set, invoke, invokeRaw: ipc.invokeRaw }
+  return { secrets, set, reconnect, invoke, invokeRaw: ipc.invokeRaw }
 }
 
 describe('clearing a saved WeChat key', () => {
-  it('deletes the key under both its conventional and its configured ref, and drops verification for the database key', () => {
+  it('deletes conventional and configured refs, invalidates the reader, and drops database verification', async () => {
     const { invoke, secrets, set } = setup()
-    invoke('substrate:clearKey', { kind: 'db_key' })
+    await invoke('substrate:clearKey', { kind: 'db_key' })
     expect(secrets.delete).toHaveBeenCalledWith('account.dbKey')
     expect(secrets.delete).toHaveBeenCalledWith('account:dbKey')
-    expect(set).toHaveBeenCalledWith({ account: { verifiedAt: 0 } })
+    expect(set).toHaveBeenCalledWith({
+      account: { verifiedAt: 0, dbCredentialsRef: null, dbKeyRef: null, credentialRevision: 1 },
+    })
   })
-  it('keeps the account verified when only an image key is cleared', () => {
+  it('invalidates media credentials while keeping database verification when an image key is cleared', async () => {
     const { invoke, secrets, set } = setup()
-    invoke('substrate:clearKey', { kind: 'image_aes' })
+    await invoke('substrate:clearKey', { kind: 'image_aes' })
     expect(secrets.delete).toHaveBeenCalledWith('account.imageAesKey')
-    expect(set).not.toHaveBeenCalled()
+    expect(set).toHaveBeenCalledWith({ account: { imageAesKeyRef: null, credentialRevision: 1 } })
   })
-  it('refuses anything that is not one of the three WeChat keys', () => {
+  it('refuses anything that is not one of the three WeChat keys', async () => {
     const { invokeRaw, secrets } = setup()
-    expect(() => invokeRaw('substrate:clearKey', { kind: 'toString' })).toThrow()
-    expect(() => invokeRaw('substrate:clearKey', { kind: 'db_key', target: { wxid: '..', dbRoot: '/x' } })).toThrow()
+    await expect(invokeRaw('substrate:clearKey', { kind: 'toString' })).rejects.toThrow()
+    await expect(
+      invokeRaw('substrate:clearKey', { kind: 'db_key', target: { wxid: '..', dbRoot: '/x' } }),
+    ).rejects.toThrow()
     expect(secrets.delete).not.toHaveBeenCalled()
   })
 })
@@ -73,20 +88,40 @@ describe('manual WeChat key IPC', () => {
     ['image_xor', '0x53', '53'],
     ['image_aes', 'AbCdEfGh12345678', '41624364456647683132333435363738'],
     ['image_aes', `0x${'AB'.repeat(16)}`, 'ab'.repeat(16)],
-  ] as const)('accepts and normalizes %s with its own format', (kind, hex, expected) => {
+  ] as const)('accepts and normalizes %s with its own format', async (kind, hex, expected) => {
     const { invoke, secrets } = setup()
-    expect(invoke('substrate:setManualKey', { kind, hex })).toEqual({ ok: true })
+    expect(await invoke('substrate:setManualKey', { kind, hex })).toEqual({ ok: true })
     expect(secrets.set).toHaveBeenCalledWith(expect.any(String), expected)
   })
-  it('never saves malformed keys', () => {
+  it('applies manually saved image credentials to the active reader immediately', async () => {
+    const { invoke, set, reconnect } = setup(undefined, true)
+    expect(await invoke('substrate:setManualKey', { kind: 'image_xor', hex: '53' })).toEqual({ ok: true })
+    expect(set).toHaveBeenCalledWith({ account: { imageXorKeyRef: SECRET_REFS.imageXorKey, credentialRevision: 1 } })
+    expect(reconnect).toHaveBeenCalledOnce()
+  })
+  it('rejects malformed manual-key IPC before writing to any store', async () => {
+    const { invokeRaw, secrets } = setup()
+    await expect(invokeRaw('substrate:setManualKey', { kind: 'toString', hex: '53' })).rejects.toThrow()
+    await expect(
+      invokeRaw('substrate:setManualKey', { kind: 'image_xor', hex: '53', target: { wxid: '..', dbRoot: '/x' } }),
+    ).rejects.toThrow()
+    expect(secrets.set).not.toHaveBeenCalled()
+  })
+  it('never saves malformed keys', async () => {
     const { invoke, secrets } = setup()
-    expect(invoke('substrate:setManualKey', { kind: 'image_xor', hex: 'a'.repeat(64) }).ok).toBe(false)
+    expect((await invoke('substrate:setManualKey', { kind: 'image_xor', hex: 'a'.repeat(64) })).ok).toBe(false)
     expect(secrets.set).not.toHaveBeenCalled()
   })
   it('tests the explicitly selected account instead of the previously saved account', async () => {
     const { invoke } = setup()
     await invoke('substrate:testConnection', { wxid: 'new', dbRoot: '/new' })
-    expect(verifyAccount).toHaveBeenLastCalledWith({ wxid: 'new', dbRoot: '/new', dbKeyHex: 'a'.repeat(64) })
+    expect(runKeyHost).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ wxid: 'new', dbRoot: '/new' }),
+        dbKeyHex: 'a'.repeat(64),
+        operation: 'inspect',
+      }),
+    )
   })
 })
 
@@ -107,14 +142,19 @@ describe('account verification IPC', () => {
       if (hasSavedKey) secrets.set(SECRET_REFS.dbKey, 'b'.repeat(64))
       const credentials = vi.fn(() => ({ config, secrets }))
       const current = setup({ credentials, switch: vi.fn(), isSwitching: () => false })
-      vi.mocked(verifyAccount).mockClear()
+      vi.mocked(runKeyHost).mockClear()
       const result = await current.invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
       expect(credentials).toHaveBeenCalledWith({ wxid: 'new', dbRoot: '/new' })
       expect(current.secrets.reveal).not.toHaveBeenCalled()
       expect(result.ok).toBe(hasSavedKey)
       if (hasSavedKey)
-        expect(verifyAccount).toHaveBeenCalledWith({ wxid: 'new', dbRoot: '/new', dbKeyHex: 'b'.repeat(64) })
-      else expect(verifyAccount).not.toHaveBeenCalled()
+        expect(runKeyHost).toHaveBeenCalledWith(
+          expect.objectContaining({
+            request: expect.objectContaining({ wxid: 'new', dbRoot: '/new' }),
+            dbKeyHex: 'b'.repeat(64),
+          }),
+        )
+      else expect(runKeyHost).not.toHaveBeenCalled()
       expect(secrets.has(SECRET_REFS.dbKey)).toBe(hasSavedKey)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -124,27 +164,37 @@ describe('account verification IPC', () => {
   it('rejects verification without a saved database key instead of accepting directory-only validation', async () => {
     const { invoke, secrets } = setup()
     secrets.reveal.mockReturnValueOnce(undefined)
-    vi.mocked(verifyAccount).mockClear()
+    vi.mocked(runKeyHost).mockClear()
     const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
     expect(result).toEqual({ ok: false, error: t('main.substrate.accountKeyMissing') })
-    expect(verifyAccount).not.toHaveBeenCalled()
+    expect(runKeyHost).not.toHaveBeenCalled()
   })
 
   it('guides the user to reacquire the key when database verification fails', async () => {
     const { invoke } = setup()
-    vi.mocked(verifyAccount).mockResolvedValueOnce({ ok: false, error: '密钥与数据库不匹配' })
+    vi.mocked(runKeyHost).mockResolvedValueOnce({
+      database: false,
+      matched: 0,
+      total: 1,
+      missing: ['session/session.db'],
+    })
     const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('重新获取')
+    expect(result.error).toContain('连接')
   })
 
   it('localizes both the mismatch and recovery guidance in English', async () => {
     setMainLanguage('en-US')
     try {
       const { invoke } = setup()
-      vi.mocked(verifyAccount).mockResolvedValueOnce({ ok: false, error: '密钥与数据库不匹配' })
+      vi.mocked(runKeyHost).mockResolvedValueOnce({
+        database: false,
+        matched: 0,
+        total: 1,
+        missing: ['session/session.db'],
+      })
       const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
-      expect(result.error).toContain('Retrieve keys again')
+      expect(result.error).toContain('connect')
       expect(result.error).not.toMatch(/[\u4e00-\u9fff]/)
     } finally {
       setMainLanguage('zh-CN')
@@ -163,7 +213,7 @@ describe('key acquisition IPC', () => {
         logger,
         config: { get: () => defaultConfig(), set: vi.fn() },
         secrets,
-        substrate: {},
+        substrate: { status: () => ({ connection: 'no_config' }) },
         paths: { nativeDir: '/native' },
         broadcast: vi.fn(),
         toast,
@@ -173,14 +223,14 @@ describe('key acquisition IPC', () => {
     )
     return { ipc, secrets, toast }
   }
-  // A run that only ends when its signal aborts, like a login hook waiting for the user.
+  // A run that only ends when its signal aborts, like a bounded native scan.
   const waitForAbort = async (opts: { signal?: AbortSignal }) => {
     await new Promise<void>((resolve) => opts.signal?.addEventListener('abort', () => resolve(), { once: true }))
     return { steps: [], cancelled: true, dbKeyHex: 'a'.repeat(64) }
   }
 
   it('cancel aborts the running acquisition, which then stores nothing and toasts nothing', async () => {
-    vi.mocked(acquireKeys).mockImplementation(waitForAbort)
+    vi.mocked(runKeyHost).mockImplementation(waitForAbort)
     const { ipc, secrets, toast } = acquireSetup()
     const run = ipc.invoke('substrate:acquireKeys', { wxid: 'wxid_a', dbRoot: '/root' })
     await Promise.resolve()
@@ -192,7 +242,7 @@ describe('key acquisition IPC', () => {
 
   it('a new request supersedes the running one instead of running two at once', async () => {
     const signals: AbortSignal[] = []
-    vi.mocked(acquireKeys).mockImplementation(async (opts) => {
+    vi.mocked(runKeyHost).mockImplementation(async (opts) => {
       if (opts.signal) signals.push(opts.signal)
       return signals.length === 1 ? waitForAbort(opts) : { steps: [] }
     })

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -55,6 +55,40 @@ describe('secretStore', () => {
     expect(() => ok.set('bad ref with spaces', 'y')).toThrow(/非法/)
     expect(isValidSecretRef(SECRET_REFS.providerApiKey('openai'))).toBe(true)
   })
+
+  it.each(['overwrite', 'insert', 'delete'] as const)(
+    'keeps existing credentials when %s cannot be persisted',
+    (operation) => {
+      const file = join(dir, 'secrets.bin')
+      const store = createSecretStore({ file, safeStorage: fakeSafeStorage() })
+      store.set(SECRET_REFS.dbKey, 'fictional-saved-database-value')
+      store.set('fictional.other', 'fictional-other-value')
+      const saved = readFileSync(file, 'utf8')
+      const blocked = `${file}.saved`
+      renameSync(file, blocked)
+      mkdirSync(file)
+
+      expect(() => {
+        switch (operation) {
+          case 'overwrite':
+            store.set(SECRET_REFS.dbKey, 'fictional-replacement')
+            break
+          case 'insert':
+            store.set('fictional.new', 'fictional-new-value')
+            break
+          case 'delete':
+            store.delete(SECRET_REFS.dbKey)
+            break
+        }
+      }).toThrow()
+      expect(store.reveal(SECRET_REFS.dbKey)).toBe('fictional-saved-database-value')
+      expect(store.reveal('fictional.other')).toBe('fictional-other-value')
+      expect(store.has('fictional.new')).toBe(false)
+      expect(store.list()).toEqual([SECRET_REFS.dbKey, 'fictional.other'])
+      expect(readFileSync(blocked, 'utf8')).toBe(saved)
+      expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    },
+  )
 
   it('returns null (not throw) when a ciphertext cannot be decrypted', () => {
     const file = join(dir, 'secrets.bin')

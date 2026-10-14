@@ -25,7 +25,7 @@ function setup() {
   })
   ensureDirs(paths)
   const config = createConfigService({ file: paths.configFile })
-  config.set({ account: { wxid: 'account-a', dbRoot: '/wechat' }, todo: { enabled: true } })
+  config.set({ account: { credentialRevision: 0, wxid: 'account-a', dbRoot: '/wechat' }, todo: { enabled: true } })
   writeFileSync(paths.composerDraftsFile, 'legacy private content')
   return paths
 }
@@ -42,7 +42,7 @@ it('isolates every mutable store and restores the original profile on A â†’ B â†
   const a = openAccountProfile(base)
   const config = createConfigService({ file: a.paths.configFile })
   writeFileSync(a.paths.composerDraftsFile, 'account a draft')
-  a.select({ ...config.get(), account: { wxid: 'account-b', dbRoot: '/wechat' } })
+  a.select({ ...config.get(), account: { credentialRevision: 0, wxid: 'account-b', dbRoot: '/wechat' } })
   const b = openAccountProfile(base)
   for (const key of [
     'recordsDb',
@@ -60,7 +60,7 @@ it('isolates every mutable store and restores the original profile on A â†’ B â†
   ] as const) {
     expect(b.paths[key]).not.toBe(a.paths[key])
   }
-  b.select({ ...config.get(), account: { wxid: 'account-a', dbRoot: '/wechat' } })
+  b.select({ ...config.get(), account: { credentialRevision: 0, wxid: 'account-a', dbRoot: '/wechat' } })
   expect(openAccountProfile(base).paths.dataRoot).toBe(a.paths.dataRoot)
   expect(readFileSync(a.paths.composerDraftsFile, 'utf8')).toBe('account a draft')
 })
@@ -68,7 +68,7 @@ it('hashes untrusted account identifiers instead of using them as path segments'
   const base = setup()
   const profile = openAccountProfile(base)
   const config = createConfigService({ file: profile.paths.configFile })
-  profile.select({ ...config.get(), account: { wxid: '../../outside', dbRoot: '/wechat' } })
+  profile.select({ ...config.get(), account: { credentialRevision: 0, wxid: '../../outside', dbRoot: '/wechat' } })
   const next = openAccountProfile(base)
   expect(next.paths.dataRoot.startsWith(join(base.dataRoot, 'accounts') + '/')).toBe(true)
   expect(next.paths.dataRoot).not.toContain('outside')
@@ -80,7 +80,10 @@ it('denies another profile even after a parent directory grant and resolves syml
   const config = createConfigService({ file: a.paths.configFile })
   const access = composeFileAccess({ paths: a.paths, config: config.get, log: nullLogger })
   access.allowList.addRoot(base.dataRoot)
-  const b = prepareAccountProfile(base, { ...config.get(), account: { wxid: 'account-b', dbRoot: '/wechat' } })
+  const b = prepareAccountProfile(base, {
+    ...config.get(),
+    account: { credentialRevision: 0, wxid: 'account-b', dbRoot: '/wechat' },
+  })
   writeFileSync(b.composerDraftsFile, 'private draft')
   expect(access.allowList.isAllowed(b.composerDraftsFile)).toBe(false)
   expect(access.allowList.isAllowed(base.composerDraftsFile)).toBe(false)
@@ -94,7 +97,10 @@ it('keeps actual auto-reply rules and audit records scoped to the selected accou
   const base = setup()
   const a = openAccountProfile(base)
   const config = createConfigService({ file: a.paths.configFile })
-  const b = prepareAccountProfile(base, { ...config.get(), account: { wxid: 'account-b', dbRoot: '/wechat' } })
+  const b = prepareAccountProfile(base, {
+    ...config.get(),
+    account: { credentialRevision: 0, wxid: 'account-b', dbRoot: '/wechat' },
+  })
   const storeA = createAutoReplyRecordStore({ dbPath: a.paths.recordsDb })
   const storeB = createAutoReplyRecordStore({ dbPath: b.recordsDb })
   try {
@@ -134,7 +140,7 @@ it('isolates custom cache locations, including an explicit grant of their parent
   const sharedCache = join(base.dataRoot, '..', 'shared-cache')
   const b = prepareAccountProfile(base, {
     ...config.get(),
-    account: { wxid: 'account-b', dbRoot: '/wechat', cacheDir: sharedCache },
+    account: { credentialRevision: 0, wxid: 'account-b', dbRoot: '/wechat', cacheDir: sharedCache },
   })
   const access = composeFileAccess({ paths: a.paths, config: config.get, log: nullLogger })
   access.allowList.addRoot(sharedCache)
@@ -149,6 +155,6 @@ it('isolates custom cache locations, including an explicit grant of their parent
 it('refuses to open a profile whose persisted identity no longer matches its directory', () => {
   const base = setup()
   const a = openAccountProfile(base)
-  createConfigService({ file: a.paths.configFile }).set({ account: { wxid: 'account-b' } })
+  createConfigService({ file: a.paths.configFile }).set({ account: { credentialRevision: 0, wxid: 'account-b' } })
   expect(() => openAccountProfile(base)).toThrow()
 })

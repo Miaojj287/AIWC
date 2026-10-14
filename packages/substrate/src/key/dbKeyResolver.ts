@@ -1,95 +1,134 @@
 /**
- * Resolves the SQLCipher key for one database file.
- *
- * On macOS WeChat hands out one passphrase per account and it opens every database (PBKDF2 is applied
- * per file with that file's own salt), so the key onboarding stored is the answer everywhere. On
- * Windows WeChat configures WCDB **per database**: `session.db`, `contact.db` and every message shard
- * carry a different already-derived key. The stored key then only opens the database it was verified
- * against, and the rest have to be matched against the keys WeChat has in memory.
- *
- * Candidates are collected once and matched locally against each file's first page, which costs a
- * single AES block per candidate — walking the process again for every message shard would cost
- * seconds each.
+ * Resolves saved SQLCipher credentials for one account without accessing the WeChat process.
+ * WeChat 4.1.15 on macOS keeps masked, already-derived keys per database; a cached session key alone
+ * therefore cannot open the contact database or message shards (see WECHAT-LOGIN-KEY-RESEARCH.md).
  */
-import { classifyKeyAgainstPage, readFirstPage, SQLCIPHER_SALT_SIZE } from './sqlcipherPage'
-
-/** How long a database no candidate could open stays "unknown" before it is tried again. */
-const RETRY_AFTER_MS = 30_000
-/** Minimum gap between two walks of the WeChat process. */
-const RECOLLECT_AFTER_MS = 5_000
+import { realpathSync } from 'node:fs'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { WechatDbCredentialBundleSchema, type WechatDbCredentialBundle } from '@aiwc/protocol'
+import { SubstrateError } from '../shared/errors'
+import { deriveSqlcipherHmacKey, pageHmacMatches, resolvePageCipher, type PageCipher } from '../wcdb/sqlcipherCodec'
+import {
+  decryptFirstPageBody,
+  deriveSqlcipherKey,
+  isPlaintextSqlitePage,
+  isValidKeyHex,
+  looksLikeSqliteHeaderBody,
+  readFirstPage,
+  SQLCIPHER_SALT_SIZE,
+} from './sqlcipherPage'
 
 export interface DbKeyResolverDeps {
-  /** The key the account was verified with; tried first for every database. */
+  accountId: string
+  dbStoragePath: string
+  /** Legacy credential. It is authenticated separately against every database. */
   sessionKeyHex: string
-  /** Keys WeChat currently has configured. Only called for a database the stored key cannot open. */
-  collectCandidates: () => readonly string[]
-  now?: () => number
+  dbCredentials?: WechatDbCredentialBundle
   logger?: (level: 'debug' | 'info' | 'warn' | 'error', msg: string, meta?: unknown) => void
 }
 
 export interface DbKeyResolver {
-  /** The key that decrypts `dbPath`, or undefined when none of the known keys fit. */
+  /** The saved key authenticated for `dbPath`, or undefined when the file remains locked. */
   keyFor(dbPath: string): string | undefined
+  /** Erase derived key buffers and account-local resolution caches on reader shutdown. */
+  clear(): void
 }
 
-/** Both caches are keyed by the file's KDF salt, which is what a rebuilt database changes. */
-interface KeyForSalt {
-  salt: string
+interface ResolvedCredential {
   keyHex: string
-}
-interface MissForSalt {
-  salt: string
-  at: number
+  cipher: PageCipher
 }
 
+type DbCredential = WechatDbCredentialBundle['entries'][number]
+
+function isWithin(root: string, candidate: string): boolean {
+  const path = relative(root, candidate)
+  return path !== '' && path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path)
+}
+
+function checkedBundle(deps: DbKeyResolverDeps): WechatDbCredentialBundle | undefined {
+  if (!deps.dbCredentials) return undefined
+  const parsed = WechatDbCredentialBundleSchema.safeParse(deps.dbCredentials)
+  if (!parsed.success || parsed.data.accountId !== deps.accountId)
+    throw new SubstrateError('invalid_key', 'WECHAT_DATABASE_CREDENTIALS_INVALID')
+  return parsed.data
+}
+
+function cipherForCredential(page: Buffer, entry: DbCredential): PageCipher | null {
+  const salt = page.subarray(0, SQLCIPHER_SALT_SIZE)
+  const input = Buffer.from(entry.keyHex, 'hex')
+  const key = entry.form === 'direct' ? input : deriveSqlcipherKey(input, salt)
+  if (key !== input) input.fill(0)
+  const hmacKey = deriveSqlcipherHmacKey(key, salt)
+  const body = decryptFirstPageBody(page, key)
+  const isAuthenticated = !!body && looksLikeSqliteHeaderBody(body) && pageHmacMatches(hmacKey, page, 1)
+  body?.fill(0)
+  if (!isAuthenticated) {
+    key.fill(0)
+    hmacKey.fill(0)
+    return null
+  }
+  return { key, hmacKey, form: entry.form, saltHex: salt.toString('hex') }
+}
+
+/** Bind account credentials to normalized paths, salts, and authenticated SQLCipher pages. */
 export function createDbKeyResolver(deps: DbKeyResolverDeps): DbKeyResolver {
-  const now = deps.now ?? Date.now
-  const resolved = new Map<string, KeyForSalt>()
-  const missedAt = new Map<string, MissForSalt>()
-  let candidates: readonly string[] = []
-  let collectedAt = 0
+  const bundle = checkedBundle(deps)
+  const root = resolve(deps.dbStoragePath)
+  const realRoot = realpathSync(root)
+  const credentials = new Map(bundle?.entries.map((entry) => [entry.relativePath, entry]))
+  const resolved = new Map<string, ResolvedCredential>()
+  const legacyKeyHex = deps.sessionKeyHex.trim().toLowerCase()
 
-  const fits = (page: Buffer, keyHex: string): boolean => classifyKeyAgainstPage(page, keyHex) !== null
-  const collect = (): void => {
-    candidates = deps.collectCandidates()
-    collectedAt = now()
+  const erase = (path: string): void => {
+    const cached = resolved.get(path)
+    cached?.cipher.key.fill(0)
+    cached?.cipher.hmacKey?.fill(0)
+    resolved.delete(path)
+  }
+  const pathWithinRoot = (dbPath: string): string | undefined => {
+    const absolutePath = resolve(dbPath)
+    const lexicalRoot = isWithin(root, absolutePath) ? root : realRoot
+    if (!isWithin(lexicalRoot, absolutePath)) return undefined
+    try {
+      if (!isWithin(realRoot, realpathSync(absolutePath))) return undefined
+    } catch {
+      deps.logger?.('debug', '[key] database path unavailable')
+      return undefined
+    }
+    return relative(lexicalRoot, absolutePath).split(sep).join('/')
   }
 
   return {
-    keyFor(dbPath: string): string | undefined {
+    keyFor(dbPath): string | undefined {
+      const path = pathWithinRoot(dbPath)
+      if (!path) return undefined
       const page = readFirstPage(dbPath)
       if (!page) return undefined
-      // Cheap identity for "still the same database": WeChat re-creating a shard gives it a fresh
-      // random salt, and the key that opened the old file would otherwise be handed out forever.
+      const entry = credentials.get(path)
+      if (isPlaintextSqlitePage(page)) return !entry && isValidKeyHex(legacyKeyHex) ? legacyKeyHex : undefined
       const salt = page.subarray(0, SQLCIPHER_SALT_SIZE).toString('hex')
-      const cached = resolved.get(dbPath)
-      if (cached?.salt === salt) return cached.keyHex
-      const missed = missedAt.get(dbPath)
-      if (missed?.salt === salt && now() - missed.at < RETRY_AFTER_MS) return undefined
-
-      if (fits(page, deps.sessionKeyHex)) {
-        resolved.set(dbPath, { salt, keyHex: deps.sessionKeyHex })
-        missedAt.delete(dbPath)
-        return deps.sessionKeyHex
-      }
-
-      // Per-database keys (Windows): match this file against everything WeChat has in memory.
-      if (collectedAt === 0) collect()
-      let match = candidates.find((candidate) => fits(page, candidate))
-      if (!match && now() - collectedAt >= RECOLLECT_AFTER_MS) {
-        // WeChat may have opened this database after the last walk.
-        collect()
-        match = candidates.find((candidate) => fits(page, candidate))
-      }
-      if (!match) {
-        deps.logger?.('warn', '[key] no key matches this database', { dbPath, candidates: candidates.length })
-        resolved.delete(dbPath)
-        missedAt.set(dbPath, { salt, at: now() })
+      // An explicit file credential is immutable until a new acquisition. Falling back to an old
+      // account key after a salt change would hide that WeChat replaced this database.
+      if (entry && entry.saltHex !== salt) {
+        erase(path)
         return undefined
       }
-      resolved.set(dbPath, { salt, keyHex: match })
-      missedAt.delete(dbPath)
-      return match
+      const cached = resolved.get(path)
+      if (cached?.cipher.saltHex === salt)
+        return cached.cipher.hmacKey && pageHmacMatches(cached.cipher.hmacKey, page, 1) ? cached.keyHex : undefined
+      erase(path)
+      const keyHex = entry?.keyHex ?? legacyKeyHex
+      const cipher = entry ? cipherForCredential(page, entry) : resolvePageCipher(page, keyHex)
+      if (!cipher?.hmacKey) {
+        cipher?.key.fill(0)
+        return undefined
+      }
+      resolved.set(path, { keyHex, cipher })
+      return keyHex
+    },
+    clear(): void {
+      for (const path of resolved.keys()) erase(path)
     },
   }
 }

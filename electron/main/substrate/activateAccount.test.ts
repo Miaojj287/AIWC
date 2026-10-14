@@ -4,7 +4,10 @@ import { createAccountActivator } from './activateAccount'
 import type { AppContext } from '../contracts'
 
 function setup(saved = 'a', connected = 'a', fail = false) {
-  let value: AppConfig = { ...defaultConfig(), account: { wxid: saved, dbRoot: '/root', verifiedAt: 1 } }
+  let value: AppConfig = {
+    ...defaultConfig(),
+    account: { credentialRevision: 0, wxid: saved, dbRoot: '/root', verifiedAt: 1 },
+  }
   let account: WxAccount = { wxid: connected, dbRoot: '/root', verified: true, avatarPath: `${connected}.png` }
   const opened: string[] = []
   const config = {

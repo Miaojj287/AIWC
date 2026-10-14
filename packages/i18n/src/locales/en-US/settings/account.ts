@@ -1,7 +1,7 @@
 import type { Messages } from '../../zh-CN'
 
 export const account: Messages['settings']['account'] = {
-  sections: { dirs: 'Folders and verification', keys: 'Decryption keys' },
+  sections: { dirs: 'Folders and verification', keys: 'WeChat connection and images' },
   verified: 'Verified',
   unverified: 'Unverified',
   loading: 'Loading…',
@@ -59,11 +59,11 @@ export const account: Messages['settings']['account'] = {
     connectFailed: 'Connection failed',
   },
   dbKey: {
-    title: 'Database decryption key',
-    description: '64 hex digits',
-    help: 'Edit it directly; it is validated and saved on Enter or when you leave the field. You can also get it automatically.',
+    title: 'WeChat data connection',
+    description: 'Connect once, then read directly',
+    help: 'Read credentials for each database of the selected account and save them encrypted. Connecting does not restart WeChat. If no credentials are saved, an existing 64-digit hex key can be entered manually.',
     fieldLabel: 'Decryption key',
-    acquire: 'Get key automatically',
+    acquire: 'Connect WeChat',
   },
   imageKeys: {
     title: 'Image decryption keys',

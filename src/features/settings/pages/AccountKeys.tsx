@@ -4,7 +4,7 @@
  */
 import { Copy, Eye, EyeOff, RefreshCw, Settings, type LucideIcon } from 'lucide-react'
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
-import type { KeyAcquireStep } from '@aiwc/protocol'
+import type { KeyAcquireScope, KeyAcquireStep } from '@aiwc/protocol'
 import { Button, IconButton, Input, TaskProgress, toast } from '@/kit'
 import { useT } from '@/i18n'
 import { invoke, useBridgeEvent } from '@/platform/hooks'
@@ -185,19 +185,21 @@ export function SecretField({ kind, secretRef, version = 0, label, className, on
 export function AcquireKeysButton({
   secretRef,
   version,
+  available,
   icon,
   onClick,
   children,
 }: {
   secretRef: string
   version: number
+  available?: boolean
   icon: LucideIcon
   onClick: () => void
   children: ReactNode
 }) {
   const { has } = useSecretPresence(secretRef, version)
   return (
-    <Button variant={has ? 'outline' : 'primary'} icon={icon} onClick={onClick}>
+    <Button variant={(available ?? has) ? 'outline' : 'primary'} icon={icon} onClick={onClick}>
       {children}
     </Button>
   )
@@ -206,8 +208,8 @@ export function AcquireKeysButton({
 export interface InlineKeyAcquireProps {
   wxid: string | undefined
   dbRoot: string | undefined
-  /** 'all' = 数据库 + 图片密钥 (账号页); 'image' = only the image keys — never touches WeChat's process. */
-  scope: 'all' | 'image'
+  /** Database connection and optional image recovery run independently. */
+  scope: KeyAcquireScope
   /** Called after a run that acquired at least one key (config may have changed). */
   onFinished: (steps: KeyAcquireStep[]) => void
   /** The user chose 手动输入 for a key that could not be acquired. */
@@ -267,7 +269,7 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
   const cancel = () => {
     runRef.current++
     runningRef.current = false
-    // Best effort: the panel closes either way; main brings WeChat back if it had closed it.
+    // The panel closes even if IPC is unavailable; the utility process also bounds its own run.
     void invoke('substrate:cancelAcquireKeys', undefined).catch(() => undefined)
     onClose()
   }

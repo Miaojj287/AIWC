@@ -74,6 +74,13 @@ export const main: Messages['main'] = {
     },
   },
   substrate: {
+    credentialsMissing: 'Some chat data is not connected. Complete the connection in Settings › Account, then retry.',
+    credentialsInvalid: 'Saved credentials are no longer valid. Reconnect this account.',
+    credentialsSaveFailed:
+      'Connection credentials could not be saved securely. Check the system keychain and reconnect.',
+    connectionTimeout: 'Connection timed out. Confirm WeChat is logged in, then retry.',
+    connectionProbeFailed: 'The connection check did not finish. Retry or check the connection status in Settings.',
+
     noDataDir: 'WeChat data folder not found. Choose it in Settings › Account first.',
     keysAcquired: 'Keys retrieved',
     keysAcquireFailed: "Couldn't get the database key automatically. Try again or paste it manually.",
@@ -81,7 +88,7 @@ export const main: Messages['main'] = {
     keysAcquiredPartial: 'Database key retrieved. Image keys can be added later.',
     selectDbRootAndAccount: 'Choose the database folder and account first',
     dbKeyMissing: 'No database key yet',
-    accountKeyMissing: 'No matching database key is saved for this account. Retrieve its keys again, then verify.',
+    accountKeyMissing: 'This account is not connected. Click Connect WeChat, then retry.',
     accountKeyVerifyFailed: 'Verification failed: {detail}. Retrieve keys again for the selected account, then verify.',
     exported: '{n, plural, one {Exported # message} other {Exported # messages}}',
     openLocation: 'Open file',

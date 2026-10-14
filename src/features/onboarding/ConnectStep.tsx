@@ -1,8 +1,6 @@
 /**
- * 连接微信 + 解锁数据 (Figma 135:415, merged page): two sections with the account and keys cards and the
- * 上一步 / 下一步 footer whose disabled 下一步 explains the gate.
- * On a later launch (`returning`) the same page opens prefilled under a 欢迎回来 header with the account's avatar and
- * nickname, and the footer is a single 进入.
+ * Account selection and safe connection capabilities share one explicit connection action.
+ * Returning recovery keeps the saved identity visible after cached startup could not connect.
  */
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import type { Ref } from 'react'
@@ -12,8 +10,7 @@ import { toMediaUrl } from '@/platform/mediaUrl'
 import { AccountCard } from './AccountCard'
 import { KeysCard } from './KeysCard'
 import { PermissionDialog } from './dialogs'
-import { nextStepGate } from './gating'
-import { selectDbKeyPresent, useWizardStore } from './wizardStore'
+import { useWizardStore } from './wizardStore'
 
 export interface ConnectStepProps {
   onBack(): void
@@ -21,7 +18,7 @@ export interface ConnectStepProps {
   stepsBar: React.ReactNode
   /** The page heading; the wizard moves focus here when this step opens. */
   headingRef?: Ref<HTMLHeadingElement>
-  /** A later launch: identity header, no 上一步, 进入 instead of 下一步. */
+  /** A later launch recovery: identity header and no back navigation. */
   returning?: boolean
 }
 
@@ -52,14 +49,18 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
   const t = useT()
   const dbRoot = useWizardStore((s) => s.dbRoot)
   const wxid = useWizardStore((s) => s.wxid)
-  const verified = useWizardStore((s) => s.verifyState === 'verified')
-  const dbKeyPresent = useWizardStore(selectDbKeyPresent)
   const testing = useWizardStore((s) => s.testing)
+  const acquiring = useWizardStore((s) => s.acquiring)
+  const credentialsLoading = useWizardStore((s) => s.credentialsLoading)
   const permissionDialog = useWizardStore((s) => s.permissionDialog)
   const dismissPermissionDialog = useWizardStore((s) => s.dismissPermissionDialog)
   const acquire = useWizardStore((s) => s.acquire)
 
-  const gate = nextStepGate({ dbRoot, wxid, verified, dbKeyPresent })
+  const disabledReason = !dbRoot
+    ? t('onboarding.gate.selectDbRoot')
+    : !wxid
+      ? t('onboarding.gate.selectAccount')
+      : undefined
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -87,7 +88,7 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
             >
               {t('onboarding.connect.keysTitle')}
             </h2>
-            <KeysCard />
+            <KeysCard onConnect={onNext} />
           </section>
         </div>
       </div>
@@ -100,19 +101,23 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
         <div className="flex flex-1 justify-center">{stepsBar}</div>
         <Button
           trailingIcon={ArrowRight}
-          disabled={!gate.ok}
-          disabledReason={gate.reason}
-          loading={testing}
+          disabled={Boolean(disabledReason) || credentialsLoading}
+          disabledReason={disabledReason}
+          loading={testing || acquiring}
           onClick={onNext}
         >
-          {testing ? t('onboarding.connect.testing') : returning ? t('onboarding.connect.enter') : t('common.next')}
+          {testing
+            ? t('onboarding.connect.testing')
+            : acquiring
+              ? t('onboarding.connection.connecting')
+              : t('onboarding.connection.connect')}
         </Button>
       </footer>
 
       <PermissionDialog
         open={permissionDialog}
         onOpenChange={(o) => !o && dismissPermissionDialog()}
-        onRetry={() => void acquire('memory_scan')}
+        onRetry={() => void acquire('memory_scan', 'database')}
       />
     </div>
   )

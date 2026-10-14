@@ -4,26 +4,13 @@
  * Bridge calls live here so the components stay declarative.
  */
 import { create } from 'zustand'
-import type { AppConfig, KeyAcquireStep, WxAccount } from '@aiwc/protocol'
+import type { AppConfig, KeyAcquireScope, KeyAcquireStep, WechatCredentialStatus, WxAccount } from '@aiwc/protocol'
 import { t } from '@/i18n'
-import { getBridge } from '@/platform/bridge'
 import { useConfigStore } from '@/platform/configStore'
 import { invoke } from '@/platform/hooks'
-import { closeKeySteps, initialKeySteps } from '@/platform/wechatKeys'
 import { verifyWizardAccount } from './accountVerification'
-import {
-  DEFAULT_KEY_STEPS,
-  EMPTY_KEYS,
-  KEY_KINDS,
-  applyKeySteps,
-  hasKey,
-  mergeKeyStep,
-  needsPermission,
-  validateKeyHex,
-  type KeyKind,
-  type KeyStates,
-  type WizardPage,
-} from './gating'
+import { createWizardConnectionActions } from './wizardConnection'
+import { DEFAULT_KEY_STEPS, EMPTY_KEYS, validateKeyHex, type KeyKind, type KeyStates, type WizardPage } from './gating'
 
 export type DbRootSource = 'none' | 'cached' | 'auto' | 'manual'
 export type VerifyState = 'idle' | 'verifying' | 'verified' | 'failed'
@@ -54,6 +41,10 @@ export interface WizardState {
   acquiring: boolean
   acquireSteps: KeyAcquireStep[]
   acquireStrategy: 'auto' | 'memory_scan'
+  acquireScope: KeyAcquireScope
+  credentials?: WechatCredentialStatus
+  credentialsLoading: boolean
+  credentialsError?: string
   /** Epoch ms the current / last run started (0 = none) — drives the elapsed time. */
   acquireStartedAt: number
   /** The last run failed: its step list and reason stay visible until dismissed or re-run. */
@@ -75,7 +66,11 @@ export interface WizardState {
   loadAccounts(): Promise<void>
   selectWxid(wxid: string): void
   verify(): Promise<boolean>
-  acquire(strategy: 'auto' | 'memory_scan'): Promise<void>
+  acquire(strategy: 'auto' | 'memory_scan', scope?: KeyAcquireScope): Promise<void>
+  loadCredentials(): Promise<void>
+  invalidateTarget(): void
+  /** Acquire database access if needed, then connect in one explicit action. */
+  connect(forceAcquire?: boolean): Promise<boolean>
   cancelAcquire(): void
   dismissAcquireResult(): void
   dismissPermissionDialog(): void
@@ -84,10 +79,7 @@ export interface WizardState {
   clearKey(kind: KeyKind): Promise<void>
   /** Test the connection; on success persist account + onboarding.completed. */
   testAndFinish(): Promise<boolean>
-  /**
-   * 进入 on a later launch: the substrate already opened the saved account at startup, so when nothing changed on
-   * the page this only confirms it is ready; any change (account, path, a new key) runs the full connection test.
-   */
+  /** Retry a cached account connection without acquiring credentials. */
   enter(): Promise<boolean>
   clearTestError(): void
   /** Mirror what the user entered into AppConfig.account (called on exit). */
@@ -95,14 +87,6 @@ export interface WizardState {
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
-const KEY_REFS: Record<KeyKind, keyof AppConfig['account']> = {
-  db_key: 'dbKeyRef',
-  image_xor: 'imageXorKeyRef',
-  image_aes: 'imageAesKeyRef',
-}
-
-let acquireEpoch = 0
-
 export const useWizardStore = create<WizardState>((set, get) => ({
   hydrated: false,
   page: 'welcome',
@@ -120,6 +104,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   acquiring: false,
   acquireSteps: [...DEFAULT_KEY_STEPS],
   acquireStrategy: 'auto',
+  acquireScope: 'database',
+  credentialsLoading: false,
   acquireStartedAt: 0,
   acquireFailed: false,
   permissionDialog: false,
@@ -127,22 +113,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   async hydrate(config) {
     const acc = config.account
-    const keys: KeyStates = { ...EMPTY_KEYS }
-    await Promise.all(
-      (Object.keys(KEY_REFS) as KeyKind[]).map(async (kind) => {
-        const ref =
-          acc[KEY_REFS[kind]] ||
-          ({ db_key: 'account:dbKey', image_xor: 'account:imageXorKey', image_aes: 'account:imageAesKey' } as const)[
-            kind
-          ]
-        if (typeof ref !== 'string' || !ref) return
-        try {
-          if (await invoke('secret:has', { ref })) keys[kind] = { status: 'acquired', source: 'cached' }
-        } catch {
-          /* secret store unavailable → treat as missing */
-        }
-      }),
-    )
+    get().invalidateTarget()
     let defaultCacheDir = ''
     try {
       const info = await invoke('app:getInfo', undefined)
@@ -157,8 +128,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       cacheDir: acc.cacheDir ?? '',
       defaultCacheDir,
       wxid: acc.wxid ?? '',
-      verifyState: acc.wxid && acc.verifiedAt ? 'verified' : 'idle',
-      keys,
+      verifyState: 'idle',
+      keys: EMPTY_KEYS,
       keyTarget: acc.wxid && acc.dbRoot ? { wxid: acc.wxid, dbRoot: acc.dbRoot } : undefined,
       page: config.onboarding.completed ? 'connect' : 'welcome',
     })
@@ -174,6 +145,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 
   async detect() {
+    get().invalidateTarget()
     set({ detecting: true, dbRootError: undefined })
     try {
       const res = await invoke('substrate:detectWeChat', undefined)
@@ -205,6 +177,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         defaultPath: get().dbRoot || undefined,
       })
       if (!dir) return
+      get().invalidateTarget()
       set({ dbRoot: dir, dbRootSource: 'manual', dbRootError: undefined, verifyState: 'idle', verifyError: undefined })
       await get().loadAccounts()
     } catch (e) {
@@ -213,6 +186,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 
   setDbRoot(path) {
+    if (path !== get().dbRoot) get().invalidateTarget()
     set({
       dbRoot: path,
       dbRootSource: path ? 'manual' : 'none',
@@ -248,101 +222,39 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       if (get().dbRoot !== dbRoot) return
       const current = get().wxid
       const stillThere = accounts.find((a) => a.wxid === current)
-      const pick = stillThere ?? (accounts.length === 1 ? accounts[0] : undefined)
+      const pick = stillThere ?? (!current && accounts.length === 1 ? accounts[0] : undefined)
+      const wxid = pick?.wxid ?? current
+      if (wxid !== current) get().invalidateTarget()
       set({
         accounts,
         accountsLoading: false,
-        wxid: pick?.wxid ?? (accounts.some((a) => a.wxid === current) ? current : ''),
-        verifyState: pick?.verified
-          ? 'verified'
-          : pick && get().verifyState === 'verified' && pick.wxid === current
-            ? 'verified'
-            : 'idle',
+        wxid,
         accountsError: accounts.length === 0 ? t('onboarding.account.noAccounts') : undefined,
       })
+      await get().loadCredentials()
     } catch (e) {
+      if (get().dbRoot !== dbRoot) return
       set({
         accountsLoading: false,
         accounts: [],
         accountsError: t('onboarding.account.loadAccountsFailed', { detail: errText(e) }),
       })
+      await get().loadCredentials()
     }
   },
 
   selectWxid(wxid) {
-    const acc = get().accounts.find((a) => a.wxid === wxid)
-    const target = get().keyTarget
-    const keysMatch = !target || (target.wxid === wxid && target.dbRoot === get().dbRoot)
-    set({ wxid, verifyState: acc?.verified && keysMatch ? 'verified' : 'idle', verifyError: undefined })
+    if (wxid === get().wxid) return
+    get().invalidateTarget()
+    set({ wxid })
+    void get().loadCredentials()
   },
 
   async verify() {
     return verifyWizardAccount(get, set)
   },
 
-  async acquire(strategy) {
-    const { wxid, dbRoot } = get()
-    if (!wxid || !dbRoot) return
-    const my = ++acquireEpoch
-    set({
-      acquiring: true,
-      acquireStrategy: strategy,
-      acquireSteps: initialKeySteps(),
-      acquireStartedAt: Date.now(),
-      acquireFailed: false,
-      permissionDialog: false,
-    })
-    const bridge = await getBridge()
-    const off = bridge.on('substrate:keyStep', (step) => {
-      if (my !== acquireEpoch) return
-      set((s) => ({ acquireSteps: mergeKeyStep(s.acquireSteps, step) }))
-    })
-    try {
-      const steps = await invoke('substrate:acquireKeys', { wxid, dbRoot, strategy })
-      if (my !== acquireEpoch) return
-      const finalSteps = steps.length ? steps : closeKeySteps(get().acquireSteps, 'unexpected')
-      const keys = applyKeySteps(get().keys, finalSteps)
-      const verifyStep = finalSteps.find((s) => s.id === 'verify')
-      set((s) => ({
-        acquiring: false,
-        acquireSteps: finalSteps,
-        acquireFailed: finalSteps.some((st) => st.status === 'failed' && st.failure !== 'cancelled'),
-        keys,
-        keyTarget: verifyStep?.status === 'done' ? { wxid, dbRoot } : s.keyTarget,
-        permissionDialog: needsPermission(finalSteps),
-        verifyState: verifyStep?.status === 'done' ? 'verified' : s.verifyState,
-        accounts:
-          verifyStep?.status === 'done'
-            ? s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: true } : a))
-            : s.accounts,
-      }))
-    } catch (e) {
-      if (my !== acquireEpoch) return
-      // The IPC itself failed: close every open step on the error so nothing keeps spinning.
-      const msg = errText(e)
-      const closed = closeKeySteps(get().acquireSteps, 'unexpected', msg)
-      set((s) => ({
-        acquiring: false,
-        acquireSteps: closed,
-        acquireFailed: true,
-        keys: applyKeySteps(s.keys, closed),
-        permissionDialog: needsPermission(closed),
-      }))
-    } finally {
-      off()
-    }
-  },
-
-  cancelAcquire() {
-    acquireEpoch++
-    // Stop the main-process run too (it kills its helpers and brings WeChat back if it closed it).
-    void invoke('substrate:cancelAcquireKeys', undefined).catch(() => undefined)
-    set((s) => ({
-      acquiring: false,
-      acquireFailed: false,
-      acquireSteps: closeKeySteps(s.acquireSteps, 'cancelled'),
-    }))
-  },
+  ...createWizardConnectionActions(get, set),
 
   dismissAcquireResult() {
     set({ acquireFailed: false })
@@ -385,8 +297,19 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   async clearKey(kind) {
     const { wxid, dbRoot } = get()
     await invoke('substrate:clearKey', { kind, ...(wxid && dbRoot ? { target: { wxid, dbRoot } } : {}) })
+    if (get().wxid !== wxid || get().dbRoot !== dbRoot) return
     set((s) => ({
       keys: { ...s.keys, [kind]: { status: 'missing' } },
+      credentials: s.credentials
+        ? {
+            ...s.credentials,
+            ...(kind === 'db_key'
+              ? { database: false }
+              : kind === 'image_xor'
+                ? { imageXor: false }
+                : { imageAes: false }),
+          }
+        : undefined,
       ...(kind === 'db_key'
         ? {
             verifyState: 'idle' as const,
@@ -395,49 +318,6 @@ export const useWizardStore = create<WizardState>((set, get) => ({
           }
         : {}),
     }))
-  },
-
-  async testAndFinish() {
-    const { wxid, dbRoot, cacheDir } = get()
-    set({ testing: true, testError: undefined })
-    try {
-      const res = await invoke('substrate:testConnection', { wxid, dbRoot })
-      if (!res.ok) {
-        set({ testing: false, testError: res.error ?? t('onboarding.connectFail.openFailed') })
-        return false
-      }
-      const connected = await invoke('substrate:connect', { wxid, dbRoot, cacheDir: cacheDir || undefined })
-      if (!connected.ok) {
-        set({ testing: false, testError: connected.error ?? t('onboarding.connectFail.connectFailed') })
-        return false
-      }
-      // onboarding.completed is written by the app root once the wizard is done (after 接入模型).
-      set({ testing: false })
-      return true
-    } catch (e) {
-      set({ testing: false, testError: errText(e) })
-      return false
-    }
-  },
-
-  async enter() {
-    const { wxid, dbRoot, keys } = get()
-    const keysChanged = KEY_KINDS.some((kind) => {
-      const k = keys[kind]
-      return k.status === 'manual' || (k.status === 'acquired' && k.source === 'auto')
-    })
-    if (!keysChanged) {
-      try {
-        const status = await invoke('substrate:status', undefined)
-        if (status.connection === 'ready' && status.account?.wxid === wxid && status.account.dbRoot === dbRoot) {
-          const result = await invoke('substrate:connect', { wxid, dbRoot })
-          return result.ok
-        }
-      } catch {
-        // Status unavailable: the full test below reports the real problem.
-      }
-    }
-    return get().testAndFinish()
   },
 
   clearTestError() {
@@ -454,12 +334,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
   },
 }))
 
-/** Derived: the db key is present from any source. */
-export const selectDbKeyPresent = (s: WizardState): boolean => hasKey(s.keys.db_key)
-
 /** Reset for tests. */
 export function __resetWizardStoreForTests(): void {
-  acquireEpoch++
+  useWizardStore.getState().invalidateTarget()
   useWizardStore.setState({
     hydrated: false,
     page: 'welcome',
@@ -479,9 +356,13 @@ export function __resetWizardStoreForTests(): void {
     verifyError: undefined,
     keys: EMPTY_KEYS,
     keyTarget: undefined,
+    credentials: undefined,
+    credentialsError: undefined,
     acquiring: false,
     acquireSteps: [...DEFAULT_KEY_STEPS],
     acquireStrategy: 'auto',
+    acquireScope: 'database',
+    credentialsLoading: false,
     acquireStartedAt: 0,
     acquireFailed: false,
     permissionDialog: false,

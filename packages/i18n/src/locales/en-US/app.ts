@@ -4,6 +4,7 @@ export const app: Messages['app'] = {
   bootFailed: 'Local data service unavailable',
   configError: "Couldn't read settings",
   starting: 'Starting',
+  restoringConnection: 'Restoring your WeChat connection…',
   onboardingSaveFailed: "Couldn't finish setup",
   bridgeUnavailable: "Couldn't connect to the local WeChat data service. Open the desktop app or restart it.",
   shortcuts: {
@@ -80,10 +81,10 @@ export const app: Messages['app'] = {
   /** Key acquisition panel (onboarding 密钥 card, 设置 › 账号) — src/platform/wechatKeys.ts. */
   keyAcquire: {
     step: {
-      dbKey: 'Database key',
+      dbKey: 'Read chat history',
       imageXor: 'Image XOR key',
       imageAes: 'Image AES key',
-      verify: 'Verify key',
+      verify: 'Verify account',
     },
     phase: {
       starting: 'Getting ready',
@@ -104,20 +105,22 @@ export const app: Messages['app'] = {
       reopening: 'WeChat will reopen by itself',
     },
     failedTitle:
-      "{id, select, db_key {Couldn't get the database key} image_xor {Couldn't get the image XOR key} image_aes {Couldn't get the image AES key} other {The key didn't verify}}",
-    doneTitle: 'Keys ready',
+      "{id, select, db_key {WeChat connection incomplete} image_xor {Couldn't get the image XOR key} image_aes {Couldn't get the image AES key} other {The key didn't verify}}",
+    doneTitle: 'WeChat data ready',
     openSettings: 'Open System Settings',
     failure: {
       cancelled: 'Cancelled',
+      timeout: 'Reading WeChat credentials timed out. Make sure WeChat is signed in, then retry.',
+      unsupported_version:
+        'This WeChat version is not supported yet. Use a saved connection or enter a key under Advanced.',
       skipped: 'Not run',
       login_timeout: 'No login came in time. Retry, then log out of WeChat and log back in.',
       wechat_exited: 'WeChat was quit while waiting. Keep the app open, log out from inside WeChat, then retry.',
       wechat_relaunch_failed: "WeChat didn't reopen. Open it yourself, then retry.",
       relaunch_timeout: 'Still no key after restarting WeChat. Log in, open any chat and retry, or paste the key.',
-      sip_enabled:
-        'System Integrity Protection (SIP) blocks the login capture. Turn off SIP and retry, or paste the key.',
+      sip_enabled: 'The system blocked access to WeChat. Use a saved connection or enter a key under Advanced.',
       needs_authorization:
-        'No access to WeChat. Allow AIWC in System Settings › Privacy & Security › Developer Tools, then retry.',
+        'The system has not allowed access to the WeChat process. Check access permissions and retry, or use a saved connection.',
       wechat_not_running: "WeChat isn't running. Open it and log in first.",
       not_found: 'No key found. Make sure WeChat is logged in, open any chat, then retry.',
       unexpected: 'Something went wrong: {detail}',

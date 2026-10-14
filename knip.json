@@ -4,6 +4,7 @@
     "electron/main/index.ts",
     "electron/preload/index.ts",
     "electron/hosts/substrateHost.ts",
+    "electron/hosts/keyAcquireHost.ts",
     "dev/fixtures/*.tsx",
     "dev/fixtures/generate.ts",
     "scripts/*.{cjs,mjs}",
