@@ -70,6 +70,8 @@ const mainEntries = [
 export default defineConfig({
   base: './',
   resolve: { alias: aliases },
+  // Uninstalled reference apps and fixture pages must not become dependency-scan entry points.
+  optimizeDeps: { entries: ['index.html'] },
   server: { host: '127.0.0.1', port: 5177, strictPort: false },
   plugins: [
     tailwindcss(),
