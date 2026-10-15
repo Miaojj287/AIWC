@@ -3,7 +3,6 @@ export const app = {
   bootFailed: '本地数据服务不可用',
   configError: '无法读取配置',
   starting: '正在启动',
-  restoringConnection: '正在恢复微信连接…',
   /** Toast when saving `onboarding.completed` fails and the window returns to the wizard; detail = the error. */
   onboardingSaveFailed: '无法完成设置',
   bridgeUnavailable: '无法连接本地微信数据服务，请在桌面应用中打开或重启应用。',

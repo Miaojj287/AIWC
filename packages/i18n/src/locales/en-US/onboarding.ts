@@ -97,6 +97,7 @@ export const onboarding: Messages['onboarding'] = {
     checking: 'Checking saved connection…',
     ready: 'Chat history is available',
     reuse: 'Connection saved. Ready to open',
+    cachedEntry: 'Your saved connection is ready. Click Enter to read your data without acquiring keys again.',
     startHint: 'Keep WeChat signed in, then select "Connect WeChat" to read your chat history.',
     selectHint: 'Connect WeChat will verify the selected account automatically',
     partial: '{matched} of {total} databases unlocked. Some chat history is unavailable',

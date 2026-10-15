@@ -96,6 +96,7 @@ export const onboarding = {
     checking: '正在检查已保存的连接…',
     ready: '聊天记录可读',
     reuse: '连接已保存，可直接进入',
+    cachedEntry: '已恢复保存的连接，点击「进入」即可读取，无需重新获取密钥。',
     startHint: '保持微信已登录，点击「连接微信」即可读取聊天记录。',
     selectHint: '点击「连接微信」会自动验证所选账号',
     partial: '已解锁 {matched} / {total} 个数据库，部分聊天记录暂不可读',

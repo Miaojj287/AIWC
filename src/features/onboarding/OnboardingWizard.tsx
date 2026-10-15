@@ -33,7 +33,7 @@ export interface OnboardingWizardProps {
   /** The user confirmed leaving the wizard; entered values are already mirrored into AppConfig. */
   onExit?(): void
   /**
-   * Recovery after a later launch could not restore the saved connection; no model step or exit action.
+   * Connection status on every later launch; no model step or exit action.
    */
   returning?: boolean
 }
@@ -167,7 +167,7 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
       </div>
       <div className="flex h-12 shrink-0 items-center justify-between px-3">
         {/* The welcome page carries its own, larger language choice; later pages keep this compact one. */}
-        {page === 'welcome' ? <span /> : <LanguageSwitch size="sm" />}
+        {page === 'welcome' && !returning ? <span /> : <LanguageSwitch size="sm" />}
         {returning ? null : (
           <Tooltip content={t('onboarding.wizard.exit')} side="bottom">
             <IconButton icon={X} label={t('onboarding.wizard.exit')} onClick={() => setExitOpen(true)} />
@@ -175,7 +175,7 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
         )}
       </div>
       <div className="min-h-0 flex-1">
-        {page === 'welcome' ? (
+        {page === 'welcome' && !returning ? (
           <div className="flex h-full flex-col overflow-y-auto">
             <WelcomeStep
               onNext={() => setPage('connect')}
@@ -183,7 +183,7 @@ export function OnboardingWizard({ onDone, onExit, modelStep, returning = false 
               languageSwitch={<LanguageSwitch />}
             />
           </div>
-        ) : page === 'model' && modelStep ? (
+        ) : page === 'model' && modelStep && !returning ? (
           modelStep({
             onBack: () => setPage('connect'),
             onFinish: onDone,

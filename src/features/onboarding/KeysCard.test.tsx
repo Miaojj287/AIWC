@@ -95,7 +95,7 @@ function acquireBridge() {
 
 function renderCard() {
   useConfigStore.setState({ config: defaultConfig(), hydrated: true })
-  useWizardStore.setState({ wxid: 'wxid_a', dbRoot: '/root' })
+  useWizardStore.setState({ hydrated: true, wxid: 'wxid_a', dbRoot: '/root' })
   render(
     <TooltipProvider>
       <ConnectStep onBack={() => {}} onNext={() => void useWizardStore.getState().connect()} stepsBar={null} />

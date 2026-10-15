@@ -129,27 +129,33 @@ describe('App onboarding', () => {
 })
 
 describe('App later launches', () => {
-  it('automatically opens the saved account without scanning or another confirmation click', async () => {
-    initialConfig = {
-      ...defaultConfig(),
-      onboarding: { completed: true },
-      account: { ...defaultConfig().account, wxid: 'saved', dbRoot: '/saved' },
-    }
-    hasCachedConnection = true
-    __setBridgeForTests(fakeBridge())
-    render(
-      <StrictMode>
-        <App />
-      </StrictMode>,
-    )
-    await flush()
-    expect(screen.getByRole('main').textContent).toBe('工作台')
-    expect(screen.queryByRole('button', { name: '进入' })).toBeNull()
-    expect(connectionCalls).toEqual(['substrate:credentialStatus', 'substrate:connect'])
-    expect(writes).toEqual([])
-  })
+  it.each(['workbench', 'agent'] as const)(
+    'keeps the saved %s account behind the connection page until entry',
+    async (shellMode) => {
+      initialConfig = {
+        ...defaultConfig(),
+        onboarding: { completed: true },
+        account: { ...defaultConfig().account, wxid: 'saved', dbRoot: '/saved' },
+        ui: { ...defaultConfig().ui, shellMode },
+      }
+      hasCachedConnection = true
+      __setBridgeForTests(fakeBridge())
+      render(
+        <StrictMode>
+          <App />
+        </StrictMode>,
+      )
+      await flush()
+      expect(screen.queryByRole('main')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '进入' }))
+      await flush()
+      expect(screen.getByRole('main').textContent).toBe(shellMode === 'agent' ? 'Agent 窗口' : '工作台')
+      expect(connectionCalls).toEqual([])
+      expect(writes).toEqual([])
+    },
+  )
 
-  it('keeps the connection page after a failed cached connection and does not retry on rerender', async () => {
+  it('does not attempt to open the cached connection on startup or rerender', async () => {
     initialConfig = {
       ...defaultConfig(),
       onboarding: { completed: true },
@@ -164,7 +170,7 @@ describe('App later launches', () => {
     expect(screen.getByRole('button', { name: '进入' })).toBeTruthy()
     view.rerender(<App />)
     await flush()
-    expect(connectionCalls).toEqual(['substrate:credentialStatus', 'substrate:connect'])
+    expect(connectionCalls).toEqual([])
   })
 
   it('stops on the connect page first and opens the Shell only after 进入, without writing config', async () => {

@@ -1,6 +1,6 @@
 /**
  * Account selection and safe connection capabilities share one explicit connection action.
- * Returning recovery keeps the saved identity visible after cached startup could not connect.
+ * Every returning launch keeps the saved identity and cached status visible until explicit entry.
  */
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import type { Ref } from 'react'
@@ -10,6 +10,7 @@ import { toMediaUrl } from '@/platform/mediaUrl'
 import { AccountCard } from './AccountCard'
 import { KeysCard } from './KeysCard'
 import { PermissionDialog } from './dialogs'
+import { hasKey } from './gating'
 import { useWizardStore } from './wizardStore'
 
 export interface ConnectStepProps {
@@ -18,7 +19,7 @@ export interface ConnectStepProps {
   stepsBar: React.ReactNode
   /** The page heading; the wizard moves focus here when this step opens. */
   headingRef?: Ref<HTMLHeadingElement>
-  /** A later launch recovery: identity header and no back navigation. */
+  /** A later launch: identity header and no back navigation. */
   returning?: boolean
 }
 
@@ -51,16 +52,23 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
   const wxid = useWizardStore((s) => s.wxid)
   const testing = useWizardStore((s) => s.testing)
   const acquiring = useWizardStore((s) => s.acquiring)
+  const hydrated = useWizardStore((s) => s.hydrated)
+  const accountsLoading = useWizardStore((s) => s.accountsLoading)
+  const detecting = useWizardStore((s) => s.detecting)
   const credentialsLoading = useWizardStore((s) => s.credentialsLoading)
+  const hasDatabase = useWizardStore((s) => hasKey(s.keys.db_key))
   const permissionDialog = useWizardStore((s) => s.permissionDialog)
   const dismissPermissionDialog = useWizardStore((s) => s.dismissPermissionDialog)
   const acquire = useWizardStore((s) => s.acquire)
 
-  const disabledReason = !dbRoot
-    ? t('onboarding.gate.selectDbRoot')
-    : !wxid
-      ? t('onboarding.gate.selectAccount')
-      : undefined
+  const checking = !hydrated || accountsLoading || detecting || credentialsLoading
+  const disabledReason = checking
+    ? t('onboarding.connection.checking')
+    : !dbRoot
+      ? t('onboarding.gate.selectDbRoot')
+      : !wxid
+        ? t('onboarding.gate.selectAccount')
+        : undefined
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -88,7 +96,7 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
             >
               {t('onboarding.connect.keysTitle')}
             </h2>
-            <KeysCard onConnect={onNext} />
+            <KeysCard onConnect={onNext} returning={returning} />
           </section>
         </div>
       </div>
@@ -101,7 +109,7 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
         <div className="flex flex-1 justify-center">{stepsBar}</div>
         <Button
           trailingIcon={ArrowRight}
-          disabled={Boolean(disabledReason) || credentialsLoading}
+          disabled={Boolean(disabledReason)}
           disabledReason={disabledReason}
           loading={testing || acquiring}
           onClick={onNext}
@@ -110,7 +118,9 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
             ? t('onboarding.connect.testing')
             : acquiring
               ? t('onboarding.connection.connecting')
-              : t('onboarding.connection.connect')}
+              : returning && hasDatabase
+                ? t('onboarding.connect.enter')
+                : t('onboarding.connection.connect')}
         </Button>
       </footer>
 

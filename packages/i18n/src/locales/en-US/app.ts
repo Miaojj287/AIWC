@@ -4,7 +4,6 @@ export const app: Messages['app'] = {
   bootFailed: 'Local data service unavailable',
   configError: "Couldn't read settings",
   starting: 'Starting',
-  restoringConnection: 'Restoring your WeChat connection…',
   onboardingSaveFailed: "Couldn't finish setup",
   bridgeUnavailable: "Couldn't connect to the local WeChat data service. Open the desktop app or restart it.",
   shortcuts: {
