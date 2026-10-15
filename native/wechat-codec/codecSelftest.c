@@ -159,6 +159,94 @@ static int context_tests(CodecScan *scan, const unsigned char *key) {
   return valid;
 }
 
+static void encode_keyspec(unsigned char *output, const unsigned char *key,
+                           const unsigned char *salt, int has_salt) {
+  static const char digits[] = "0123456789abcdef";
+  output[0] = 'x';
+  output[1] = '\'';
+  unsigned bytes = CODEC_KEY_BYTES + (has_salt ? CODEC_SALT_BYTES : 0);
+  for (unsigned i = 0; i < bytes; ++i) {
+    unsigned char value = i < CODEC_KEY_BYTES ? key[i] : salt[i - CODEC_KEY_BYTES];
+    output[2 + i * 2] = digits[value >> 4];
+    output[3 + i * 2] = digits[value & 15];
+  }
+  output[2 + bytes * 2] = '\'';
+}
+
+static void scan_retained(CodecScan *scan, unsigned char *context, unsigned char *child,
+                         unsigned char *keyspec, uint32_t length) {
+  for (unsigned i = 0; i < scan->database_count; ++i) scan->databases[i].matched = 0;
+  scan->matched_count = 0;
+  uint64_t pointer = (uint64_t)keyspec;
+  memcpy(child + 4, &length, sizeof(length));
+  memcpy(child + 24, &pointer, sizeof(pointer));
+  codec_scan_chunk(scan, context, CODEC_CONTEXT_BYTES);
+}
+
+static int retained_tests(CodecScan *scan, const unsigned char *key) {
+  enum { KEYSPEC_BYTES = 99, KEY_ONLY_BYTES = 67, KEYSPEC_BUFFER_BYTES = 104 };
+  unsigned char context[CODEC_CONTEXT_BYTES] = {0}, child[CODEC_SUBCONTEXT_BYTES] = {0};
+  unsigned char keyspec[KEYSPEC_BUFFER_BYTES] = {0}, original[KEYSPEC_BUFFER_BYTES] = {0};
+  uint64_t provider[8] = {0};
+  scan->task = mach_task_self();
+  scan->core = 0x100000000ULL;
+  scan->deadline = codec_seconds() + CODEC_SCAN_SECONDS;
+  scan->database_count = 2;
+  scan->contexts = 0;
+  const uint32_t shape[] = {16, 32, 16, 16, 4096};
+  memcpy(context + 12, shape, sizeof(shape));
+  provider[6] = scan->core + CODEC_KDF_OFFSET;
+  provider[7] = scan->core + CODEC_AES_OFFSET;
+  uint64_t pointer = (uint64_t)provider;
+  memcpy(context + 120, &pointer, sizeof(pointer));
+  pointer = (uint64_t)child;
+  memcpy(context + 104, &pointer, sizeof(pointer));
+  memcpy(context + 112, &pointer, sizeof(pointer));
+  encode_keyspec(original, key, scan->databases[0].pages[0], 1);
+  for (unsigned i = 0; i < KEYSPEC_BYTES; ++i) original[i] ^= scan->mask[i % CODEC_KEY_BYTES];
+  memcpy(keyspec, original, sizeof(keyspec));
+  scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES);
+  int valid = scan->matched_count == 1 && scan->databases[0].matched &&
+      !scan->databases[1].matched && !memcmp(scan->databases[0].key, key, CODEC_KEY_BYTES);
+  // Reject malformed syntax, a different explicit salt, and a different key.
+  const unsigned offsets[] = {0, 1, 2, 66, 98};
+  for (unsigned i = 0; i < sizeof(offsets) / sizeof(offsets[0]); ++i) {
+    memcpy(keyspec, original, sizeof(keyspec));
+    keyspec[offsets[i]] = 'z' ^ scan->mask[offsets[i] % CODEC_KEY_BYTES];
+    scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES);
+    valid = valid && scan->matched_count == 0;
+  }
+  memcpy(keyspec, original, sizeof(keyspec));
+  keyspec[2] = (('0' ^ scan->mask[2]) == keyspec[2] ? '1' : '0') ^ scan->mask[2];
+  scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES);
+  valid = valid && scan->matched_count == 0;
+  memcpy(keyspec, original, sizeof(keyspec));
+  keyspec[66] = (('0' ^ scan->mask[2]) == keyspec[66] ? '1' : '0') ^ scan->mask[2];
+  scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES);
+  valid = valid && scan->matched_count == 0;
+  memcpy(keyspec, original, sizeof(keyspec));
+  scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES - 1);
+  valid = valid && scan->matched_count == 0;
+  scan->databases[0].pages[2][100] ^= 1;
+  scan_retained(scan, context, child, keyspec, KEYSPEC_BYTES);
+  valid = valid && scan->matched_count == 0;
+  scan->databases[0].pages[2][100] ^= 1;
+  encode_keyspec(keyspec, key, NULL, 0);
+  for (unsigned i = 0; i < KEY_ONLY_BYTES; ++i) keyspec[i] ^= scan->mask[i % CODEC_KEY_BYTES];
+  scan_retained(scan, context, child, keyspec, KEY_ONLY_BYTES);
+  valid = valid && scan->matched_count == 2;
+  codec_cancelled = 1;
+  scan_retained(scan, context, child, keyspec, KEY_ONLY_BYTES);
+  valid = valid && scan->matched_count == 0;
+  codec_cancelled = 0;
+  codec_wipe(context, sizeof(context));
+  codec_wipe(child, sizeof(child));
+  codec_wipe(keyspec, sizeof(keyspec));
+  codec_wipe(original, sizeof(original));
+  codec_wipe(provider, sizeof(provider));
+  return valid;
+}
+
 static int output_tests(CodecScan *scan) {
   int descriptors[2];
   if (pipe(descriptors) != 0) return 0;
@@ -194,12 +282,13 @@ int main(void) {
   int file = file_tests(scan, key);
   int header = header_tests();
   int context = context_tests(scan, key);
+  int retained = retained_tests(scan, key);
   int output = output_tests(scan);
   codec_wipe(key, sizeof(key));
   codec_wipe(scan, sizeof(*scan));
   free(scan);
-  printf("{\"crypto\":%s,\"file\":%s,\"version\":%s,\"context\":%s,\"output\":%s}\n",
+  printf("{\"crypto\":%s,\"file\":%s,\"version\":%s,\"context\":%s,\"retained\":%s,\"output\":%s}\n",
       crypto ? "true" : "false", file ? "true" : "false", header ? "true" : "false",
-      context ? "true" : "false", output ? "true" : "false");
-  return crypto && file && header && context && output ? 0 : 1;
+      context ? "true" : "false", retained ? "true" : "false", output ? "true" : "false");
+  return crypto && file && header && context && retained && output ? 0 : 1;
 }

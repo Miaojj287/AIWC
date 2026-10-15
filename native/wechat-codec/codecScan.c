@@ -5,26 +5,73 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  CODEC_KEYSPEC_BYTES = CODEC_KEY_BYTES * 2 + 3,
+  CODEC_SALTED_KEYSPEC_BYTES = (CODEC_KEY_BYTES + CODEC_SALT_BYTES) * 2 + 3
+};
+
 static int expired(CodecScan *scan) {
   return !codec_owner_alive(scan) || codec_seconds() >= scan->deadline;
+}
+
+static int hex_digit(unsigned char value) {
+  if (value >= '0' && value <= '9') return value - '0';
+  if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+  if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+  return -1;
+}
+
+static void verify_candidate(CodecScan *scan, const unsigned char *key,
+                             const unsigned char *salt) {
+  for (unsigned i = 0; i < scan->database_count && !expired(scan); ++i) {
+    CodecDatabase *database = &scan->databases[i];
+    if (database->matched || (salt && memcmp(salt, database->pages[0], CODEC_SALT_BYTES))) continue;
+    if (codec_verify_key(key, database)) {
+      memcpy(database->key, key, sizeof(database->key));
+      database->matched = 1;
+      ++scan->matched_count;
+    }
+  }
+}
+
+static void check_retained_keyspec(CodecScan *scan, const unsigned char *context) {
+  uint32_t length = 0;
+  uint64_t pointer = 0;
+  memcpy(&length, context + 4, sizeof(length));
+  memcpy(&pointer, context + 24, sizeof(pointer));
+  if ((length != CODEC_KEYSPEC_BYTES && length != CODEC_SALTED_KEYSPEC_BYTES) ||
+      !codec_pointer(pointer) || expired(scan)) return;
+  unsigned char encoded[CODEC_SALTED_KEYSPEC_BYTES] = {0};
+  unsigned char decoded[CODEC_KEY_BYTES + CODEC_SALT_BYTES] = {0};
+  int valid = codec_read(scan->task, pointer, encoded, length);
+  // WeChat 4.1.15 retains an XOR-masked x'<key>[salt]' input in some open codecs.
+  for (unsigned i = 0; valid && i < length; ++i) encoded[i] ^= scan->mask[i % CODEC_KEY_BYTES];
+  valid = valid && (encoded[0] == 'x' || encoded[0] == 'X') &&
+      encoded[1] == '\'' && encoded[length - 1] == '\'';
+  for (unsigned i = 0; valid && i < (length - 3) / 2; ++i) {
+    int high = hex_digit(encoded[2 + i * 2]), low = hex_digit(encoded[3 + i * 2]);
+    valid = high >= 0 && low >= 0;
+    if (valid) decoded[i] = (unsigned char)((high << 4) | low);
+  }
+  if (valid) verify_candidate(scan, decoded,
+      length == CODEC_SALTED_KEYSPEC_BYTES ? decoded + CODEC_KEY_BYTES : NULL);
+  codec_wipe(encoded, sizeof(encoded));
+  codec_wipe(decoded, sizeof(decoded));
 }
 
 static void check_subcontext(CodecScan *scan, uint64_t pointer) {
   unsigned char context[CODEC_SUBCONTEXT_BYTES] = {0}, key[CODEC_KEY_BYTES] = {0};
   uint64_t key_pointer = 0;
-  if (codec_read(scan->task, pointer, context, sizeof(context)))
-    memcpy(&key_pointer, context + 8, sizeof(key_pointer));
+  if (!codec_read(scan->task, pointer, context, sizeof(context))) {
+    codec_wipe(context, sizeof(context));
+    return;
+  }
+  memcpy(&key_pointer, context + 8, sizeof(key_pointer));
   if (codec_pointer(key_pointer) && codec_read(scan->task, key_pointer, key, sizeof(key))) {
     for (unsigned i = 0; i < sizeof(key); ++i) key[i] ^= scan->mask[i];
-    for (unsigned i = 0; i < scan->database_count && !expired(scan); ++i) {
-      CodecDatabase *database = &scan->databases[i];
-      if (!database->matched && codec_verify_key(key, database)) {
-        memcpy(database->key, key, sizeof(database->key));
-        database->matched = 1;
-        ++scan->matched_count;
-      }
-    }
+    verify_candidate(scan, key, NULL);
   }
+  if (scan->matched_count < scan->database_count) check_retained_keyspec(scan, context);
   codec_wipe(context, sizeof(context));
   codec_wipe(key, sizeof(key));
 }

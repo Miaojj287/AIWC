@@ -103,6 +103,8 @@ export const onboarding = {
     partialReady: '部分数据库可读',
     partialDatabase: '已解锁 {matched} / {total} 个数据库，部分数据库暂不可读',
     auxiliary: '已解锁 {matched} / {total} 个数据库；剩余的第三方应用图标库不影响当前聊天读取。',
+    complete: '已解锁 {matched} / {total} 个数据库',
+    completeRemaining: '补齐剩余数据库',
     missing: '尚未解锁的数据库',
     advanced: '高级选项 · 手动输入',
     connect: '连接微信',

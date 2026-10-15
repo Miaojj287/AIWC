@@ -116,6 +116,61 @@ it('shows an authenticated chat connection when only the auxiliary icon store is
   screen.getByText('已恢复保存的连接，点击「进入」即可读取，无需重新获取密钥。')
 })
 
+it('offers explicit database completion without clearing or automatically acquiring saved credentials', async () => {
+  const acquire = vi.fn(async () => undefined)
+  const originalAcquire = useWizardStore.getState().acquire
+  useWizardStore.setState({
+    hydrated: true,
+    wxid: 'wxid_a',
+    dbRoot: '/root',
+    acquire,
+    credentials: {
+      database: true,
+      imageXor: true,
+      imageAes: true,
+      matched: 24,
+      total: 25,
+      missing: ['third_app_icon/third_app_icon.db'],
+      revision: 1,
+    },
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'acquired', source: 'cached' },
+      image_aes: { status: 'acquired', source: 'cached' },
+    },
+  })
+  try {
+    render(
+      <TooltipProvider>
+        <KeysCard returning />
+      </TooltipProvider>,
+    )
+    expect(acquire).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '补齐剩余数据库' }))
+    await waitFor(() => expect(acquire).toHaveBeenCalledWith('auto', 'database'))
+    expect(useWizardStore.getState().keys.db_key.status).toBe('acquired')
+    act(() =>
+      useWizardStore.setState({
+        credentials: {
+          database: true,
+          imageXor: true,
+          imageAes: true,
+          matched: 25,
+          total: 25,
+          missing: [],
+          revision: 2,
+        },
+      }),
+    )
+    screen.getByText('已解锁 25 / 25 个数据库')
+    screen.getByText('已恢复保存的连接，点击「进入」即可读取，无需重新获取密钥。')
+    expect(screen.queryByRole('button', { name: '补齐剩余数据库' })).toBeNull()
+    expect(screen.queryByText('third_app_icon/third_app_icon.db')).toBeNull()
+  } finally {
+    useWizardStore.setState({ acquire: originalAcquire })
+  }
+})
+
 /** A bridge whose acquireKeys stays pending until `finish` is called; pushes go through `push`. */
 function acquireBridge() {
   let listener: ((step: KeyAcquireStep) => void) | undefined

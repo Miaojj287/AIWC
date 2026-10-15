@@ -105,6 +105,8 @@ export const onboarding: Messages['onboarding'] = {
     partialDatabase: '{matched} of {total} databases unlocked. Some databases are unavailable',
     auxiliary:
       '{matched} of {total} databases unlocked. The remaining third-party app icon database does not affect current chat reading.',
+    complete: '{matched} of {total} databases unlocked',
+    completeRemaining: 'Unlock remaining databases',
     missing: 'Databases still locked',
     advanced: 'Advanced · Manual input',
     connect: 'Connect WeChat',

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Image, KeyRound } from 'lucide-react'
+import { ChevronDown, ChevronRight, Image, KeyRound, ScanSearch } from 'lucide-react'
 import { useState } from 'react'
 import { useT } from '@/i18n'
 import { Button, Card, FieldLabel, InlineHint } from '@/kit'
@@ -60,14 +60,16 @@ export function KeysCard({ onConnect, returning = false }: { onConnect?: () => v
                     : 'onboarding.connection.partialDatabase',
                 { matched: credentials.matched, total: credentials.total },
               )
-            : cachedEntry
-              ? t('onboarding.connection.cachedEntry')
-              : t('onboarding.connection.reuse')}
+            : credentials && credentials.total > 0 && credentials.matched === credentials.total
+              ? t('onboarding.connection.complete', { matched: credentials.matched, total: credentials.total })
+              : cachedEntry
+                ? t('onboarding.connection.cachedEntry')
+                : t('onboarding.connection.reuse')}
         </InlineHint>
       ) : (
         <span className="text-caption text-fg-3">{t('onboarding.connection.startHint')}</span>
       )}
-      {!checking && cachedEntry && credentials.missing.length ? (
+      {!checking && cachedEntry ? (
         <span className="text-caption text-fg-3">{t('onboarding.connection.cachedEntry')}</span>
       ) : null}
       {credentials?.missing.length ? (
@@ -79,6 +81,18 @@ export function KeysCard({ onConnect, returning = false }: { onConnect?: () => v
             </span>
           ))}
         </div>
+      ) : null}
+      {hasDatabase && credentials?.missing.length ? (
+        <Button
+          variant="outline"
+          size="sm"
+          icon={ScanSearch}
+          className="self-start"
+          onClick={() => void acquire('auto', 'database')}
+          disabled={!canAcquire}
+        >
+          {t('onboarding.connection.completeRemaining')}
+        </Button>
       ) : null}
       {hasDatabase && !imagesReady ? (
         <div className="flex flex-wrap items-center gap-2">
