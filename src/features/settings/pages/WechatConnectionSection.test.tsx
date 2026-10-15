@@ -12,14 +12,22 @@ afterEach(() => {
   __resetLanguageForTests()
 })
 
-function setup(database: boolean, bundle = false) {
+function setup(database: boolean, bundle = false, missing: string[] = []) {
   const account = { ...defaultConfig().account, wxid: 'account_a', dbRoot: '/data' }
   if (bundle) account.dbCredentialsRef = 'account:databaseCredentials'
   let finish: (steps: KeyAcquireStep[]) => void = () => {}
   const acquisition = new Promise<KeyAcquireStep[]>((resolve) => (finish = resolve))
   const invoke = vi.fn(async (channel: string) => {
     if (channel === 'substrate:credentialStatus')
-      return { database, imageXor: true, imageAes: true, matched: database ? 2 : 0, total: 2, missing: [], revision: 1 }
+      return {
+        database,
+        imageXor: true,
+        imageAes: true,
+        matched: database ? 2 : 0,
+        total: 2 + missing.length,
+        missing,
+        revision: 1,
+      }
     if (channel === 'secret:has') return true
     if (channel === 'substrate:acquireKeys') return acquisition
     if (channel === 'substrate:cancelAcquireKeys') return undefined
@@ -53,6 +61,21 @@ it('opens a saved connection without scanning the process or showing legacy key 
     invoke.mock.calls.some(([channel]) => channel === 'substrate:acquireKeys' || channel === 'secret:reveal'),
   ).toBe(false)
 })
+
+it.each(['third_app_icon/third_app_icon.db', 'message/message_1.db'])(
+  'validates a saved partial connection without implicitly scanning for %s',
+  async (path) => {
+    const { invoke, onConnect } = setup(true, true, [path])
+    await screen.findByText(path)
+    if (path === 'third_app_icon/third_app_icon.db') {
+      screen.getByText('聊天记录可读')
+      expect(screen.queryByText('未验证')).toBeNull()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '连接微信' }))
+    await waitFor(() => expect(onConnect).toHaveBeenCalledOnce())
+    expect(invoke.mock.calls.some(([channel]) => channel === 'substrate:acquireKeys')).toBe(false)
+  },
+)
 
 it('continues to open the database after an explicit first acquisition', async () => {
   const { invoke, finish, onSaved, onConnect } = setup(false)

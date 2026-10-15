@@ -101,6 +101,7 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
     const { config, secrets } = saved
     const { ref, field } = KEY_REF_BY_KIND[kind]
     const account = config.get().account
+    if (kind === 'db_key' && saved.config === ctx.config) await substrate.close()
     for (const value of new Set([ref, account[field]])) if (value) secrets.delete(value)
     if (kind === 'db_key') secrets.delete(SECRET_REFS.dbCredentials)
     config.set({
@@ -110,7 +111,7 @@ export function registerSubstrateIpc(ctx: AppContext, host: HostBridge, handle: 
         ...(kind === 'db_key' ? { verifiedAt: 0, dbCredentialsRef: null } : {}),
       },
     })
-    await refreshCredentials(saved)
+    if (kind !== 'db_key') await refreshCredentials(saved)
   })
 
   const activate = createAccountActivator(ctx, host.accountSession, ctx.paths.accountScope, connection.verify)

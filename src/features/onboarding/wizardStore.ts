@@ -303,8 +303,9 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       credentials: s.credentials
         ? {
             ...s.credentials,
+            revision: s.credentials.revision + 1,
             ...(kind === 'db_key'
-              ? { database: false }
+              ? { database: false, matched: 0, total: 0, missing: [] }
               : kind === 'image_xor'
                 ? { imageXor: false }
                 : { imageAes: false }),
@@ -312,6 +313,8 @@ export const useWizardStore = create<WizardState>((set, get) => ({
         : undefined,
       ...(kind === 'db_key'
         ? {
+            testError: undefined,
+            keyTarget: undefined,
             verifyState: 'idle' as const,
             verifyError: undefined,
             accounts: s.accounts.map((a) => (a.wxid === wxid ? { ...a, verified: false } : a)),

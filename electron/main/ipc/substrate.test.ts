@@ -39,6 +39,7 @@ function setup(accountSession?: HostBridge['accountSession'], ready = false) {
   const secrets = { set: vi.fn(), reveal: vi.fn((): string | undefined => 'a'.repeat(64)), delete: vi.fn() }
   const set = vi.fn()
   const reconnect = vi.fn(async () => ({ ok: true }))
+  const close = vi.fn(async () => {})
   const logger = { child: () => logger }
   const ipc = createHandlerHarness()
   registerSubstrateIpc(
@@ -46,17 +47,81 @@ function setup(accountSession?: HostBridge['accountSession'], ready = false) {
       logger,
       config: { get: () => config, set },
       secrets,
-      substrate: { status: () => ({ connection: ready ? 'ready' : 'no_config' }), reconnect },
+      substrate: { status: () => ({ connection: ready ? 'ready' : 'no_config' }), reconnect, close },
       paths: {},
     } as unknown as AppContext,
     { accountSession } as HostBridge,
     ipc.handle,
   )
   const invoke = <K extends InvokeChannel>(channel: K, req: InvokeReq<K>) => ipc.invoke(channel, req) as InvokeRes<K>
-  return { secrets, set, reconnect, invoke, invokeRaw: ipc.invokeRaw }
+  return { secrets, set, reconnect, close, invoke, invokeRaw: ipc.invokeRaw }
 }
 
 describe('clearing a saved WeChat key', () => {
+  it('clears an open database connection once without reopening it with deleted credentials', async () => {
+    const { invoke, secrets, close, reconnect } = setup(undefined, true)
+    reconnect.mockResolvedValue({ ok: false })
+    await expect(invoke('substrate:clearKey', { kind: 'db_key' })).resolves.toBeUndefined()
+    expect(close).toHaveBeenCalledOnce()
+    expect(reconnect).not.toHaveBeenCalled()
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(secrets.delete.mock.invocationCallOrder[0] ?? 0)
+    expect(secrets.delete).toHaveBeenCalledWith(SECRET_REFS.dbCredentials)
+  })
+  it('keeps saved credentials if closing the current database fails', async () => {
+    const { invoke, secrets, close, set } = setup(undefined, true)
+    close.mockRejectedValueOnce(new Error('close failed'))
+    await expect(invoke('substrate:clearKey', { kind: 'db_key' })).rejects.toThrow('close failed')
+    expect(secrets.delete).not.toHaveBeenCalled()
+    expect(set).not.toHaveBeenCalled()
+  })
+  it('updates image credentials on the open reader without closing the database connection', async () => {
+    const { invoke, close, reconnect } = setup(undefined, true)
+    await invoke('substrate:clearKey', { kind: 'image_aes' })
+    expect(reconnect).toHaveBeenCalledOnce()
+    expect(close).not.toHaveBeenCalled()
+  })
+  it('does not close the current reader when clearing a different account', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'aiwc-clear-other-'))
+    try {
+      const config = createConfigService({ file: join(root, 'config.json') })
+      const options = {
+        file: join(root, 'secrets.bin'),
+        safeStorage: {
+          isEncryptionAvailable: () => true,
+          encryptString: (value: string) => Buffer.from(value),
+          decryptString: (value: Buffer) => value.toString(),
+        },
+      }
+      const secrets = createSecretStore(options)
+      secrets.set(SECRET_REFS.dbCredentials, 'synthetic database bundle')
+      secrets.set(SECRET_REFS.dbKey, 'a'.repeat(64))
+      secrets.set(SECRET_REFS.imageAesKey, 'b'.repeat(32))
+      config.set({
+        account: {
+          wxid: 'other',
+          dbRoot: '/other',
+          dbCredentialsRef: SECRET_REFS.dbCredentials,
+          dbKeyRef: SECRET_REFS.dbKey,
+          imageAesKeyRef: SECRET_REFS.imageAesKey,
+        },
+      })
+      const credentials = vi.fn(() => ({ config, secrets }))
+      const { invoke, close, reconnect } = setup({ credentials, switch: vi.fn(), isSwitching: () => false }, true)
+      await invoke('substrate:clearKey', { kind: 'db_key', target: { wxid: 'other', dbRoot: '/other' } })
+      const reloaded = createSecretStore(options)
+      expect(reloaded.has(SECRET_REFS.dbCredentials)).toBe(false)
+      expect(reloaded.has(SECRET_REFS.dbKey)).toBe(false)
+      expect(reloaded.has(SECRET_REFS.imageAesKey)).toBe(true)
+      const account = createConfigService({ file: join(root, 'config.json') }).get().account
+      expect(account.dbCredentialsRef).toBeUndefined()
+      expect(account.dbKeyRef).toBeUndefined()
+      expect(account).toMatchObject({ credentialRevision: 1, verifiedAt: 0 })
+      expect(close).not.toHaveBeenCalled()
+      expect(reconnect).not.toHaveBeenCalled()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
   it('deletes conventional and configured refs, invalidates the reader, and drops database verification', async () => {
     const { invoke, secrets, set } = setup()
     await invoke('substrate:clearKey', { kind: 'db_key' })

@@ -41,8 +41,18 @@ it('keeps saved credentials masked in advanced controls and never reveals them',
 it('deletes a saved key only after the danger confirmation, and cancelling keeps it', async () => {
   useConfigStore.setState({ config: defaultConfig(), hydrated: true })
   useWizardStore.setState({
+    hydrated: true,
     wxid: 'wxid_a',
     dbRoot: '/root',
+    credentials: {
+      database: true,
+      imageXor: false,
+      imageAes: false,
+      matched: 24,
+      total: 25,
+      missing: ['third_app_icon/third_app_icon.db'],
+      revision: 1,
+    },
     keys: {
       db_key: { status: 'acquired', source: 'cached' },
       image_xor: { status: 'missing' },
@@ -67,10 +77,43 @@ it('deletes a saved key only after the danger confirmation, and cancelling keeps
   screen.getByText('将从本机删除解密密钥，之后需要重新获取或手动输入。')
   fireEvent.click(within(dialog).getByRole('button', { name: '清除' }))
   await waitFor(() => expect(useWizardStore.getState().keys.db_key.status).toBe('missing'))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.queryByText('third_app_icon/third_app_icon.db')).toBeNull()
+  expect(screen.queryByText('尚未配置微信账号')).toBeNull()
+  expect(screen.queryByRole('button', { name: '清除' })).toBeNull()
   expect(invoke).toHaveBeenCalledWith('substrate:clearKey', {
     kind: 'db_key',
     target: { wxid: 'wxid_a', dbRoot: '/root' },
   })
+})
+
+it('shows an authenticated chat connection when only the auxiliary icon store is missing', () => {
+  useWizardStore.setState({
+    hydrated: true,
+    credentials: {
+      database: true,
+      imageXor: true,
+      imageAes: true,
+      matched: 24,
+      total: 25,
+      missing: ['third_app_icon/third_app_icon.db'],
+      revision: 1,
+    },
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'acquired', source: 'cached' },
+      image_aes: { status: 'acquired', source: 'cached' },
+    },
+  })
+  render(
+    <TooltipProvider>
+      <KeysCard returning />
+    </TooltipProvider>,
+  )
+  screen.getByText('聊天记录可读')
+  screen.getByText('已解锁 24 / 25 个数据库；剩余的第三方应用图标库不影响当前聊天读取。')
+  screen.getByText('third_app_icon/third_app_icon.db')
+  screen.getByText('已恢复保存的连接，点击「进入」即可读取，无需重新获取密钥。')
 })
 
 /** A bridge whose acquireKeys stays pending until `finish` is called; pushes go through `push`. */

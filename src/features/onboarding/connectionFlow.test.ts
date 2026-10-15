@@ -36,6 +36,34 @@ it('loads selected account capabilities without revealing any saved key', async 
   expect(useWizardStore.getState()).toMatchObject({ credentials: available, verifyState: 'verified' })
 })
 
+it('does not restore old coverage when a capability check finishes after database credentials were cleared', async () => {
+  const result = Promise.withResolvers<WechatCredentialStatus>()
+  const invoke = vi.fn((channel: string) =>
+    channel === 'substrate:credentialStatus' ? result.promise : Promise.resolve(undefined),
+  )
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({
+    wxid: 'selected',
+    dbRoot: '/root',
+    credentials: available,
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'missing' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  const pending = useWizardStore.getState().loadCredentials()
+  await useWizardStore.getState().clearKey('db_key')
+  result.resolve(available)
+  await pending
+  expect(useWizardStore.getState()).toMatchObject({
+    credentialsLoading: false,
+    verifyState: 'idle',
+    keys: { db_key: { status: 'missing' } },
+    credentials: { database: false, matched: 0, total: 0, missing: [] },
+  })
+})
+
 it('refreshes capabilities and discards an acquire result after account changes away and back', async () => {
   const result = Promise.withResolvers<KeyAcquireStep[]>()
   const invoke = vi.fn((channel: string) =>

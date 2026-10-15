@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Image, KeyRound } from 'lucide-react'
 import { useState } from 'react'
 import { useT } from '@/i18n'
 import { Button, Card, FieldLabel, InlineHint } from '@/kit'
+import { classifyDatabaseCoverage } from '@/platform/databaseCoverage'
 import { KEY_KINDS, hasKey } from './gating'
 import { KeyAcquireProgress } from './KeyAcquireProgress'
 import { KeyRow } from './KeyRow'
@@ -27,6 +28,8 @@ export function KeysCard({ onConnect, returning = false }: { onConnect?: () => v
   const canAcquire = Boolean(wxid && dbRoot) && !acquiring && !checking
   const cachedEntry = returning && credentials?.database
   const imagesReady = hasKey(keys.image_xor) && hasKey(keys.image_aes)
+  const coverage = classifyDatabaseCoverage(credentials)
+  const hasUnavailableChat = coverage === 'chat' || coverage === 'other'
 
   return (
     <Card className="flex flex-col gap-3">
@@ -38,15 +41,25 @@ export function KeysCard({ onConnect, returning = false }: { onConnect?: () => v
           checking
             ? { kind: 'info', text: t('onboarding.connection.checking') }
             : hasDatabase
-              ? { kind: 'success', text: t('onboarding.connection.ready') }
+              ? {
+                  kind: hasUnavailableChat ? 'warning' : 'success',
+                  text: t(hasUnavailableChat ? 'onboarding.connection.partialReady' : 'onboarding.connection.ready'),
+                }
               : undefined
         }
       />
       {credentialsError ? <InlineHint kind="error">{credentialsError}</InlineHint> : null}
       {checking ? null : hasDatabase ? (
-        <InlineHint kind={credentials?.missing.length ? 'warning' : 'success'}>
-          {credentials?.missing.length
-            ? t('onboarding.connection.partial', { matched: credentials.matched, total: credentials.total })
+        <InlineHint kind={hasUnavailableChat ? 'warning' : 'success'}>
+          {credentials && (credentials.missing.length || hasUnavailableChat)
+            ? t(
+                coverage === 'auxiliary'
+                  ? 'onboarding.connection.auxiliary'
+                  : coverage === 'chat'
+                    ? 'onboarding.connection.partial'
+                    : 'onboarding.connection.partialDatabase',
+                { matched: credentials.matched, total: credentials.total },
+              )
             : cachedEntry
               ? t('onboarding.connection.cachedEntry')
               : t('onboarding.connection.reuse')}

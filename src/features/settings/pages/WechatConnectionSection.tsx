@@ -4,6 +4,7 @@ import type { AppConfig, KeyAcquireStep } from '@aiwc/protocol'
 import { useT } from '@/i18n'
 import { Badge, Button, Card, InlineHint, toast } from '@/kit'
 import { useInvoke } from '@/platform/hooks'
+import { classifyDatabaseCoverage } from '@/platform/databaseCoverage'
 import { secretRefFor, type KeyKind } from '../accountModel'
 import { errorMessage } from '../hooks'
 import { SRow, Section } from '../pageKit'
@@ -32,6 +33,8 @@ export function WechatConnectionSection({ account, version, onSaved, onConnect }
   )
   const canConnect = Boolean(account.wxid && account.dbRoot)
   const hasDatabase = Boolean(credentials.data?.database)
+  const coverage = classifyDatabaseCoverage(credentials.data)
+  const hasUnavailableChat = coverage === 'chat' || coverage === 'other'
   const imagesReady = Boolean(credentials.data?.imageXor && credentials.data.imageAes)
   const isBusy = connecting || acquire !== null
 
@@ -88,8 +91,8 @@ export function WechatConnectionSection({ account, version, onSaved, onConnect }
             {credentials.loading ? (
               <span className="text-caption text-fg-3">{t('onboarding.connection.checking')}</span>
             ) : hasDatabase ? (
-              <Badge tone={credentials.data?.missing.length ? 'warn' : 'ok'}>
-                {credentials.data?.missing.length ? t('settings.account.unverified') : t('onboarding.connection.ready')}
+              <Badge tone={hasUnavailableChat ? 'warn' : 'ok'}>
+                {t(hasUnavailableChat ? 'onboarding.connection.partialReady' : 'onboarding.connection.ready')}
               </Badge>
             ) : (
               <span className="text-caption text-fg-3">{t('onboarding.connection.startHint')}</span>
@@ -101,7 +104,7 @@ export function WechatConnectionSection({ account, version, onSaved, onConnect }
               disabled={!canConnect || credentials.loading || acquire !== null}
               disabledReason={!canConnect ? t('settings.account.acquire.selectFirst') : undefined}
               onClick={() => {
-                if (hasDatabase && !credentials.data?.missing.length) void connect()
+                if (hasDatabase) void connect()
                 else setAcquire('database')
               }}
             >

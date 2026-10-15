@@ -1,17 +1,27 @@
 import type { WechatCredentialStatus } from '@aiwc/protocol'
 import { useT } from '@/i18n'
 import { InlineHint, Input } from '@/kit'
+import { classifyDatabaseCoverage } from '@/platform/databaseCoverage'
 
 /** Display safe per-file availability without exposing a private database credential bundle. */
 export function DatabaseCredentialStatus({ credentials }: { credentials?: WechatCredentialStatus }) {
   const t = useT()
   if (!credentials) return null
+  const coverage = classifyDatabaseCoverage(credentials)
+  const hasUnavailableChat = coverage === 'chat' || coverage === 'other'
   return (
     <div className="flex flex-col gap-2">
       {credentials.database ? (
-        <InlineHint kind={credentials.missing.length ? 'warning' : 'success'}>
-          {credentials.missing.length
-            ? t('onboarding.connection.partial', { matched: credentials.matched, total: credentials.total })
+        <InlineHint kind={hasUnavailableChat ? 'warning' : 'success'}>
+          {credentials.missing.length || hasUnavailableChat
+            ? t(
+                coverage === 'auxiliary'
+                  ? 'onboarding.connection.auxiliary'
+                  : coverage === 'chat'
+                    ? 'onboarding.connection.partial'
+                    : 'onboarding.connection.partialDatabase',
+                { matched: credentials.matched, total: credentials.total },
+              )
             : t('onboarding.connection.reuse')}
         </InlineHint>
       ) : null}

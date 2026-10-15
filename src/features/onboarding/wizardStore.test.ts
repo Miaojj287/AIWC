@@ -61,6 +61,15 @@ it('clearing a key deletes it from the selected account, so it stays missing aft
     dbRoot: '/selected',
     verifyState: 'verified',
     accounts: [{ wxid: 'selected', dbRoot: '/selected', verified: true }],
+    credentials: {
+      database: true,
+      imageXor: true,
+      imageAes: false,
+      matched: 24,
+      total: 25,
+      missing: ['third_app_icon/third_app_icon.db'],
+      revision: 1,
+    },
     keys: {
       db_key: { status: 'acquired', source: 'cached' },
       image_xor: { status: 'acquired', source: 'cached' },
@@ -76,6 +85,7 @@ it('clearing a key deletes it from the selected account, so it stays missing aft
     keys: { db_key: { status: 'missing' }, image_xor: { status: 'acquired' } },
     verifyState: 'idle',
     accounts: [{ wxid: 'selected', verified: false }],
+    credentials: { database: false, imageXor: true, matched: 0, total: 0, missing: [], revision: 2 },
   })
 })
 

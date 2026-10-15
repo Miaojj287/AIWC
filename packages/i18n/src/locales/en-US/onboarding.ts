@@ -101,6 +101,10 @@ export const onboarding: Messages['onboarding'] = {
     startHint: 'Keep WeChat signed in, then select "Connect WeChat" to read your chat history.',
     selectHint: 'Connect WeChat will verify the selected account automatically',
     partial: '{matched} of {total} databases unlocked. Some chat history is unavailable',
+    partialReady: 'Some databases are available',
+    partialDatabase: '{matched} of {total} databases unlocked. Some databases are unavailable',
+    auxiliary:
+      '{matched} of {total} databases unlocked. The remaining third-party app icon database does not affect current chat reading.',
     missing: 'Databases still locked',
     advanced: 'Advanced · Manual input',
     connect: 'Connect WeChat',
