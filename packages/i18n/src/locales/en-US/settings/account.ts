@@ -66,8 +66,9 @@ export const account: Messages['settings']['account'] = {
     acquire: 'Connect WeChat',
   },
   imageKeys: {
-    title: 'Image decryption keys',
-    help: 'The XOR and AES keys restore images; if they are missing, only image previews are affected. Edit them directly (validated and saved on Enter or when you leave the field), or get them automatically.',
+    title: 'Image previews',
+    help: 'Image previews can be set up later without affecting chat text. Automatic setup reads only image credentials. Advanced options allow manual XOR and AES entry, validated and saved on Enter or blur.',
+    ready: 'Images available',
     xor: 'XOR key',
     aes: 'AES key',
     acquire: 'Get image keys automatically',

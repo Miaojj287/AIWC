@@ -187,6 +187,8 @@ export function AcquireKeysButton({
   version,
   available,
   icon,
+  disabled,
+  disabledReason,
   onClick,
   children,
 }: {
@@ -194,12 +196,20 @@ export function AcquireKeysButton({
   version: number
   available?: boolean
   icon: LucideIcon
+  disabled?: boolean
+  disabledReason?: string
   onClick: () => void
   children: ReactNode
 }) {
   const { has } = useSecretPresence(secretRef, version)
   return (
-    <Button variant={(available ?? has) ? 'outline' : 'primary'} icon={icon} onClick={onClick}>
+    <Button
+      variant={(available ?? has) ? 'outline' : 'primary'}
+      icon={icon}
+      onClick={onClick}
+      disabled={disabled}
+      disabledReason={disabledReason}
+    >
       {children}
     </Button>
   )
@@ -284,6 +294,12 @@ export function InlineKeyAcquire({ wxid, dbRoot, scope, onFinished, onManual, on
       // `runRef` is a run counter, not a DOM node: bumping it on unmount drops the pending completion.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       runRef.current++
+      if (runningRef.current) {
+        runningRef.current = false
+        void invoke('substrate:cancelAcquireKeys', undefined).catch(() => {
+          // The old panel is gone; the utility process also bounds its own operation.
+        })
+      }
     }
   }, [])
 

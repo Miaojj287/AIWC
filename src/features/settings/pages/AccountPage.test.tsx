@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { defaultConfig, type AiwcBridge } from '@aiwc/protocol'
 import { TooltipProvider } from '@/kit'
@@ -42,6 +42,8 @@ it('shows the connected account avatar when saved config disagrees, and groups d
           { wxid: 'saved_b', dbRoot: '/root', verified: false },
         ]
       if (channel === 'secret:has') return false
+      if (channel === 'substrate:credentialStatus')
+        return { database: false, imageXor: false, imageAes: false, matched: 0, total: 0, missing: [], revision: 0 }
       throw new Error(channel)
     }) as AiwcBridge['invoke'],
   })
@@ -64,4 +66,11 @@ it('shows the connected account avatar when saved config disagrees, and groups d
     'account.dbKey',
     'account.imageKeys',
   ])
+  expect(screen.queryByLabelText('解密密钥')).toBeNull()
+  expect(screen.queryByLabelText('XOR 密钥')).toBeNull()
+  expect(screen.queryByLabelText('AES 密钥')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '高级选项 · 手动输入' }))
+  expect(screen.getByLabelText('解密密钥')).toBeTruthy()
+  expect(screen.getByLabelText('XOR 密钥')).toBeTruthy()
+  expect(screen.getByLabelText('AES 密钥')).toBeTruthy()
 })

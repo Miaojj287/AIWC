@@ -67,8 +67,9 @@ export const account = {
     acquire: '连接微信',
   },
   imageKeys: {
-    title: '图片解密密钥',
-    help: 'XOR 与 AES 两把密钥用于还原图片，缺失时只影响图片预览。可直接编辑，回车或失焦时校验保存，也可自动获取。',
+    title: '图片预览',
+    help: '图片预览可以稍后补齐，不影响读取聊天文字。自动获取只读取图片所需的凭据；高级选项中可手动输入 XOR 与 AES 密钥，回车或失焦时校验保存。',
+    ready: '图片可预览',
     xor: 'XOR 密钥',
     aes: 'AES 密钥',
     acquire: '自动获取图片密钥',

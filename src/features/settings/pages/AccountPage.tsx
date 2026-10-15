@@ -2,7 +2,7 @@
  * 账号 — current account card, database configuration (key / root / verification) and cache + image
  * keys. Figma 128:462, board 151:415 ③. Validated actions use explicit buttons; paths are mono.
  */
-import { FolderOpen, KeyRound, Link, RefreshCw, RotateCcw, ScanLine, ShieldCheck, Image } from 'lucide-react'
+import { FolderOpen, Link, RefreshCw, RotateCcw, ScanLine, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { WxAccount } from '@aiwc/protocol'
 import {
@@ -25,11 +25,9 @@ import { useAccountStatus } from '@/platform/useAccountStatus'
 import { toMediaUrl } from '@/platform/mediaUrl'
 import { useConfig } from '@/platform/configStore'
 import { invoke, useInvoke } from '@/platform/hooks'
-import { secretRefFor, type KeyKind } from '../accountModel'
 import { activateAccount, errorMessage, refreshConfig, saveConfig } from '../hooks'
 import { PagePlaceholder, SRow, Section } from '../pageKit'
-import { AcquireKeysButton, InlineKeyAcquire, SecretField } from './AccountKeys'
-import { DatabaseCredentialStatus, SavedDatabaseCredentials } from './DatabaseCredentialStatus'
+import { WechatConnectionSection } from './WechatConnectionSection'
 import { OfficeSection } from './OfficeSection'
 import { MobileSection } from './MobileSection'
 
@@ -40,19 +38,12 @@ export function AccountPage() {
   const accounts = useInvoke('substrate:listAccounts', { dbRoot: account?.dbRoot }, [account?.dbRoot])
   const [switching, setSwitching] = useState(false)
   const [keyVersion, setKeyVersion] = useState(0)
-  const [acquire, setAcquire] = useState<'database' | 'image' | null>(null)
   const [verifyWxid, setVerifyWxid] = useState<string | undefined>(account?.wxid)
   const [verifying, setVerifying] = useState(false)
   const [verifyError, setVerifyError] = useState<string | undefined>()
   const [testing, setTesting] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [resetCache, setResetCache] = useState(false)
-  const credentials = useInvoke(
-    'substrate:credentialStatus',
-    { wxid: account?.wxid ?? '', dbRoot: account?.dbRoot ?? '' },
-    [account?.wxid, account?.dbRoot, account?.credentialRevision, keyVersion],
-    { enabled: Boolean(account?.wxid && account.dbRoot) },
-  )
 
   useEffect(() => {
     if (account?.wxid) setVerifyWxid(account.wxid)
@@ -83,7 +74,6 @@ export function AccountPage() {
     try {
       if (await activateAccount({ wxid, dbRoot: target.dbRoot, verifiedAt: target.verified ? Date.now() : 0 })) {
         setVerifyError(undefined)
-        setAcquire(null)
         accounts.reload()
         toast.success(t('settings.account.switched', { name: target.nickname ?? target.wxid }))
       }
@@ -150,10 +140,9 @@ export function AccountPage() {
     }
   }
 
-  const testConnection = async () => {
+  const testConnection = async (target = { wxid: verifyWxid ?? account.wxid ?? '', dbRoot: account.dbRoot ?? '' }) => {
     setTesting(true)
     try {
-      const target = { wxid: verifyWxid ?? account.wxid ?? '', dbRoot: account.dbRoot ?? '' }
       const res = await invoke('substrate:testConnection', target)
       if (res.ok) {
         if (!(await activateAccount({ ...target, verifiedAt: Date.now() }))) return
@@ -305,106 +294,13 @@ export function AccountPage() {
         </Card>
       </Section>
 
-      <Section title={t('settings.account.sections.keys')}>
-        <Card variant="rows">
-          <SRow
-            id="account.dbKey"
-            title={t('settings.account.dbKey.title')}
-            description={t('settings.account.dbKey.description')}
-            help={t('settings.account.dbKey.help')}
-            stacked
-            footer={
-              <>
-                <DatabaseCredentialStatus credentials={credentials.data} />
-                {acquire === 'database' ? (
-                  <InlineKeyAcquire
-                    key="acquire-all"
-                    wxid={account.wxid}
-                    dbRoot={account.dbRoot}
-                    scope="database"
-                    onFinished={afterKeys}
-                    onManual={(kind) => document.getElementById(`account-key-${kind}`)?.focus()}
-                    onClose={() => setAcquire(null)}
-                  />
-                ) : null}
-              </>
-            }
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              {account.dbCredentialsRef ? (
-                <SavedDatabaseCredentials />
-              ) : (
-                <SecretField
-                  kind="db_key"
-                  secretRef={secretRefFor(account, 'db_key')}
-                  version={keyVersion}
-                  onSaved={afterKeys}
-                  label={t('settings.account.dbKey.fieldLabel')}
-                  className="min-w-[200px] flex-1"
-                />
-              )}
-              <AcquireKeysButton
-                secretRef={secretRefFor(account, 'db_key')}
-                version={keyVersion}
-                available={credentials.data?.database}
-                icon={KeyRound}
-                onClick={() => setAcquire('database')}
-              >
-                {t('settings.account.dbKey.acquire')}
-              </AcquireKeysButton>
-            </div>
-          </SRow>
-
-          <SRow
-            id="account.imageKeys"
-            title={t('settings.account.imageKeys.title')}
-            help={t('settings.account.imageKeys.help')}
-            stacked
-            footer={
-              <>
-                {acquire === 'image' ? (
-                  <InlineKeyAcquire
-                    key="acquire-image"
-                    wxid={account.wxid}
-                    dbRoot={account.dbRoot}
-                    scope="image"
-                    onFinished={afterKeys}
-                    onManual={(kind) => document.getElementById(`account-key-${kind}`)?.focus()}
-                    onClose={() => setAcquire(null)}
-                  />
-                ) : null}
-              </>
-            }
-          >
-            <div className="flex flex-wrap items-end gap-3">
-              <LabeledSecret
-                label={t('settings.account.imageKeys.xor')}
-                kind="image_xor"
-                secretRef={secretRefFor(account, 'image_xor')}
-                version={keyVersion}
-                onSaved={afterKeys}
-                className="w-[120px]"
-              />
-              <LabeledSecret
-                label={t('settings.account.imageKeys.aes')}
-                kind="image_aes"
-                secretRef={secretRefFor(account, 'image_aes')}
-                version={keyVersion}
-                onSaved={afterKeys}
-                className="min-w-[200px] flex-1"
-              />
-              <AcquireKeysButton
-                secretRef={secretRefFor(account, 'image_aes')}
-                version={keyVersion}
-                icon={Image}
-                onClick={() => setAcquire('image')}
-              >
-                {t('settings.account.imageKeys.acquire')}
-              </AcquireKeysButton>
-            </div>
-          </SRow>
-        </Card>
-      </Section>
+      <WechatConnectionSection
+        key={`${account.wxid}:${account.dbRoot}`}
+        account={account}
+        version={keyVersion}
+        onSaved={afterKeys}
+        onConnect={() => testConnection({ wxid: account.wxid ?? '', dbRoot: account.dbRoot ?? '' })}
+      />
 
       <OfficeSection />
 
@@ -422,26 +318,6 @@ export function AccountPage() {
         }}
       />
     </>
-  )
-}
-
-function LabeledSecret({
-  label,
-  className,
-  ...rest
-}: {
-  label: string
-  kind: KeyKind
-  secretRef: string
-  version: number
-  onSaved: () => void
-  className?: string
-}) {
-  return (
-    <div className={`flex flex-col gap-1 ${className ?? ''}`}>
-      <span className="text-micro text-fg-3">{label}</span>
-      <SecretField label={label} {...rest} />
-    </div>
   )
 }
 
