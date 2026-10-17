@@ -18,9 +18,9 @@ const native = vi.hoisted(() => ({
 vi.mock('./macosCodecScanner', () => ({ scanMacCodecCredentials: native.codec }))
 vi.mock('./macosMemoryScanner', () => ({ scanMacImageAesKey: native.image }))
 vi.mock('./windowsMemoryScanner', () => ({
-  scanWindowsDbKey: native.windowsDatabase,
   scanWindowsImageAesKey: native.windowsImage,
 }))
+vi.mock('./windowsCredentialScanner', () => ({ scanWindowsCredentials: native.windowsDatabase }))
 vi.mock('../discovery/processDetect', () => ({ findWeChatPidSync: native.pid }))
 
 const ACCOUNT_ID = 'fictional-account'
@@ -235,4 +235,66 @@ describe('acquireKeys', () => {
       expect(terminal(result.steps)).toBe(true)
     },
   )
+})
+
+describe('Windows bundle connection', () => {
+  beforeEach(() => {
+    vi.stubGlobal('process', Object.defineProperty(Object.create(process), 'platform', { value: 'win32' }))
+  })
+
+  it('scans the actual inventory once and privately commits the per-file bundle', async () => {
+    const fixture = encryptedAccountFixture(root, ACCOUNT_ID)
+    native.windowsDatabase.mockResolvedValue({ bundle: fixture.bundle })
+    const saved = vi.fn()
+    const result = await acquireKeys({ ...options(), scope: 'database', onDatabaseReady: saved })
+    expect(native.windowsDatabase).toHaveBeenCalledOnce()
+    expect(native.windowsDatabase.mock.calls[0]?.[0].targets.sort()).toEqual(
+      fixture.files.map((file) => file.path).sort(),
+    )
+    expect(saved).toHaveBeenCalledWith({
+      dbKeyHex: fixture.bundle.entries[0]?.keyHex,
+      dbCredentials: fixture.bundle,
+      currentPaths: fixture.bundle.entries.map((entry) => entry.relativePath),
+    })
+    expect(result.dbCredentials).toEqual(fixture.bundle)
+    expect(native.codec).not.toHaveBeenCalled()
+    expect(native.windowsImage).not.toHaveBeenCalled()
+  })
+
+  it('commits partial session coverage and the complete inventory for supplement merging', async () => {
+    const fixture = encryptedAccountFixture(root, ACCOUNT_ID)
+    const partial = { ...fixture.bundle, entries: fixture.bundle.entries.slice(0, 1) }
+    native.windowsDatabase.mockResolvedValue({ bundle: partial })
+    const saved = vi.fn()
+    const result = await acquireKeys({ ...options(), scope: 'database', onDatabaseReady: saved })
+    expect(result.dbCredentials).toEqual(partial)
+    expect(saved.mock.calls[0]?.[0].currentPaths).toHaveLength(fixture.files.length)
+  })
+
+  it.each(['needs_authorization', 'timeout', 'not_found'] as const)('does not commit after %s', async (failure) => {
+    encryptedAccountFixture(root, ACCOUNT_ID)
+    native.windowsDatabase.mockResolvedValue({ failure })
+    const saved = vi.fn()
+    const result = await acquireKeys({ ...options(), scope: 'database', onDatabaseReady: saved })
+    expect(result.steps.find((step) => step.id === 'db_key')?.failure).toBe(failure)
+    expect(saved).not.toHaveBeenCalled()
+  })
+
+  it('does not commit a late result after cancellation', async () => {
+    const fixture = encryptedAccountFixture(root, ACCOUNT_ID)
+    const controller = new AbortController()
+    native.windowsDatabase.mockImplementation(() => {
+      controller.abort()
+      return { bundle: fixture.bundle }
+    })
+    const saved = vi.fn()
+    const result = await acquireKeys({
+      ...options(),
+      scope: 'database',
+      signal: controller.signal,
+      onDatabaseReady: saved,
+    })
+    expect(result.cancelled).toBe(true)
+    expect(saved).not.toHaveBeenCalled()
+  })
 })

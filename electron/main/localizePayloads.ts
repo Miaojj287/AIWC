@@ -27,6 +27,7 @@ export const localizeText = <T extends string | undefined>(text: T): T => {
   const codes: Record<string, string> = {
     WECHAT_DATABASE_CREDENTIALS_MISSING: t('main.substrate.credentialsMissing'),
     WECHAT_DATABASE_CREDENTIALS_INVALID: t('main.substrate.credentialsInvalid'),
+    WECHAT_DATABASE_PAGE_EXTENT_INVALID: t('main.substrate.credentialsInvalid'),
     KEY_HOST_TIMEOUT: t('main.substrate.connectionTimeout'),
     KEY_HOST_SAVE_FAILED: t('main.substrate.credentialsSaveFailed'),
     KEY_HOST_FAILED: t('main.substrate.connectionProbeFailed'),

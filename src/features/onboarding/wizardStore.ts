@@ -113,6 +113,10 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   async hydrate(config) {
     const acc = config.account
+    // A persisted connection already passed consent, even if optional model setup was interrupted.
+    const hasSavedConnection = Boolean(
+      acc.wxid && acc.dbRoot && (acc.dbCredentialsRef || acc.dbKeyRef) && (acc.credentialRevision ?? 0) > 0,
+    )
     get().invalidateTarget()
     let defaultCacheDir = ''
     try {
@@ -131,7 +135,7 @@ export const useWizardStore = create<WizardState>((set, get) => ({
       verifyState: 'idle',
       keys: EMPTY_KEYS,
       keyTarget: acc.wxid && acc.dbRoot ? { wxid: acc.wxid, dbRoot: acc.dbRoot } : undefined,
-      page: config.onboarding.completed ? 'connect' : 'welcome',
+      page: config.onboarding.completed || hasSavedConnection ? 'connect' : 'welcome',
     })
     if (acc.dbRoot) await get().loadAccounts()
     else await get().detect()

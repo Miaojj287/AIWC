@@ -160,9 +160,9 @@ export class SqlcipherBridge implements WcdbBridge {
 
   /**
    * Drop the connection but keep the plaintext copy. A key that is momentarily unknown or different
-   * is not a corruption signal: on Windows every database resolves its own key from the running
-   * WeChat, so `keyFor` returns undefined while WeChat is closed, and deleting the copy there would
-   * throw away minutes of decryption. The copy is named after the database's salt, so a database that
+   * is not a corruption signal: account-scoped credentials may be temporarily unavailable
+   * or replaced without invalidating the source, and deleting the copy there would throw away
+   * minutes of decryption. The copy is named after the database's salt, so a database that
    * was really replaced gets a different file anyway.
    */
   private evict(dbPath: string): void {

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, expect, it, vi } from 'vitest'
 import { defaultConfig, type AiwcBridge, type KeyAcquireStep } from '@aiwc/protocol'
 import { TooltipProvider } from '@/kit'
+import { setLanguage } from '@/i18n'
 import { __setBridgeForTests } from '@/platform/bridge'
 import { __resetConfigStoreForTests, useConfigStore } from '@/platform/configStore'
 import { KeysCard } from './KeysCard'
@@ -13,6 +14,38 @@ afterEach(() => {
   __setBridgeForTests(undefined)
   __resetConfigStoreForTests()
   __resetWizardStoreForTests()
+  setLanguage('zh-CN')
+})
+
+it.each([
+  ['zh-CN', '已解锁 0 / 19 个数据库', '保持微信已登录，点击「连接微信」即可读取聊天记录。'],
+  [
+    'en-US',
+    '0 of 19 databases unlocked',
+    'Keep WeChat signed in, then select "Connect WeChat" to read your chat history.',
+  ],
+] as const)('shows the actual locked count before connection in %s', (language, count, hint) => {
+  setLanguage(language)
+  useWizardStore.setState({
+    hydrated: true,
+    credentials: {
+      database: false,
+      matched: 0,
+      total: 19,
+      missing: ['session/session.db'],
+      revision: 0,
+      imageXor: false,
+      imageAes: false,
+    },
+  })
+  render(
+    <TooltipProvider>
+      <KeysCard returning />
+    </TooltipProvider>,
+  )
+  expect(screen.getByText(count)).toBeTruthy()
+  expect(screen.getByText(hint)).toBeTruthy()
+  expect(useWizardStore.getState().keys.db_key.status).toBe('missing')
 })
 
 it('keeps saved credentials masked in advanced controls and never reveals them', () => {
@@ -200,6 +233,34 @@ function renderCard() {
     </TooltipProvider>,
   )
 }
+
+it.each([
+  ['zh-CN', '进入'],
+  ['en-US', 'Enter'],
+] as const)('labels an authenticated cached connection as entry before model setup in %s', (language, enter) => {
+  setLanguage(language)
+  useWizardStore.setState({
+    hydrated: true,
+    wxid: 'fictional-account',
+    dbRoot: '/root',
+    keys: {
+      db_key: { status: 'acquired', source: 'cached' },
+      image_xor: { status: 'missing' },
+      image_aes: { status: 'missing' },
+    },
+  })
+  const onNext = vi.fn()
+  render(
+    <TooltipProvider>
+      <ConnectStep onBack={() => {}} onNext={onNext} stepsBar={null} />
+    </TooltipProvider>,
+  )
+  const button = screen.getByRole('button', { name: enter })
+  expect(onNext).not.toHaveBeenCalled()
+  expect(button.hasAttribute('disabled')).toBe(false)
+  fireEvent.click(button)
+  expect(onNext).toHaveBeenCalledOnce()
+})
 
 it('names the current stage, with what to do while it waits for a login', async () => {
   const bridge = acquireBridge()

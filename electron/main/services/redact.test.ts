@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
 import { createRedactor, REDACTED } from './redact'
 import { buildDiagnosticsText, exportDiagnostics } from './diagnostics'
 
@@ -124,7 +125,7 @@ describe('diagnostics bundle', () => {
         written = text
       },
     })
-    expect(out).toBe('/out/aiwc-logs-20261011.log')
+    expect(out).toBe(join('/out', 'aiwc-logs-20261011.log'))
     expect(written).toContain('gone.log (read failed: ENOENT ~/logs/gone.log)')
   })
 })

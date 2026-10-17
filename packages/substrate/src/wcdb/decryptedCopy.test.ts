@@ -14,10 +14,12 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SQLCIPHER_PAGE_SIZE } from '../key/sqlcipherPage'
 import { DecryptedCopy } from './decryptedCopy'
 import { PAGE_BODY_END } from './sqlcipherCodec'
+import { encryptedDatabaseFixture } from './testing/encryptedAccountFixture'
 import {
   buildWal,
   encryptPage,
@@ -80,7 +82,101 @@ function pageOf(bytes: Buffer, pageNumber: number): Buffer {
   return bytes.subarray((pageNumber - 1) * PAGE, pageNumber * PAGE)
 }
 
+function writeDeclaredExtent(declared: number, counter = 7, validFor = counter): void {
+  const header = plaintextPage(1, 1)
+  header.writeUInt32BE(declared, 28)
+  header.writeUInt32BE(counter, 24)
+  header.writeUInt32BE(validFor, 92)
+  writePage(dbPath, 1, encryptPage(header, KEY, 1, fixtureIv(11)))
+}
+
 describe('DecryptedCopy', () => {
+  it('reads a real SQLite copy with preallocated zero tail without modifying its source', () => {
+    const fixture = encryptedDatabaseFixture(
+      dbPath,
+      'CREATE TABLE fixture(value INTEGER); INSERT INTO fixture VALUES(37)',
+    )
+    const source = Buffer.concat([readFileSync(dbPath), Buffer.alloc(6 * PAGE)])
+    writeFileSync(dbPath, source)
+    const copy = new DecryptedCopy({ dbPath, cipher: fixtureCipher(fixture.key, fixture.salt), cacheDir })
+    expect(copy.refresh()).toBe(true)
+    expect(statSync(copy.path).size).toBe(fixture.pages.length * PAGE)
+    const database = new DatabaseSync(copy.path, { readOnly: true })
+    try {
+      expect(database.prepare('SELECT value FROM fixture').get()?.['value']).toBe(37)
+    } finally {
+      database.close()
+    }
+    expect(readFileSync(dbPath).equals(source)).toBe(true)
+  })
+
+  it('rejects corruption inside the logical extent even when the cached IV is unchanged', () => {
+    writeDb(3)
+    writeDeclaredExtent(3)
+    const copy = openCopy()
+    copy.refresh()
+    const corrupt = Buffer.from(pageOf(readFileSync(dbPath), 2))
+    corrupt[100] = (corrupt[100] ?? 0) ^ 1
+    writePage(dbPath, 2, corrupt)
+    expect(() => copy.refresh()).toThrow()
+  })
+
+  it.each([
+    [0, 7, 7],
+    [1, 7, 8],
+  ])('copies every physical page when the logical count is invalid (%i/%i/%i)', (declared, counter, validFor) => {
+    writeDb(3)
+    writeDeclaredExtent(declared, counter, validFor)
+    const copy = openCopy()
+    copy.refresh()
+    expect(statSync(copy.path).size).toBe(3 * PAGE)
+  })
+
+  it('refreshes the header when logical size shrinks without changing its IV or physical extent', () => {
+    writeDb(3)
+    writeDeclaredExtent(3)
+    const copy = openCopy()
+    copy.refresh()
+    writeDeclaredExtent(2)
+    expect(copy.refresh()).toBe(true)
+    expect(statSync(copy.path).size).toBe(2 * PAGE)
+    expect(readFileSync(copy.path).readUInt32BE(28)).toBe(2)
+    expect(statSync(dbPath).size).toBe(3 * PAGE)
+  })
+
+  it('preserves WAL growth and shrink commits over a preallocated main file', () => {
+    writeDb(2)
+    writeDeclaredExtent(2)
+    writeFileSync(dbPath, Buffer.concat([readFileSync(dbPath), Buffer.alloc(6 * PAGE)]))
+    touch(dbPath)
+    const copy = openCopy()
+    copy.refresh()
+    writeFileSync(
+      `${dbPath}-wal`,
+      buildWal({
+        frames: [
+          { pageNumber: 3, dbSize: 0, payload: encryptPage(plaintextPage(3, 3), KEY, 3, fixtureIv(33)) },
+          { pageNumber: 4, dbSize: 4, payload: encryptPage(plaintextPage(4, 4), KEY, 4, fixtureIv(34)) },
+        ],
+      }),
+    )
+    touch(`${dbPath}-wal`)
+    expect(copy.refresh()).toBe(true)
+    expect(statSync(copy.path).size).toBe(4 * PAGE)
+    const header = plaintextPage(1, 1)
+    header.writeUInt32BE(1, 28)
+    writeFileSync(
+      `${dbPath}-wal`,
+      buildWal({
+        salt: Buffer.alloc(8, 0x55),
+        frames: [{ pageNumber: 1, dbSize: 1, payload: encryptPage(header, KEY, 1, fixtureIv(35)) }],
+      }),
+    )
+    touch(`${dbPath}-wal`)
+    expect(copy.refresh()).toBe(true)
+    expect(statSync(copy.path).size).toBe(PAGE)
+    expect(statSync(dbPath).size).toBe(8 * PAGE)
+  })
   it('materializes every page of the encrypted database', () => {
     const plain = writeDb(3)
     const copy = openCopy()
@@ -215,13 +311,12 @@ describe('DecryptedCopy', () => {
     expect(readFileSync(copy.path).length).toBe(0)
   })
 
-  it('ignores a torn trailing page while WeChat is extending the file', () => {
+  it('rejects a torn trailing page instead of silently accepting an incomplete physical extent', () => {
     writeDb(2)
     writeFileSync(dbPath, readFileSync(dbPath).subarray(0, PAGE + 100))
     touch(dbPath)
     const copy = openCopy()
-    expect(copy.refresh()).toBe(true)
-    expect(readFileSync(copy.path).length).toBe(PAGE)
+    expect(() => copy.refresh()).toThrow()
   })
 })
 

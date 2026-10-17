@@ -155,9 +155,6 @@ export const known = {
     imageAesMissing: '缺少图片 AES 密钥，请先在设置中获取',
   },
   keys: {
-    wechatNotRunning: '未检测到微信进程，请先登录微信',
-    notInMemory: '内存中未找到匹配的数据库密钥，请在登录后重试',
-    memoryUnreadable: '无法读取微信进程内存（可能需要管理员权限）',
     xorKey: 'XOR 密钥 0x{hex}',
     xorFailed: '未能获取 XOR 密钥',
     aesDone: '图片 AES 密钥获取成功',

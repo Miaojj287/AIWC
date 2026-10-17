@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { accountModifiedTime, isAccountDir } from '../wcdb/dbFiles'
+import { windowsConfiguredRootCandidates } from './windowsRoots'
 
 export interface DbRootCandidate {
   path: string
@@ -66,7 +67,7 @@ export function listAccountDirs(root: string): string[] {
   )
 }
 
-/** Static candidate roots for the platform (existence not checked). */
+/** Platform candidates include optional Windows metadata; account-tree validation happens during scoring. */
 export function defaultRootCandidates(env: RootEnv): string[] {
   const roots: string[] = []
   if (env.platform === 'darwin') {
@@ -83,6 +84,7 @@ export function defaultRootCandidates(env: RootEnv): string[] {
     return roots
   }
   const documents = join(env.userProfile || env.home, 'Documents')
+  if (env.platform === 'win32') roots.push(...windowsConfiguredRootCandidates(env.appData))
   roots.push(join(documents, 'xwechat_files'), join(documents, 'WeChat Files'))
   return roots
 }

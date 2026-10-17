@@ -42,6 +42,8 @@ export function plaintextPage(pageNumber: number, marker: number): Buffer {
     page[21] = 0x40
     page[22] = 0x20
     page[23] = 0x20
+    // Unspecified fixture sizes model SQLite's legacy physical-size fallback, not marker-filled counts.
+    page.writeUInt32BE(0, 28)
   }
   return page
 }

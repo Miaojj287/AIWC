@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-17",
+  "platform": "win32-x64",
+  "electron": "39",
+  "safeStorage": true,
+  "autoDiscoveryWithStandardAppData": true,
+  "before": {
+    "matched": 0,
+    "total": 19,
+    "revision": 0,
+    "openProcessCalls": 0
+  },
+  "firstConnect": {
+    "matched": 15,
+    "total": 19,
+    "revision": 1,
+    "openProcessCalls": 1,
+    "firstObservationAfterClickMs": 12357
+  },
+  "restartWithProcessDenied": {
+    "matched": 15,
+    "total": 19,
+    "revision": 1,
+    "optionalSetupComplete": false,
+    "enterVisible": true,
+    "openProcessCalls": 0,
+    "readerReadyAfterEnter": true
+  },
+  "deniedSupplement": {
+    "matched": 15,
+    "total": 19,
+    "revision": 1,
+    "openProcessCalls": 1,
+    "enterDidNotIncreaseCalls": true
+  },
+  "english": {
+    "connectionContainsCjk": false,
+    "overflowButtons": 0
+  },
+  "generatedHostRestored": true,
+  "validation": {
+    "windowsProductionBuild": "passed",
+    "typecheck": "passed",
+    "repositoryLint": "passed",
+    "knip": "passed",
+    "ownFileFormatting": "passed",
+    "targetedTests": {
+      "files": 38,
+      "passed": 317,
+      "skippedOptInRealDatabaseTests": 2,
+      "hookTimeoutMs": 60000,
+      "exitCode": 0
+    },
+    "repositoryCheck": "failed-at-format-existing-CRLF",
+    "fullSuite": "not-completed-existing-failures-recorded"
+  },
+  "delivery": {
+    "kind": "patch",
+    "baseCommit": "2b8408d",
+    "branch": "REA",
+    "files": 36,
+    "reason": "git-author-identity-not-configured"
+  }
+}

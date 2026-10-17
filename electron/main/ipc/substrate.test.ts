@@ -208,18 +208,23 @@ describe('account verification IPC', () => {
       const credentials = vi.fn(() => ({ config, secrets }))
       const current = setup({ credentials, switch: vi.fn(), isSwitching: () => false })
       vi.mocked(runKeyHost).mockClear()
+      vi.mocked(runKeyHost).mockResolvedValueOnce({
+        database: hasSavedKey,
+        matched: hasSavedKey ? 1 : 0,
+        total: 1,
+        missing: hasSavedKey ? [] : ['session/session.db'],
+      })
       const result = await current.invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
       expect(credentials).toHaveBeenCalledWith({ wxid: 'new', dbRoot: '/new' })
       expect(current.secrets.reveal).not.toHaveBeenCalled()
       expect(result.ok).toBe(hasSavedKey)
-      if (hasSavedKey)
-        expect(runKeyHost).toHaveBeenCalledWith(
-          expect.objectContaining({
-            request: expect.objectContaining({ wxid: 'new', dbRoot: '/new' }),
-            dbKeyHex: 'b'.repeat(64),
-          }),
-        )
-      else expect(runKeyHost).not.toHaveBeenCalled()
+      expect(runKeyHost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          request: expect.objectContaining({ wxid: 'new', dbRoot: '/new' }),
+          dbKeyHex: hasSavedKey ? 'b'.repeat(64) : undefined,
+          operation: 'inspect',
+        }),
+      )
       expect(secrets.has(SECRET_REFS.dbKey)).toBe(hasSavedKey)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -230,9 +235,15 @@ describe('account verification IPC', () => {
     const { invoke, secrets } = setup()
     secrets.reveal.mockReturnValueOnce(undefined)
     vi.mocked(runKeyHost).mockClear()
+    vi.mocked(runKeyHost).mockResolvedValueOnce({
+      database: false,
+      matched: 0,
+      total: 1,
+      missing: ['session/session.db'],
+    })
     const result = await invoke('substrate:verifyAccount', { wxid: 'new', dbRoot: '/new' })
     expect(result).toEqual({ ok: false, error: t('main.substrate.accountKeyMissing') })
-    expect(runKeyHost).not.toHaveBeenCalled()
+    expect(runKeyHost).toHaveBeenCalledWith(expect.objectContaining({ operation: 'inspect', dbKeyHex: undefined }))
   })
 
   it('guides the user to reacquire the key when database verification fails', async () => {

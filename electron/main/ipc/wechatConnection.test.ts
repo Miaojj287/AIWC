@@ -20,6 +20,31 @@ function setup() {
 }
 const request = (wxid: string) => ({ wxid, dbRoot: '/fictional', scope: 'database' })
 
+it('reports the actual locked inventory before credentials exist without starting acquisition', async () => {
+  const coverage = {
+    database: false,
+    matched: 0,
+    total: 3,
+    missing: ['session/session.db', 'contact/contact.db', 'message/message_0.db'],
+  }
+  vi.mocked(runKeyHost).mockReset().mockResolvedValue(coverage)
+  const { connection, ctx } = setup()
+  expect(await connection.inspect({ wxid: 'account-a', dbRoot: '/fictional' })).toEqual({
+    ...coverage,
+    revision: 0,
+    imageXor: false,
+    imageAes: false,
+  })
+  expect(runKeyHost).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      operation: 'inspect',
+      request: { wxid: 'account-a', dbRoot: '/fictional', strategy: 'auto', scope: 'database' },
+    }),
+  )
+  expect(ctx.secrets.set).not.toHaveBeenCalled()
+  expect(ctx.broadcast).not.toHaveBeenCalled()
+})
+
 describe('explicit connection acquisition scheduling', () => {
   it('cancels every queued request before any process access starts', async () => {
     vi.mocked(runKeyHost).mockReset().mockResolvedValue({ steps: [] })

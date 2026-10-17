@@ -118,7 +118,7 @@ export function ConnectStep({ onBack, onNext, stepsBar, headingRef, returning = 
             ? t('onboarding.connect.testing')
             : acquiring
               ? t('onboarding.connection.connecting')
-              : returning && hasDatabase
+              : hasDatabase
                 ? t('onboarding.connect.enter')
                 : t('onboarding.connection.connect')}
         </Button>

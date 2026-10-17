@@ -1,0 +1,112 @@
+{
+  "date": "2026-10-18",
+  "platform": "win32-x64",
+  "clientVersion": "4.1.15.53",
+  "electron": "39",
+  "rootCause": "authenticated-logical-extent-versus-windows-physical-preallocation",
+  "reaBaseline": "2b8408d",
+  "processAndSourceReadOnly": true,
+  "wechatLoginStateChanged": false,
+  "realKeyMaterialEmitted": false,
+  "safeStorage": true,
+  "encryptedSecretFiles": 2,
+  "freshConnection": {
+    "before": {
+      "matched": 0,
+      "total": 19,
+      "revision": 0
+    },
+    "after": {
+      "matched": 19,
+      "total": 19,
+      "revision": 1
+    },
+    "openProcessCalls": 1,
+    "firstConfirmedAfterClickMs": 17769,
+    "timingMeaning": "observation-upper-bound-including-account-environment-restart"
+  },
+  "supplement": {
+    "before": {
+      "matched": 15,
+      "total": 19,
+      "revision": 1
+    },
+    "after": {
+      "matched": 19,
+      "total": 19,
+      "revision": 2
+    },
+    "openProcessCalls": 1,
+    "firstConfirmedAfterClickMs": 16049,
+    "existingCachePreserved": true
+  },
+  "fullRestartWithProcessDenied": {
+    "coverage": {
+      "matched": 19,
+      "total": 19,
+      "revision": 2
+    },
+    "outerEnterVisible": true,
+    "openProcessCalls": 0,
+    "safeStorage": true,
+    "messages": {
+      "sessions": 8,
+      "messages": 116,
+      "failed": 0
+    }
+  },
+  "messagePagination": {
+    "sessions": 8,
+    "readableSessions": 8,
+    "sessionsWithMessages": 6,
+    "messages": 116,
+    "pages": 8,
+    "failures": 0,
+    "stalled": 0,
+    "connection": "ready",
+    "syncPhase": "idle"
+  },
+  "ui": {
+    "opened": 8,
+    "failed": 0,
+    "english": {
+      "enterVisible": true,
+      "buttonOverflows": 0
+    }
+  },
+  "fullLogicalPageRead": {
+    "databases": 19,
+    "schemaReadable": 19,
+    "integrityPassed": 17,
+    "fts5IntegritySqlLogicErrors": 2,
+    "rawRows": 117,
+    "sourceMessages": 116,
+    "unlistedTables": 1,
+    "unlistedRows": 1,
+    "sourceReadErrors": 0,
+    "excludedSystemRows": 1,
+    "excludedSystemIdentityMatched": true
+  },
+  "researchTiming": {
+    "singleReadOnlyTraversalMs": 1654,
+    "totalExtentVerificationMs": 4884
+  },
+  "generatedHostsRestored": true,
+  "validation": {
+    "windowsProductionBuild": "passed",
+    "targeted": {
+      "files": 42,
+      "passedFiles": 40,
+      "skippedFiles": 2,
+      "passedTests": 365,
+      "skippedTests": 4,
+      "exitCode": 0
+    },
+    "repositoryCheck": "failed-at-format-existing-CRLF-1429-files",
+    "fullSuite": "earlier-attempts-not-completed-existing-failures-in-original-report",
+    "repositoryLint": "passed",
+    "knip": "passed",
+    "typecheck": "passed"
+  },
+  "userVerifiedMessageReadability": true
+}

@@ -67,7 +67,14 @@ export function KeysCard({ onConnect, returning = false }: { onConnect?: () => v
                 : t('onboarding.connection.reuse')}
         </InlineHint>
       ) : (
-        <span className="text-caption text-fg-3">{t('onboarding.connection.startHint')}</span>
+        <div className="flex flex-col gap-1">
+          {credentials && credentials.total > 0 ? (
+            <span className="text-caption text-fg-2">
+              {t('onboarding.connection.complete', { matched: credentials.matched, total: credentials.total })}
+            </span>
+          ) : null}
+          <span className="text-caption text-fg-3">{t('onboarding.connection.startHint')}</span>
+        </div>
       )}
       {!checking && cachedEntry ? (
         <span className="text-caption text-fg-3">{t('onboarding.connection.cachedEntry')}</span>

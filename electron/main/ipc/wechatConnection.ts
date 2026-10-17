@@ -23,16 +23,13 @@ export function createWechatConnection(ctx: AppContext, host: HostBridge) {
   const inspect = async (target: AccountTarget): Promise<WechatCredentialStatus> => {
     const saved = credentials(target)
     const material = readWechatCredentials(saved, target.wxid)
-    const result =
-      !material.dbKeyHex && !material.dbCredentials
-        ? { database: false, matched: 0, total: 0, missing: [] }
-        : await runKeyHost({
-            entry,
-            nativeDir: ctx.paths.nativeDir,
-            request: { wxid: target.wxid, dbRoot: target.dbRoot, strategy: 'auto', scope: 'database' },
-            operation: 'inspect',
-            ...material,
-          })
+    const result = await runKeyHost({
+      entry,
+      nativeDir: ctx.paths.nativeDir,
+      request: { wxid: target.wxid, dbRoot: target.dbRoot, strategy: 'auto', scope: 'database' },
+      operation: 'inspect',
+      ...material,
+    })
     const coverage = WechatDatabaseCoverageSchema.parse(result)
     const account = saved.config.get().account
     return {

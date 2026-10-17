@@ -59,16 +59,18 @@ describe('inspectDbCredentials', () => {
     })
   })
 
-  it('keeps removed saved databases visible as missing coverage', () => {
+  it('counts only databases currently on disk while retaining the saved bundle', () => {
     const session = file('session/session.db')
     const contact = file('contact/contact.db')
     rmSync(join(root, ACCOUNT_ID, 'db_storage', contact.relativePath))
+    const bundle: WechatDbCredentialBundle = { version: 1, accountId: ACCOUNT_ID, entries: [session, contact] }
     expect(
       inspectDbCredentials({
         dbRoot: root,
         wxid: ACCOUNT_ID,
-        dbCredentials: { version: 1, accountId: ACCOUNT_ID, entries: [session, contact] },
+        dbCredentials: bundle,
       }),
-    ).toEqual({ database: true, matched: 1, total: 2, missing: ['contact/contact.db'] })
+    ).toEqual({ database: true, matched: 1, total: 1, missing: [] })
+    expect(bundle.entries).toHaveLength(2)
   })
 })

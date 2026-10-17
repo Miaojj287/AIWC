@@ -1,4 +1,4 @@
-import { join, relative, sep } from 'node:path'
+import { relative, sep } from 'node:path'
 import { realpathSync } from 'node:fs'
 import type { WechatDbCredentialBundle } from '@aiwc/protocol'
 import { findSessionDbCandidates, resolveDbStoragePath } from '../wcdb/dbFiles'
@@ -32,10 +32,6 @@ export function inspectDbCredentials(opts: CredentialCoverageOptions): Credentia
     sessionKeyHex: opts.dbKeyHex ?? '',
     dbCredentials: opts.dbCredentials,
   })
-  for (const entry of opts.dbCredentials?.entries ?? []) {
-    const saved = join(storage, ...entry.relativePath.split('/'))
-    if (!files.includes(saved)) files.push(saved)
-  }
   const status: CredentialCoverage = { database: false, matched: 0, total: files.length, missing: [] }
   try {
     for (const file of files) {

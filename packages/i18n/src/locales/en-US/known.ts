@@ -148,9 +148,6 @@ export const known: Messages['known'] = {
     imageAesMissing: 'The image AES key is missing. Get it in Settings first.',
   },
   keys: {
-    wechatNotRunning: 'WeChat is not running. Log in to WeChat first.',
-    notInMemory: 'No matching database key in memory. Try again after logging in.',
-    memoryUnreadable: "Can't read WeChat process memory (administrator rights may be required)",
     xorKey: 'XOR key 0x{hex}',
     xorFailed: "Couldn't get the XOR key",
     aesDone: 'Image AES key retrieved',

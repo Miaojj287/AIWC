@@ -36,6 +36,57 @@ it('loads selected account capabilities without revealing any saved key', async 
   expect(useWizardStore.getState()).toMatchObject({ credentials: available, verifyState: 'verified' })
 })
 
+it.each([true, false])(
+  'returns a saved connection to the connection page before optional model setup (usable: %s)',
+  async (usable) => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'substrate:credentialStatus') return usable ? available : missing
+      if (channel === 'substrate:listAccounts') return [{ wxid: 'selected', dbRoot: '/saved', verified: false }]
+      return { dataDir: '/app' }
+    })
+    __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+    const config = defaultConfig()
+    await useWizardStore.getState().hydrate({
+      ...config,
+      account: {
+        ...config.account,
+        wxid: 'selected',
+        dbRoot: '/saved',
+        dbCredentialsRef: 'account.dbCredentials',
+        credentialRevision: 1,
+      },
+    })
+    expect(useWizardStore.getState()).toMatchObject({
+      page: 'connect',
+      verifyState: usable ? 'verified' : 'idle',
+      credentials: usable ? available : missing,
+    })
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'app:getInfo',
+      'substrate:listAccounts',
+      'substrate:credentialStatus',
+    ])
+  },
+)
+
+it.each([{}, { dbCredentialsRef: 'account.dbCredentials' }, { credentialRevision: 1 }])(
+  'keeps account drafts on the consent page without a committed connection (%o)',
+  async (saved) => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'substrate:credentialStatus') return missing
+      if (channel === 'substrate:listAccounts') return [{ wxid: 'selected', dbRoot: '/saved', verified: false }]
+      return { dataDir: '/app' }
+    })
+    __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+    const config = defaultConfig()
+    await useWizardStore.getState().hydrate({
+      ...config,
+      account: { ...config.account, wxid: 'selected', dbRoot: '/saved', ...saved },
+    })
+    expect(useWizardStore.getState().page).toBe('welcome')
+  },
+)
+
 it('does not restore old coverage when a capability check finishes after database credentials were cleared', async () => {
   const result = Promise.withResolvers<WechatCredentialStatus>()
   const invoke = vi.fn((channel: string) =>
@@ -135,6 +186,58 @@ it('connects in one user action after acquiring database access without waiting 
     dbRoot: '/root',
     strategy: 'auto',
     scope: 'database',
+  })
+})
+
+it.each(['needs_authorization', 'timeout', 'unexpected'] as const)(
+  'preserves cached database entry after a supplement fails with %s',
+  async (failure) => {
+    const failed: KeyAcquireStep[] = [
+      { id: 'db_key', label: '', status: 'failed', failure },
+      { id: 'verify', label: '', status: 'failed', failure: 'skipped' },
+    ]
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'substrate:credentialStatus') return available
+      if (channel === 'substrate:acquireKeys') {
+        if (failure === 'unexpected') throw new Error('KEY_HOST_FAILED')
+        return failed
+      }
+      return { ok: true }
+    })
+    __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+    useWizardStore.setState({ wxid: 'selected', dbRoot: '/root' })
+    await useWizardStore.getState().loadCredentials()
+    await useWizardStore.getState().acquire('auto', 'database')
+    expect(useWizardStore.getState()).toMatchObject({
+      acquiring: false,
+      acquireFailed: true,
+      credentials: available,
+      keys: { db_key: { status: 'acquired', source: 'cached' } },
+    })
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'substrate:credentialStatus')).toHaveLength(2)
+    expect(await useWizardStore.getState().enter()).toBe(true)
+    expect(invoke.mock.calls.some(([channel]) => channel.startsWith('secret:'))).toBe(false)
+  },
+)
+
+it('revokes cached entry when verification after failed supplement finds replaced credentials', async () => {
+  let status = available
+  const invoke = vi.fn(async (channel: string) =>
+    channel === 'substrate:credentialStatus'
+      ? status
+      : [
+          { id: 'db_key', label: '', status: 'failed', failure: 'not_found' },
+          { id: 'verify', label: '', status: 'failed', failure: 'skipped' },
+        ],
+  )
+  __setBridgeForTests({ invoke, on: () => () => {} } as unknown as AiwcBridge)
+  useWizardStore.setState({ wxid: 'selected', dbRoot: '/root' })
+  await useWizardStore.getState().loadCredentials()
+  status = missing
+  await useWizardStore.getState().acquire('auto', 'database')
+  expect(useWizardStore.getState()).toMatchObject({
+    credentials: missing,
+    keys: { db_key: { status: 'missing' } },
   })
 })
 

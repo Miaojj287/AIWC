@@ -31,8 +31,9 @@ import {
 import { basename, join } from 'node:path'
 import { SQLCIPHER_PAGE_SIZE } from '../key/sqlcipherPage'
 import type { WcdbLogger } from './bridge'
-import { decryptPageInto, PAGE_BODY_END, type PageCipher } from './sqlcipherCodec'
+import { decryptPageInto, pageHmacMatches, PAGE_BODY_END, type PageCipher } from './sqlcipherCodec'
 import { readWalSnapshot, walPageCeiling, type WalSnapshot } from './sqliteWal'
+import { authenticatedMainPageCount } from './sqlitePageExtent'
 
 const PAGE = SQLCIPHER_PAGE_SIZE
 /** Pages per read/write batch (512 KiB). */
@@ -214,41 +215,71 @@ export class DecryptedCopy {
     if (pages === 0) return
     this.ensureIvs(pages)
     const chunk = Buffer.allocUnsafe(Math.min(pages, PAGES_PER_CHUNK) * PAGE)
-    for (let first = 1; first <= pages; first += PAGES_PER_CHUNK) {
-      const count = Math.min(PAGES_PER_CHUNK, pages - first + 1)
-      const read = readSync(fd, chunk, 0, count * PAGE, (first - 1) * PAGE)
-      for (let slot = 0; slot < Math.floor(read / PAGE); slot += 1) {
-        const from = slot * PAGE + PAGE_BODY_END
-        chunk.copy(this.ivs, (first - 1 + slot) * IV_PREFIX, from, from + IV_PREFIX)
+    try {
+      for (let first = 1; first <= pages; first += PAGES_PER_CHUNK) {
+        const count = Math.min(PAGES_PER_CHUNK, pages - first + 1)
+        const read = readSync(fd, chunk, 0, count * PAGE, (first - 1) * PAGE)
+        for (let slot = 0; slot < Math.floor(read / PAGE); slot += 1) {
+          const from = slot * PAGE + PAGE_BODY_END
+          chunk.copy(this.ivs, (first - 1 + slot) * IV_PREFIX, from, from + IV_PREFIX)
+        }
       }
+    } finally {
+      chunk.fill(0)
     }
     this.pages = pages
     this.mainPages = pages
   }
 
   private copyMainPages(target: number): boolean {
+    const firstPage = Buffer.alloc(PAGE)
+    const savedTail = Buffer.alloc(PAGE - PAGE_BODY_END)
+    const input = Buffer.alloc(PAGES_PER_CHUNK * PAGE)
+    const output = Buffer.alloc(PAGES_PER_CHUNK * PAGE)
     const src = openSync(this.dbPath, 'r')
     try {
-      const pages = Math.floor(fstatSync(src).size / PAGE)
+      const physicalBytes = fstatSync(src).size
+      if (physicalBytes === 0) {
+        // An emptied source must not leave readable historical plaintext behind in our cache.
+        this.mainPages = 0
+        return false
+      }
+      if (readSync(src, firstPage, 0, PAGE, 0) !== PAGE) throw new Error('WECHAT_DATABASE_PAGE_EXTENT_INVALID')
+      const pages = authenticatedMainPageCount(firstPage, this.cipher, physicalBytes)
+      if (pages === undefined) throw new Error('WECHAT_DATABASE_PAGE_EXTENT_INVALID')
+      // A logical shrink can rewrite the header with the same IV; its authenticated tail still changes.
+      const forceHeader =
+        readSync(target, savedTail, 0, savedTail.length, PAGE_BODY_END) !== savedTail.length ||
+        !savedTail.equals(firstPage.subarray(PAGE_BODY_END))
       this.ensureIvs(pages)
-      const input = Buffer.allocUnsafe(PAGES_PER_CHUNK * PAGE)
-      const output = Buffer.allocUnsafe(PAGES_PER_CHUNK * PAGE)
       let changed = false
       for (let first = 1; first <= pages; first += PAGES_PER_CHUNK) {
         const count = Math.min(PAGES_PER_CHUNK, pages - first + 1)
         const read = readSync(src, input, 0, count * PAGE, (first - 1) * PAGE)
-        changed = this.copyChunk(target, input, output, first, Math.floor(read / PAGE)) || changed
+        if (read !== count * PAGE) throw new Error('WECHAT_DATABASE_PAGE_EXTENT_INVALID')
+        changed = this.copyChunk(target, input, output, first, count, forceHeader) || changed
       }
       this.mainPages = pages
       this.pages = Math.max(this.pages, pages)
       return changed
     } finally {
+      firstPage.fill(0)
+      savedTail.fill(0)
+      input.fill(0)
+      output.fill(0)
       closeSync(src)
     }
   }
 
   /** Decrypt the changed pages of one chunk and write them back as contiguous runs. */
-  private copyChunk(target: number, input: Buffer, output: Buffer, firstPage: number, available: number): boolean {
+  private copyChunk(
+    target: number,
+    input: Buffer,
+    output: Buffer,
+    firstPage: number,
+    available: number,
+    forceHeader: boolean,
+  ): boolean {
     let changed = false
     let runStart = -1
     const flush = (endSlot: number): void => {
@@ -261,7 +292,11 @@ export class DecryptedCopy {
       const pageNumber = firstPage + slot
       const page = input.subarray(slot * PAGE, (slot + 1) * PAGE)
       const iv = page.subarray(PAGE_BODY_END, PAGE_BODY_END + IV_PREFIX)
-      if (pageNumber <= this.pages && this.ivMatches(pageNumber, iv)) {
+      if (this.cipher.hmacKey && !pageHmacMatches(this.cipher.hmacKey, page, pageNumber)) {
+        flush(slot)
+        throw new Error(`数据库页解密失败（第 ${pageNumber} 页）`)
+      }
+      if (pageNumber <= this.pages && !(forceHeader && pageNumber === 1) && this.ivMatches(pageNumber, iv)) {
         flush(slot)
         continue
       }
@@ -308,6 +343,8 @@ export class DecryptedCopy {
         changed = true
       }
     } finally {
+      input.fill(0)
+      output.fill(0)
       closeSync(fd)
     }
     return changed

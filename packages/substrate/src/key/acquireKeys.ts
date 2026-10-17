@@ -9,20 +9,13 @@
 import type { KeyAcquireFailure, KeyAcquireScope, KeyAcquireStep, WechatDbCredentialBundle } from '@aiwc/protocol'
 import { relative } from 'node:path'
 import { realpathSync } from 'node:fs'
-import {
-  findMessageShards,
-  findNamedDb,
-  findSessionDbCandidates,
-  resolveAccountDir,
-  resolveDbStoragePath,
-} from '../wcdb/dbFiles'
+import { findSessionDbCandidates, resolveAccountDir, resolveDbStoragePath } from '../wcdb/dbFiles'
 import { cleanAccountDirName } from '../wcdb/accountUtils'
 import { findWeChatPidSync } from '../discovery/processDetect'
-import { verifyDbKey } from './sqlcipherPage'
-import { validateKeyHexDetailed } from './validateKeyHex'
 import { resolveImageKeys } from './imageKeys'
 import { scanMacImageAesKey } from './macosMemoryScanner'
-import { scanWindowsDbKey, scanWindowsImageAesKey } from './windowsMemoryScanner'
+import { scanWindowsImageAesKey } from './windowsMemoryScanner'
+import { scanWindowsCredentials } from './windowsCredentialScanner'
 import { scanMacCodecCredentials } from './macosCodecScanner'
 import { credentialDatabaseFiles } from './credentialFiles'
 import { StepTracker } from './stepTracker'
@@ -65,54 +58,6 @@ export interface AcquireKeysResult {
 
 const isAbort = (error: unknown): boolean =>
   error instanceof Error && (error.name === 'AbortError' || (error as { code?: string }).code === 'ABORT_ERR')
-
-/**
- * The databases this one key has to open. The reader needs all of them, and every SQLCipher file has
- * its own salt, so verifying only `session.db` would accept a key that cannot read a single message
- * (see verifyDbKeyAcross). Missing files are simply left out.
- */
-function accountDbTargets(dbStoragePath: string): string[] {
-  return [
-    ...findSessionDbCandidates(dbStoragePath).slice(0, 1),
-    findNamedDb(dbStoragePath, 'contact.db'),
-    findMessageShards(dbStoragePath)[0]?.dbPath,
-  ].filter((path): path is string => !!path)
-}
-
-async function acquireDbKey(
-  opts: AcquireKeysOptions,
-  dbStoragePath: string,
-  tracker: StepTracker,
-): Promise<string | undefined> {
-  const timeout = opts.dbKeyTimeoutMs ?? DB_SCAN_TIMEOUT_MS
-
-  if (process.platform === 'darwin') return undefined
-
-  if (process.platform === 'win32') {
-    const pid = findWeChatPidSync()
-    if (!pid) {
-      tracker.fail('db_key', '未检测到微信进程，请先登录微信', 'wechat_not_running')
-      return undefined
-    }
-    const sessionDb = findSessionDbCandidates(dbStoragePath)[0]
-    if (!sessionDb) {
-      tracker.fail('db_key', '未找到 session.db')
-      return undefined
-    }
-    tracker.phase('db_key', 'reading_memory')
-    // Synchronous native scan bounded by its own deadline (it cannot observe `signal` mid-scan).
-    const scan = scanWindowsDbKey(pid, sessionDb, Date.now() + timeout, accountDbTargets(dbStoragePath))
-    if (scan.key) {
-      return scan.key
-    }
-    if (scan.opened) tracker.fail('db_key', '内存中未找到匹配的数据库密钥，请在登录后重试', 'not_found')
-    else tracker.fail('db_key', '无法读取微信进程内存（可能需要管理员权限）', 'needs_authorization')
-    return undefined
-  }
-
-  tracker.fail('db_key', undefined, 'unsupported_version')
-  return undefined
-}
 
 async function acquireImageKeys(
   opts: AcquireKeysOptions,
@@ -217,7 +162,7 @@ async function acquireVerifiedDatabase(
   tracker: StepTracker,
 ): Promise<{ dbKeyHex: string; dbCredentials?: WechatDbCredentialBundle; currentPaths?: string[] } | undefined> {
   tracker.phase('db_key', 'reading_memory')
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' || process.platform === 'win32') {
     const canonicalStorage = realpathSync(storage)
     const pid = findWeChatPidSync()
     if (!pid) {
@@ -229,13 +174,14 @@ async function acquireVerifiedDatabase(
       tracker.fail('db_key', undefined, 'not_found')
       return undefined
     }
-    const result = await scanMacCodecCredentials({
+    const scan = process.platform === 'darwin' ? scanMacCodecCredentials : scanWindowsCredentials
+    const result = await scan({
       pid,
       nativeDir: opts.nativeDir,
       dbStoragePath: canonicalStorage,
       accountId: opts.wxid,
       targets,
-      timeoutMs: opts.dbKeyTimeoutMs,
+      timeoutMs: opts.dbKeyTimeoutMs ?? DB_SCAN_TIMEOUT_MS,
       signal: opts.signal,
     })
     const sessionPaths = findSessionDbCandidates(canonicalStorage)
@@ -253,17 +199,6 @@ async function acquireVerifiedDatabase(
       currentPaths: targets.map((path) => relative(canonicalStorage, path).split('\\').join('/')),
     }
   }
-  const dbKeyHex = await acquireDbKey(opts, storage, tracker)
-  if (!dbKeyHex) {
-    tracker.fail('verify', undefined, 'skipped')
-    return undefined
-  }
-  tracker.phase('verify', 'verifying')
-  const check = validateKeyHexDetailed(dbKeyHex)
-  const target = findSessionDbCandidates(storage)[0]
-  if (!check.ok || !target || !verifyDbKey(target, dbKeyHex).ok) {
-    tracker.fail('verify', undefined, 'not_found')
-    return undefined
-  }
-  return { dbKeyHex: check.normalized ?? dbKeyHex }
+  tracker.fail('db_key', undefined, 'unsupported_version')
+  return undefined
 }

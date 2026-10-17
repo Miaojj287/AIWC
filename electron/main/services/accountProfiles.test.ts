@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createAutoReplyRecordStore } from '@aiwc/gateway'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { platform, tmpdir } from 'node:os'
+import { dirname, join, relative } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { createPaths, ensureDirs, defaultAllowedRoots, substrateCacheDir } from '../paths'
 import { createConfigService } from '../config/configService'
@@ -70,7 +70,7 @@ it('hashes untrusted account identifiers instead of using them as path segments'
   const config = createConfigService({ file: profile.paths.configFile })
   profile.select({ ...config.get(), account: { credentialRevision: 0, wxid: '../../outside', dbRoot: '/wechat' } })
   const next = openAccountProfile(base)
-  expect(next.paths.dataRoot.startsWith(join(base.dataRoot, 'accounts') + '/')).toBe(true)
+  expect(dirname(next.paths.dataRoot)).toBe(join(base.dataRoot, 'accounts'))
   expect(next.paths.dataRoot).not.toContain('outside')
 })
 
@@ -88,8 +88,10 @@ it('denies another profile even after a parent directory grant and resolves syml
   expect(access.allowList.isAllowed(b.composerDraftsFile)).toBe(false)
   expect(access.allowList.isAllowed(base.composerDraftsFile)).toBe(false)
   const link = join(a.paths.workspaceDir, 'linked-draft')
-  symlinkSync(b.composerDraftsFile, link)
-  await expect(resolveAllowedExisting(access.allowList, link)).rejects.toThrow()
+  // A directory junction tests the same realpath escape without Windows file-symlink privileges.
+  symlinkSync(b.dataRoot, link, platform() === 'win32' ? 'junction' : 'dir')
+  const linkedDraft = join(link, relative(b.dataRoot, b.composerDraftsFile))
+  await expect(resolveAllowedExisting(access.allowList, linkedDraft)).rejects.toThrow()
   expect(access.protectedPaths()).toContain(b.dataRoot)
 })
 

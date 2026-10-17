@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, parse } from 'node:path'
+import { platform, tmpdir } from 'node:os'
+import { join, parse, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   pathDeniedMessage,
@@ -41,19 +41,19 @@ describe('path allow-list', () => {
     expect(al.isAllowed('/Users/me/Downloads/x.md')).toBe(false)
     expect(al.addRoot('/Users/me/Downloads/')).toBe(true)
     expect(al.isAllowed('/Users/me/Downloads/x.md')).toBe(true)
-    expect(al.roots()).toContain('/Users/me/Downloads')
+    expect(al.roots()).toContain(resolve('/Users/me/Downloads'))
   })
 
   it('refuses the filesystem root and the home directory as roots (initial and added)', () => {
     const al = createAllowList(['/', '/Users/me', '/data/aiwc'], { home: '/Users/me' })
-    expect(al.roots()).toEqual(['/data/aiwc'])
+    expect(al.roots()).toEqual([resolve('/data/aiwc')])
     expect(al.addRoot('/')).toBe(false)
     expect(al.addRoot('/Users/me/')).toBe(false)
     expect(al.addRoot('/Users/me/../me')).toBe(false)
     expect(al.addRoot('')).toBe(false)
     expect(al.isAllowed('/etc/passwd')).toBe(false)
     expect(al.isAllowed('/Users/me/.ssh/id_rsa')).toBe(false)
-    expect(al.roots()).toEqual(['/data/aiwc'])
+    expect(al.roots()).toEqual([resolve('/data/aiwc')])
     expect(isForbiddenRoot('/', '/Users/me')).toBe(true)
     expect(isForbiddenRoot('/Users/me', '/Users/me')).toBe(true)
     expect(isForbiddenRoot('/Users/me/Documents', '/Users/me')).toBe(false)
@@ -102,10 +102,18 @@ describe('symlink-aware resolution (app:openPath / file:*)', () => {
     writeFileSync(join(root, 'inside.txt'), 'ok')
     writeFileSync(join(outside, 'secret.txt'), 'secret')
     mkdirSync(join(root, 'sub'))
-    symlinkSync(join(outside, 'secret.txt'), join(root, 'link-file'))
-    symlinkSync(outside, join(root, 'link-dir'))
-    symlinkSync(join(root, 'inside.txt'), join(root, 'link-inside'))
-    symlinkSync(join(root, 'sub'), join(root, 'link-sub'))
+    writeFileSync(join(root, 'sub', 'inside.txt'), 'ok')
+    // Junctions keep the real filesystem boundary checks active without Windows symlink privileges.
+    if (platform() === 'win32') {
+      symlinkSync(outside, join(root, 'link-file'), 'junction')
+      symlinkSync(join(root, 'sub'), join(root, 'link-inside'), 'junction')
+    } else {
+      symlinkSync(join(outside, 'secret.txt'), join(root, 'link-file'))
+      symlinkSync(join(root, 'inside.txt'), join(root, 'link-inside'))
+    }
+    const directoryLinkType = platform() === 'win32' ? 'junction' : 'dir'
+    symlinkSync(outside, join(root, 'link-dir'), directoryLinkType)
+    symlinkSync(join(root, 'sub'), join(root, 'link-sub'), directoryLinkType)
   })
   afterAll(() => {
     rmSync(root, { recursive: true, force: true })
@@ -115,8 +123,11 @@ describe('symlink-aware resolution (app:openPath / file:*)', () => {
 
   it('openPath / read: follows symlinks and refuses when the real path leaves the allow-list', async () => {
     await expect(resolveAllowedExisting(al(), join(root, 'inside.txt'))).resolves.toBe(join(root, 'inside.txt'))
-    await expect(resolveAllowedExisting(al(), join(root, 'link-inside'))).resolves.toBe(join(root, 'inside.txt'))
-    await expect(resolveAllowedExisting(al(), join(root, 'link-file'))).rejects.toThrow(pathDeniedMessage())
+    const insideLink = platform() === 'win32' ? join(root, 'link-inside', 'inside.txt') : join(root, 'link-inside')
+    const insideTarget = platform() === 'win32' ? join(root, 'sub', 'inside.txt') : join(root, 'inside.txt')
+    await expect(resolveAllowedExisting(al(), insideLink)).resolves.toBe(insideTarget)
+    const outsideLink = platform() === 'win32' ? join(root, 'link-file', 'secret.txt') : join(root, 'link-file')
+    await expect(resolveAllowedExisting(al(), outsideLink)).rejects.toThrow(pathDeniedMessage())
     await expect(resolveAllowedExisting(al(), join(root, 'link-dir', 'secret.txt'))).rejects.toThrow(
       pathDeniedMessage(),
     )

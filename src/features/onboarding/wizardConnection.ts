@@ -1,4 +1,4 @@
-import { WechatCredentialStatusSchema, type KeyAcquireScope } from '@aiwc/protocol'
+import { WechatCredentialStatusSchema, type KeyAcquireScope, type KeyAcquireStep } from '@aiwc/protocol'
 import { t } from '@/i18n'
 import { getBridge } from '@/platform/bridge'
 import { invoke } from '@/platform/hooks'
@@ -12,6 +12,13 @@ type ConnectionActions = Pick<
   'loadCredentials' | 'invalidateTarget' | 'acquire' | 'cancelAcquire' | 'connect' | 'testAndFinish' | 'enter'
 >
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+function applyAcquisitionSteps(state: WizardState, steps: readonly KeyAcquireStep[]) {
+  const keys = applyKeySteps(state.keys, steps)
+  // A failed supplement does not revoke persisted credentials; the capability check decides that.
+  if (state.credentials?.database && hasKey(state.keys.db_key)) keys.db_key = state.keys.db_key
+  return keys
+}
 
 /** Coordinate explicit acquisition and account-bound cached capabilities without exposing secrets. */
 export function createWizardConnectionActions(get: () => WizardState, set: SetWizard): ConnectionActions {
@@ -138,12 +145,12 @@ export function createWizardConnectionActions(get: () => WizardState, set: SetWi
         acquireFailed: steps.some(
           (step) => step.status === 'failed' && step.failure !== 'cancelled' && step.failure !== 'skipped',
         ),
-        keys: applyKeySteps(state.keys, steps),
+        keys: applyAcquisitionSteps(state, steps),
         keyTarget: verified ? { wxid, dbRoot } : state.keyTarget,
         permissionDialog: needsPermission(steps),
         verifyState: verified ? 'verified' : state.verifyState,
       }))
-      if (steps.some((step) => step.status === 'done')) await loadCredentials()
+      if (get().credentials?.database || steps.some((step) => step.status === 'done')) await loadCredentials()
     } catch (error) {
       if (!current()) return
       const steps = closeKeySteps(get().acquireSteps, 'unexpected', errorText(error), scope)
@@ -151,9 +158,10 @@ export function createWizardConnectionActions(get: () => WizardState, set: SetWi
         acquiring: false,
         acquireSteps: steps,
         acquireFailed: true,
-        keys: applyKeySteps(state.keys, steps),
+        keys: applyAcquisitionSteps(state, steps),
         permissionDialog: needsPermission(steps),
       }))
+      if (get().credentials?.database) await loadCredentials()
     } finally {
       off?.()
     }

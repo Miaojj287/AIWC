@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { platform, tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import type { WechatDbCredentialBundle } from '@aiwc/protocol'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -188,8 +188,10 @@ describe('createDbKeyResolver', () => {
       const salt = randomBytes(16)
       const outsidePath = join(outside, 'session.db')
       writeFileSync(outsidePath, encryptPage(plaintextPage(1, 0x42), key, 1, fixtureIv(1), salt))
-      const path = join(root, 'session.db')
-      symlinkSync(outsidePath, path)
+      // Directory junctions exercise the same realpath guard without Windows symlink privileges.
+      const link = join(root, 'outside')
+      symlinkSync(outside, link, platform() === 'win32' ? 'junction' : 'dir')
+      const path = join(link, 'session.db')
       const resolver = createDbKeyResolver({
         accountId: ACCOUNT_ID,
         dbStoragePath: root,
